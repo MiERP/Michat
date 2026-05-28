@@ -1,0 +1,12 @@
+{
+  "gemma-4-E2B-it-uncensored-Q4_K_M.gguf": {
+    "filename": "gemma-4-E2B-it-uncensored-Q4_K_M.gguf",
+    "type": "chat",
+    "addedAt": "2026-04-16T06:38:34.783Z"
+  },
+  "bge-m3-q4_k_m.gguf": {
+    "filename": "bge-m3-q4_k_m.gguf",
+    "type": "embedding",
+    "addedAt": "2026-04-16T06:38:37.925Z"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "shortcuts": "Phím tắt bàn phím",
+  "description": "Tùy chỉnh phím tắt của ứng dụng để nâng cao hiệu suất thao tác",
+  "resetToDefaults": "Khôi phục mặc định",
+  "confirmReset": "Bạn có chắc muốn khôi phục tất cả phím tắt về mặc định không? Hành động này không thể hoàn tác.",
+  "confirmResetTitle": "Đặt lại phím tắt",
+  "confirm": "Xác nhận đặt lại",
+  "cancel": "Hủy",
+  "conflictError": "Phím tắt này đã được sử dụng",
+  "conflictHint": "Vui lòng chọn tổ hợp phím khác",
+  "pressKey": "Nhấn phím...",
+
+  "category": {
+    "notebook": "Quản lý sổ ghi chú",
+    "panel": "Chuyển đổi bảng điều khiển",
+    "chat": "Trò chuyện và tin nhắn"
+  },
+
+  "createNotebook": "Tạo sổ ghi chú mới",
+  "closeNotebook": "Đóng sổ ghi chú",
+  "toggleKnowledgeBase": "Thu gọn/Mở cơ sở tri thức",
+  "toggleCreativeSpace": "Thu gọn/Mở không gian sáng tạo"
+}
