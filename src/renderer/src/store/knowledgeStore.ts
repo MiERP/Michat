@@ -59,22 +59,6 @@ interface KnowledgeStore {
     }
     error?: string
   }>
-  addDocumentFromUrl: (
-    notebookId: string,
-    url: string
-  ) => Promise<{ success: boolean; documentId?: string; error?: string }>
-  addNoteToKnowledge: (
-    notebookId: string,
-    noteId: string
-  ) => Promise<{ success: boolean; documentId?: string; error?: string }>
-  search: (notebookId: string, query: string, options?: SearchOptions) => Promise<void>
-  deleteDocument: (
-    notebookId: string,
-    documentId: string
-  ) => Promise<{ success: boolean; error?: string }>
-  selectFiles: () => Promise<string[]>
-  selectFolder: () => Promise<string | null>
-}
 
 export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   // 初始状态
@@ -169,21 +153,6 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   },
 
   // 从 URL 添加文档
-  addDocumentFromUrl: async (notebookId, url) => {
-    set({ isIndexing: true, error: null })
-    try {
-      const result = await window.api.knowledge.addDocumentFromUrl(notebookId, url)
-      if (result.success) {
-        await get().loadDocuments(notebookId)
-        await get().loadStats(notebookId)
-      }
-      set({ isIndexing: false, indexProgress: null })
-      return result
-    } catch (error) {
-      set({ isIndexing: false, indexProgress: null, error: (error as Error).message })
-      return { success: false, error: (error as Error).message }
-    }
-  },
 
   // 将 Note 添加到知识库
   addNoteToKnowledge: async (notebookId, noteId) => {

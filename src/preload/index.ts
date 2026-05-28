@@ -157,8 +157,6 @@ const api = {
       ipcRenderer.invoke('knowledge:add-document-from-file', { notebookId, filePath }),
     addDocumentsFromFolder: (notebookId: string, folderPath: string) =>
       ipcRenderer.invoke('knowledge:add-documents-from-folder', { notebookId, folderPath }),
-    addDocumentFromUrl: (notebookId: string, url: string) =>
-      ipcRenderer.invoke('knowledge:add-document-from-url', { notebookId, url }),
     addNote: (notebookId: string, noteId: string) =>
       ipcRenderer.invoke('knowledge:add-note', { notebookId, noteId }),
 

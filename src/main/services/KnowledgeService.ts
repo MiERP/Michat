@@ -18,7 +18,6 @@ import { and, eq, desc, inArray, sql } from 'drizzle-orm'
 import { EmbeddingService } from './EmbeddingService'
 import { ChunkingService, type ChunkOptions } from './ChunkingService'
 import { FileParserService } from './FileParserService'
-import { WebFetchService } from './WebFetchService'
 import { RerankService } from './RerankService'
 import { vectorStoreManager } from '../vectorstore'
 import { ProviderManager } from '../providers/ProviderManager'
@@ -89,7 +88,6 @@ export class KnowledgeService {
   private embeddingService: EmbeddingService
   private chunkingService: ChunkingService
   private fileParserService: FileParserService
-  private webFetchService: WebFetchService
   private rerankService: RerankService
   private knowledgeFilesDir: string
 
@@ -97,7 +95,6 @@ export class KnowledgeService {
     this.embeddingService = new EmbeddingService(providerManager)
     this.chunkingService = new ChunkingService()
     this.fileParserService = new FileParserService()
-    this.webFetchService = new WebFetchService()
     this.rerankService = new RerankService(providerManager)
     this.knowledgeFilesDir = join(app.getPath('userData'), 'knowledge-files')
     this.ensureKnowledgeFilesDir()
@@ -618,24 +615,6 @@ export class KnowledgeService {
       failedFiles
     }
   }
-
-  async addDocumentFromUrl(
-    notebookId: string,
-    url: string,
-    onProgress?: IndexProgressCallback
-  ): Promise<string> {
-    onProgress?.('fetching_url', 0)
-    const fetchResult = await this.webFetchService.fetchUrl(url)
-    return this.addDocument(
-      notebookId,
-      {
-        title: fetchResult.title || url,
-        type: 'url',
-        content: fetchResult.content,
-        sourceUri: url,
-        mimeType: fetchResult.mimeType,
-        metadata: { ...fetchResult.metadata, description: fetchResult.description }
-      },
       onProgress
     )
   }

@@ -9,11 +9,7 @@ import { KnowledgeService } from '../services/KnowledgeService'
 import { LlamaService } from '../services/LlamaService'
 import Logger from '../../shared/utils/logger'
 import { KnowledgeSchemas, validate } from './validation'
-import {
-  assertSafePublicHttpUrl,
-  isAllowedExternalOpenUrl,
-  normalizeFsPath
-} from '../security/guards'
+import { normalizeFsPath } from '../security/guards'
 
 /**
  * 注册知识库相关 IPC Handlers
@@ -188,30 +184,6 @@ export function registerKnowledgeHandlers(
 
   // 从 URL 添加文档
   ipcMain.handle(
-    'knowledge:add-document-from-url',
-    async (event: IpcMainInvokeEvent, args: unknown) => {
-      const validated = await validate(KnowledgeSchemas.addDocumentFromUrl, async (params) => {
-        Logger.debug('KnowledgeHandlers', 'add-document-from-url:', params)
-
-        try {
-          const embeddingReadyError = await ensureEmbeddingServiceReady()
-          if (embeddingReadyError) {
-            return {
-              success: false,
-              error: embeddingReadyError
-            }
-          }
-
-          const validatedUrl = await assertSafePublicHttpUrl(params.url, 'Knowledge URL')
-          const documentId = await knowledgeService.addDocumentFromUrl(
-            params.notebookId,
-            validatedUrl.toString(),
-            (stage, progress) => {
-              event.sender.send('knowledge:index-progress', {
-                notebookId: params.notebookId,
-                stage,
-                progress
-              })
             }
           )
           return { success: true, documentId }
@@ -468,13 +440,7 @@ export function registerKnowledgeHandlers(
         }
 
         // 根据文档类型处理
-        if (doc.type === 'url' && doc.sourceUri) {
-          if (!isAllowedExternalOpenUrl(doc.sourceUri)) {
-            return { success: false, error: 'Only public http/https URLs can be opened' }
-          }
-
-          await shell.openExternal(doc.sourceUri)
-        } else if (doc.type === 'file') {
+        if (doc.type === 'file') {
           const filePathToOpen = doc.localFilePath
           if (!filePathToOpen) {
             return { success: false, error: 'No file path available' }

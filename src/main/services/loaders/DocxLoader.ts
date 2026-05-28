@@ -4,10 +4,8 @@
  */
 
 import { readFile } from 'fs/promises'
-import { mkdtemp, rm } from 'fs/promises'
-import { tmpdir } from 'os'
-import { basename, extname, join } from 'path'
-import { execFile } from 'child_process'
+import { extname } from 'path'
+import officeparser from 'officeparser'
 import mammoth from 'mammoth'
 import * as cheerio from 'cheerio'
 import Logger from '../../../shared/utils/logger'
@@ -36,8 +34,7 @@ export class DocxLoader implements IDocumentLoader {
     const extension = extname(filePath).toLowerCase()
 
     if (extension === '.doc') {
-      const convertedBuffer = await this.convertLegacyDocToDocx(filePath)
-      return this.loadFromBuffer(convertedBuffer, options)
+      return this.loadLegacyDoc(filePath, options)
     }
 
     const buffer = await readFile(filePath)
@@ -172,65 +169,23 @@ export class DocxLoader implements IDocumentLoader {
     return root
   }
 
-  private async convertLegacyDocToDocx(sourceDocPath: string): Promise<Buffer> {
-    const tempDir = await mkdtemp(join(tmpdir(), 'michat-doc-convert-'))
-    const libreOfficeCommand = await this.findLibreOfficeBinary()
-
+  
+  private async loadLegacyDoc(filePath: string, options?: LoadOptions): Promise<DocumentLoadResult> {
+    Logger.info('DocxLoader', `Parsing legacy .doc file: `)
     try {
-      await this.execFileAsync(libreOfficeCommand, [
-        '--headless',
-        '--convert-to',
-        'docx',
-        '--outdir',
-        tempDir,
-        sourceDocPath
-      ])
-
-      const convertedPath = join(tempDir, `${basename(sourceDocPath, extname(sourceDocPath))}.docx`)
-      return await readFile(convertedPath)
-    } catch (error) {
-      throw new Error(
-        `Cannot parse .doc directly. Please install LibreOffice for auto-conversion or convert file to .docx manually. ${(error as Error).message}`
-      )
-    } finally {
-      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
-    }
-  }
-
-  private async findLibreOfficeBinary(): Promise<string> {
-    const candidates: string[] = []
-
-    if (process.platform === 'win32') {
-      candidates.push(
-        'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
-        'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
-        'soffice'
-      )
-    } else {
-      candidates.push('soffice', 'libreoffice')
-    }
-
-    for (const candidate of candidates) {
-      try {
-        await this.execFileAsync(candidate, ['--version'])
-        return candidate
-      } catch {
-        // Try next candidate.
+      const buffer = await readFile(filePath)
+      const text = await officeparser.parseOfficeAsync(buffer)
+      const content = text.trim()
+      if (!content) throw new Error('No readable text content found in legacy .doc file')
+      return {
+        content: content,
+        mimeType: 'application/msword',
+        structure: undefined,
+        metadata: { characterCount: content.length, wordCount: content.split(/\s+/).length, parser: 'officeparser' }
       }
+    } catch (error) {
+      Logger.error('DocxLoader', 'Failed to parse legacy .doc file:', error)
+      throw new Error(`Failed to parse .doc file: `)
     }
-
-    throw new Error('LibreOffice executable not found')
-  }
-
-  private execFileAsync(command: string, args: string[]): Promise<void> {
-    return new Promise((resolve, reject) => {
-      execFile(command, args, { windowsHide: true }, (error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
   }
 }

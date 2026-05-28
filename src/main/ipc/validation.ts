@@ -126,7 +126,7 @@ export const KnowledgeSchemas = {
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
     options: z.object({
       title: z.string().min(1, 'Title cannot be empty'),
-      type: z.enum(['file', 'note', 'url', 'text']),
+      type: z.enum(['file', 'note', 'text']),
       content: z.string(),
       sourceUri: z.string().optional(),
       sourceNoteId: z.string().optional(),
@@ -158,16 +158,6 @@ export const KnowledgeSchemas = {
       })
   }),
 
-  // S-01: Validate URL to prevent injection attacks
-  addDocumentFromUrl: z.object({
-    notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
-    url: z
-      .string()
-      .url({ message: 'Invalid URL format' })
-      .refine((u) => u.startsWith('https://') || u.startsWith('http://'), {
-        message: 'Only http and https URLs are allowed'
-      })
-  }),
 
   addNote: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
@@ -222,7 +212,7 @@ export const KnowledgeSchemas = {
         metadataFilter: z
           .object({
             documentIds: z.array(z.string().min(1)).optional(),
-            documentTypes: z.array(z.enum(['file', 'note', 'url', 'text'])).optional(),
+            documentTypes: z.array(z.enum(['file', 'note', 'text'])).optional(),
             sourceUriContains: z.string().min(1).max(500).optional()
           })
           .optional(),

@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next'
 import {
   Plus,
   FileText,
-  Globe,
   FileUp,
   Loader2,
   StickyNote,
@@ -26,14 +25,13 @@ import DocumentList from './source/DocumentList'
 import type { KnowledgeDocument } from '../../../../shared/types/knowledge'
 
 // 添加来源类型
-type AddSourceType = 'file' | 'url' | 'text' | 'note'
 
 // 添加来源弹窗组件
 interface AddSourceModalProps {
   type: AddSourceType
   isOpen: boolean
   onClose: () => void
-  onSubmit: (data: { title?: string; content?: string; url?: string; noteId?: string }) => void
+  onSubmit: (data: { title?: string; content?: string; noteId?: string }) => void
   isLoading: boolean
   notes: { id: string; title: string }[]
 }
@@ -50,14 +48,12 @@ function AddSourceModal({
   // 状态会在组件重新挂载时自动重置（通过父组件的 key 属性）
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
-  const [url, setUrl] = useState('')
+  
   const [selectedNoteId, setSelectedNoteId] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (type === 'url' && url) {
-      onSubmit({ url })
-    } else if (type === 'text' && title && content) {
+ else if (type === 'text' && title && content) {
       onSubmit({ title, content })
     } else if (type === 'note' && selectedNoteId) {
       onSubmit({ noteId: selectedNoteId })
@@ -67,12 +63,12 @@ function AddSourceModal({
   // 判断是否可以提交
   const canSubmit =
     !isLoading &&
-    ((type === 'url' && url.trim()) ||
+    (
       (type === 'text' && title.trim() && content.trim()) ||
       (type === 'note' && selectedNoteId))
 
   const getTitle = () => {
-    if (type === 'url') return t('importUrl')
+
     if (type === 'text') return t('pasteText')
     if (type === 'note') return t('importNote')
     return ''
@@ -86,18 +82,6 @@ function AddSourceModal({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {type === 'url' && (
-            <Input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder={t('urlPlaceholder')}
-              className="text-base"
-              required
-              autoFocus
-              disabled={isLoading}
-            />
-          )}
 
           {type === 'text' && (
             <div className="flex flex-col gap-4">
@@ -253,7 +237,6 @@ export default function SourcePanel(): ReactElement {
     addDocument,
     addDocumentFromFile,
     addDocumentsFromFolder,
-    addDocumentFromUrl,
     addNoteToKnowledge,
     deleteDocument,
     selectFiles,
@@ -348,9 +331,7 @@ export default function SourcePanel(): ReactElement {
   }, [notebookId, defaultEmbeddingModel, selectFolder, addDocumentsFromFolder, t, setShowAddMenu])
 
   // 处理 URL 导入
-  const handleUrlImport = useCallback(
     async (data: { url?: string }) => {
-      if (!notebookId || !data.url) return
 
       // 检查是否配置了默认嵌入模型
       if (!defaultEmbeddingModel) {
@@ -359,10 +340,8 @@ export default function SourcePanel(): ReactElement {
         return
       }
 
-      await addDocumentFromUrl(notebookId, data.url)
       setModalType(null)
     },
-    [notebookId, defaultEmbeddingModel, addDocumentFromUrl, t]
   )
 
   // 处理文本粘贴
@@ -466,16 +445,13 @@ export default function SourcePanel(): ReactElement {
 
   // 处理弹窗提交
   const handleModalSubmit = useCallback(
-    (data: { title?: string; content?: string; url?: string; noteId?: string }) => {
-      if (modalType === 'url') {
-        handleUrlImport(data)
+    (data: { title?: string; content?: string; noteId?: string }) => {
       } else if (modalType === 'text') {
         handleTextPaste(data)
       } else if (modalType === 'note') {
         handleNoteImport(data)
       }
     },
-    [modalType, handleUrlImport, handleTextPaste, handleNoteImport]
   )
 
   return (
@@ -530,14 +506,12 @@ export default function SourcePanel(): ReactElement {
                     </Button>
                     <Button
                       onClick={() => {
-                        setModalType('url')
                         setShowAddMenu(false)
                       }}
                       variant="ghost"
                       className="w-full justify-start text-sm font-normal rounded-none"
                     >
                       <Globe className="w-4 h-4" />
-                      {t('importUrl')}
                     </Button>
                     <Button
                       onClick={() => {
