@@ -84,9 +84,6 @@ export function deleteSession(sessionId: string) {
 
   try {
     db.delete(chatSessions).where(eq(chatSessions.id, sessionId)).run()
-
-    // 删除会话后执行 checkpoint，确保数据及时持久化
-    executeCheckpoint('PASSIVE')
   } catch (error) {
     console.error('[Database] Error deleting session:', error)
     throw error
@@ -183,7 +180,7 @@ export function createMessage(
 export function getMessagesBySession(sessionId: string) {
   const db = getDatabase()
 
-  return db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId)).all()
+  return db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId)).orderBy(chatMessages.createdAt).limit(200).all()
 }
 
 /**

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { LlamaService } from './services/LlamaService'
 import { initDatabase, runMigrations, initExtensions, closeDatabase, executeCheckpoint } from './db'
@@ -27,6 +27,7 @@ let llamaService: LlamaService | null = null
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
+  try {
   const licenseStatus = LicenseService.ensureLicenseOnStartup()
   Logger.info(
     'Main',
@@ -150,6 +151,14 @@ app.whenReady().then(async () => {
       }
     }
   })
+  } catch (error) {
+    Logger.error('Main', 'Fatal error during app initialization:', error)
+    dialog.showErrorBox(
+      'MiChat - Initialization Error',
+      `A fatal error occurred during startup:\n\n${(error as Error).message}\n\nPlease check the logs and restart the application.`
+    )
+    app.quit()
+  }
 })
 
 // Handle window all closed event

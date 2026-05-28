@@ -168,7 +168,7 @@ declare global {
       ) => () => void
 
       // Provider 配置相关
-      saveProviderConfig: (config: ProviderConfig) => Promise<void>
+      saveProviderConfig: (config: ProviderConfig) => Promise<{ encrypted: boolean }>
       getProviderConfig: (providerName: string) => Promise<ProviderConfig | null>
       getAllProviderConfigs: () => Promise<ProviderConfig[]>
       deleteProviderConfig: (providerName: string) => Promise<void>
@@ -196,6 +196,9 @@ declare global {
         providerName: string
       ) => Promise<{ id: string; object: string; owned_by?: string; created?: number }[]>
       onProviderConfigChanged: (callback: () => void) => () => void
+
+      // Check if secure encryption is available for API keys
+      checkEncryption: () => Promise<{ encrypted: boolean }>
 
       // 知识库相关
       knowledge: {

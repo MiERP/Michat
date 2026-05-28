@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { ProviderManager } from '../providers/ProviderManager'
 import { LlamaService } from '../services/LlamaService'
 import { providersManager } from '../config'
+import { isEncryptionAvailable } from '../config/secureStorage'
 import { enrichModelsWithType } from '../../shared/utils/modelClassifier'
 import { ProviderSchemas, validate } from './validation'
 import Logger from '../../shared/utils/logger'
@@ -55,11 +56,13 @@ export function registerProviderHandlers(
         assertLoopbackHttpUrl(embeddingBaseUrl, 'Provider embedding base URL')
       }
 
-      await providersManager.saveProviderConfig(args.providerName, args.config, args.enabled)
+      const result = await providersManager.saveProviderConfig(args.providerName, args.config, args.enabled)
 
       BrowserWindow.getAllWindows().forEach((win) => {
         win.webContents.send('provider-config-changed')
       })
+
+      return result
     })
   )
 
@@ -120,6 +123,11 @@ export function registerProviderHandlers(
       return provider.validateConfig(args.config)
     })
   )
+
+  // Check if secure storage encryption is available
+  ipcMain.handle('check-encryption', () => {
+    return { encrypted: isEncryptionAvailable() }
+  })
 
   // Fetch models from llama.cpp server (OpenAI-compatible /v1/models)
   ipcMain.handle(

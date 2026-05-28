@@ -27,6 +27,19 @@ interface ProvidersSettingsProps {
 export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps): ReactElement {
   const { t } = useTranslation('settings')
   const [models, setModels] = useState<GgufModel[]>([])
+  const [encryptionAvailable, setEncryptionAvailable] = useState(true)
+
+  useEffect(() => {
+    const checkEncryption = async () => {
+      try {
+        const result = await window.api.checkEncryption()
+        setEncryptionAvailable(result.encrypted)
+      } catch {
+        setEncryptionAvailable(true)
+      }
+    }
+    checkEncryption()
+  }, [])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [defaultChatModel, setDefaultChatModel] = useState<string>('')
@@ -174,6 +187,11 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
   return (
     <ScrollArea className="h-full">
       <div className="space-y-6 pr-4">
+        {!encryptionAvailable && (
+          <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
+            <strong>Security Warning:</strong> API keys are stored in plain text because system encryption is not available on this platform.
+          </div>
+        )}
         <div className="flex gap-3">
           <Button
             onClick={() => handleImport('chat')}

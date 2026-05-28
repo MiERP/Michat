@@ -78,7 +78,7 @@ export class WebFetchService {
             'Accept-Language': 'vi-VN,zh;q=0.9,en;q=0.8'
           },
           signal: controller.signal,
-          redirect: 'error'
+          redirect: 'follow'
         })
 
         clearTimeout(timeoutId)

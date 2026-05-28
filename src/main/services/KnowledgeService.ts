@@ -895,6 +895,7 @@ export class KnowledgeService {
       .from(documents)
       .where(eq(documents.notebookId, notebookId))
       .orderBy(desc(documents.updatedAt))
+      .limit(50)
       .all()
   }
 

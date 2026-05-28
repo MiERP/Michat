@@ -275,8 +275,6 @@ export function closeDatabase() {
     // 即使出错也要清理引用
     sqlite = null
     db = null
-  } finally {
-    isClosing = false
   }
 }
 

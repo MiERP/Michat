@@ -26,7 +26,7 @@ function isLoopbackIp(hostname: string): boolean {
 }
 
 function isPrivateOrSpecialIp(hostname: string): boolean {
-  const normalized = normalizeHostname(hostname)
+  const normalized = normalizeHostname(hostname).toLowerCase()
   if (normalized === '::1') return true
   if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
   if (/^fe[89ab]/i.test(normalized)) return true

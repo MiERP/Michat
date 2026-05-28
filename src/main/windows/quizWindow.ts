@@ -48,7 +48,7 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
     backgroundColor,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: true
     }
   })
 

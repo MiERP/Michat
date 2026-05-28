@@ -25,7 +25,7 @@ export class ProviderConfigManager {
     providerName: string,
     config: Record<string, any>,
     enabled: boolean
-  ): Promise<void> {
+  ): Promise<{ encrypted: boolean }> {
     const store = await this.getStore()
     const providers = store.get('providers', {})
 
@@ -49,6 +49,8 @@ export class ProviderConfigManager {
     }
 
     store.set('providers', providers)
+
+    return { encrypted: isEncryptionAvailable() }
   }
 
   /**

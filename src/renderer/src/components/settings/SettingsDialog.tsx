@@ -132,10 +132,20 @@ export default function SettingsDialog(): ReactElement {
     }
 
     // 保存提供商配置（新增/删除已经立即保存，这里只保存修改）
+    let anyUnencrypted = false
     for (const provider of pendingProviders) {
-      await window.api.saveProviderConfig(provider)
+      const result = await window.api.saveProviderConfig(provider)
+      if (!result.encrypted) {
+        anyUnencrypted = true
+      }
     }
     setOriginalProviders(pendingProviders)
+
+    if (anyUnencrypted) {
+      alert(
+        'Warning: API keys are stored in plain text because system encryption is not available on this platform. This is a security risk.'
+      )
+    }
   }
 
   // Hủy变更

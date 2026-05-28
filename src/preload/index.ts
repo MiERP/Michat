@@ -137,6 +137,9 @@ const api = {
     return () => ipcRenderer.removeListener('provider-config-changed', listener)
   },
 
+  // Check if API key encryption is available
+  checkEncryption: (): Promise<{ encrypted: boolean }> => ipcRenderer.invoke('check-encryption'),
+
   // Llama model management
   llama: {
     listModels: () => ipcRenderer.invoke('llama:list-models'),

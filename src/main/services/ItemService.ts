@@ -1,6 +1,6 @@
 import { getDatabase } from '../db'
 import { items, notes, mindMaps, quizzes, type Item, type NewItem } from '../db/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 
 /**
@@ -32,52 +32,34 @@ export class ItemService {
       .where(eq(items.notebookId, notebookId))
       .orderBy(items.order)
 
-    // 加载每个 item 的关联资源
+    // Batch load resources by type
+    const noteIds = itemsList.filter(i => i.type === 'note').map(i => i.resourceId)
+    const mindMapIds = itemsList.filter(i => i.type === 'mindmap').map(i => i.resourceId)
+    const quizIds = itemsList.filter(i => i.type === 'quiz').map(i => i.resourceId)
+
+    const [noteRows, mindMapRows, quizRows] = await Promise.all([
+      noteIds.length > 0 ? db.select().from(notes).where(inArray(notes.id, noteIds)) : Promise.resolve([]),
+      mindMapIds.length > 0 ? db.select().from(mindMaps).where(inArray(mindMaps.id, mindMapIds)) : Promise.resolve([]),
+      quizIds.length > 0 ? db.select().from(quizzes).where(inArray(quizzes.id, quizIds)) : Promise.resolve([])
+    ])
+
+    const noteMap = new Map<string, any>()
+    for (const r of noteRows) noteMap.set(r.id, r)
+    const mindMapMap = new Map<string, any>()
+    for (const r of mindMapRows) mindMapMap.set(r.id, r)
+    const quizMap = new Map<string, any>()
+    for (const r of quizRows) quizMap.set(r.id, r)
+
     const itemDetails: ItemDetail[] = []
     for (const item of itemsList) {
       let resource: any = null
-
       switch (item.type) {
-        case 'note': {
-          const noteResult = await db
-            .select()
-            .from(notes)
-            .where(eq(notes.id, item.resourceId))
-            .limit(1)
-          resource = noteResult[0] || null
-          break
-        }
-
-        case 'mindmap': {
-          const mindMapResult = await db
-            .select()
-            .from(mindMaps)
-            .where(eq(mindMaps.id, item.resourceId))
-            .limit(1)
-          resource = mindMapResult[0] || null
-          break
-        }
-
-        case 'quiz': {
-          const quizResult = await db
-            .select()
-            .from(quizzes)
-            .where(eq(quizzes.id, item.resourceId))
-            .limit(1)
-          resource = quizResult[0] || null
-          break
-        }
-
-        // 未来可以添加更多类型
-        default:
-          resource = null
+        case 'note': resource = noteMap.get(item.resourceId) || null; break
+        case 'mindmap': resource = mindMapMap.get(item.resourceId) || null; break
+        case 'quiz': resource = quizMap.get(item.resourceId) || null; break
       }
-
       if (resource) {
-        itemDetails.push({
-          ...item,
-          resource
-        })
+        itemDetails.push({ ...item, resource })
       }
     }
 
