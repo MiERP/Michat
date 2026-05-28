@@ -25,6 +25,7 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
       stored.ragSkipShortQueryLength ?? defaultSettings.ragSkipShortQueryLength,
     ragEnableChitChatHeuristic:
       stored.ragEnableChitChatHeuristic ?? defaultSettings.ragEnableChitChatHeuristic,
+    allowRemoteProviders: stored.allowRemoteProviders ?? defaultSettings.allowRemoteProviders,
     prompts: {
       mindMap: {
         'vi-VN': stored.prompts?.mindMap?.['vi-VN'] ?? defaultSettings.prompts!.mindMap!['vi-VN'],

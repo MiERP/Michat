@@ -223,6 +223,10 @@ declare global {
           }
           error?: string
         }>
+        addNote: (
+          notebookId: string,
+          noteId: string
+        ) => Promise<{ success: boolean; documentId?: string; error?: string }>
         // 搜索
         search: (
           notebookId: string,

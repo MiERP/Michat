@@ -1,7 +1,7 @@
 import { getDatabase } from '../db'
 import { items, notes, mindMaps, quizzes, type Item, type NewItem } from '../db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
-import { nanoid } from 'nanoid'
+import { randomUUID } from 'crypto'
 
 /**
  * Item 类型枚举
@@ -92,7 +92,7 @@ export class ItemService {
     }
 
     const newItem: NewItem = {
-      id: nanoid(),
+      id: randomUUID(),
       notebookId: data.notebookId,
       type: data.type,
       resourceId: data.resourceId,

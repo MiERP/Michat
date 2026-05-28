@@ -1,5 +1,7 @@
+/* eslint-disable no-irregular-whitespace */
 import { app } from 'electron'
 import { join } from 'path'
+import { existsSync } from 'fs'
 import { stat } from 'fs/promises'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
@@ -11,34 +13,34 @@ let sqlite: Database.Database | null = null
 let db: ReturnType<typeof drizzle> | null = null
 let checkpointTimer: NodeJS.Timeout | null = null
 let truncateTimer: NodeJS.Timeout | null = null
-let isClosing = false // 防止重复关闭
+let isClosing = false // ÃƒÂ©Ã‹Å“Ã‚Â²ÃƒÂ¦Ã‚Â­Ã‚Â¢ÃƒÂ©Ã¢â‚¬Â¡Ã‚ÂÃƒÂ¥Ã‚Â¤Ã‚ÂÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â³ÃƒÂ©Ã¢â‚¬â€Ã‚Â­
 
 /**
- * 初始化数据库连接
- * 在 Electron 主进程的 app.whenReady() 中调用
+ * ÃƒÂ¥Ã‹â€ Ã‚ÂÃƒÂ¥Ã‚Â§Ã¢â‚¬Â¹ÃƒÂ¥Ã…â€™Ã¢â‚¬â€œÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¨Ã‚Â¿Ã…Â¾ÃƒÂ¦Ã…Â½Ã‚Â¥
+ * ÃƒÂ¥Ã…â€œÃ‚Â¨ Electron ÃƒÂ¤Ã‚Â¸Ã‚Â»ÃƒÂ¨Ã‚Â¿Ã¢â‚¬ÂºÃƒÂ§Ã‚Â¨Ã¢â‚¬Â¹ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ app.whenReady() ÃƒÂ¤Ã‚Â¸Ã‚Â­ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
  */
 export function initDatabase() {
-  // 数据库文件存放在用户数据目录
+  // ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ¤Ã‚Â»Ã‚Â¶ÃƒÂ¥Ã‚Â­Ã‹Å“ÃƒÂ¦Ã¢â‚¬ÂÃ‚Â¾ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ÃƒÂ¦Ã‹â€ Ã‚Â·ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ§Ã¢â‚¬ÂºÃ‚Â®ÃƒÂ¥Ã‚Â½Ã¢â‚¬Â¢
   const dbPath = join(app.getPath('userData'), 'michat.db')
 
   console.log('[Database] Initializing database at:', dbPath)
 
   try {
-    // 创建 SQLite 数据库实例
+    // ÃƒÂ¥Ã‹â€ Ã¢â‚¬ÂºÃƒÂ¥Ã‚Â»Ã‚Âº SQLite ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¥Ã‚Â®Ã…Â¾ÃƒÂ¤Ã‚Â¾Ã¢â‚¬Â¹
     sqlite = new Database(dbPath)
 
-    // 加载 sqlite-vec 扩展
+    // ÃƒÂ¥Ã…Â Ã‚Â ÃƒÂ¨Ã‚Â½Ã‚Â½ sqlite-vec ÃƒÂ¦Ã¢â‚¬Â°Ã‚Â©ÃƒÂ¥Ã‚Â±Ã¢â‚¬Â¢
     if (app.isPackaged) {
-      // 打包环境：手动构建到 .asar.unpacked 的路径
+      // ÃƒÂ¦Ã¢â‚¬Â°Ã¢â‚¬Å“ÃƒÂ¥Ã…â€™Ã¢â‚¬Â¦ÃƒÂ§Ã…Â½Ã‚Â¯ÃƒÂ¥Ã‚Â¢Ã†â€™ÃƒÂ¯Ã‚Â¼Ã…Â¡ÃƒÂ¦Ã¢â‚¬Â°Ã¢â‚¬Â¹ÃƒÂ¥Ã…Â Ã‚Â¨ÃƒÂ¦Ã…Â¾Ã¢â‚¬Å¾ÃƒÂ¥Ã‚Â»Ã‚ÂºÃƒÂ¥Ã‹â€ Ã‚Â° .asar.unpacked ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ÃƒÂ¨Ã‚Â·Ã‚Â¯ÃƒÂ¥Ã‚Â¾Ã¢â‚¬Å¾
       const platform = process.platform
       const arch = process.arch
 
-      // 映射平台和架构名称
+      // ÃƒÂ¦Ã‹Å“Ã‚Â ÃƒÂ¥Ã‚Â°Ã¢â‚¬Å¾ÃƒÂ¥Ã‚Â¹Ã‚Â³ÃƒÂ¥Ã‚ÂÃ‚Â°ÃƒÂ¥Ã¢â‚¬â„¢Ã…â€™ÃƒÂ¦Ã…Â¾Ã‚Â¶ÃƒÂ¦Ã…Â¾Ã¢â‚¬Å¾ÃƒÂ¥Ã‚ÂÃ‚ÂÃƒÂ§Ã‚Â§Ã‚Â°
       const platformName = platform === 'win32' ? 'windows' : platform
       const packageName = `sqlite-vec-${platformName}-${arch}`
       const extension = platform === 'win32' ? 'dll' : platform === 'darwin' ? 'dylib' : 'so'
 
-      // 构建到解包目录的路径
+      // ÃƒÂ¦Ã…Â¾Ã¢â‚¬Å¾ÃƒÂ¥Ã‚Â»Ã‚ÂºÃƒÂ¥Ã‹â€ Ã‚Â°ÃƒÂ¨Ã‚Â§Ã‚Â£ÃƒÂ¥Ã…â€™Ã¢â‚¬Â¦ÃƒÂ§Ã¢â‚¬ÂºÃ‚Â®ÃƒÂ¥Ã‚Â½Ã¢â‚¬Â¢ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ÃƒÂ¨Ã‚Â·Ã‚Â¯ÃƒÂ¥Ã‚Â¾Ã¢â‚¬Å¾
       const vecPath = join(
         process.resourcesPath,
         'app.asar.unpacked',
@@ -50,26 +52,26 @@ export function initDatabase() {
       console.log('[Database] Loading sqlite-vec from:', vecPath)
       sqlite.loadExtension(vecPath)
     } else {
-      // 开发环境：使用 sqlite-vec 默认加载
+      // ÃƒÂ¥Ã‚Â¼Ã¢â€šÂ¬ÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ§Ã…Â½Ã‚Â¯ÃƒÂ¥Ã‚Â¢Ã†â€™ÃƒÂ¯Ã‚Â¼Ã…Â¡ÃƒÂ¤Ã‚Â½Ã‚Â¿ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ sqlite-vec ÃƒÂ©Ã‚Â»Ã‹Å“ÃƒÂ¨Ã‚Â®Ã‚Â¤ÃƒÂ¥Ã…Â Ã‚Â ÃƒÂ¨Ã‚Â½Ã‚Â½
       sqliteVec.load(sqlite)
     }
     console.log('[Database] sqlite-vec extension loaded')
 
-    // 验证 sqlite-vec 版本
+    // ÃƒÂ©Ã‚ÂªÃ…â€™ÃƒÂ¨Ã‚Â¯Ã‚Â sqlite-vec ÃƒÂ§Ã¢â‚¬Â°Ã‹â€ ÃƒÂ¦Ã…â€œÃ‚Â¬
     const vecVersion = sqlite.prepare('SELECT vec_version() as version').get() as {
       version: string
     }
     console.log('[Database] sqlite-vec version:', vecVersion?.version)
 
-    // 启用 WAL 模式以提高性能
+    // ÃƒÂ¥Ã‚ÂÃ‚Â¯ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ WAL ÃƒÂ¦Ã‚Â¨Ã‚Â¡ÃƒÂ¥Ã‚Â¼Ã‚ÂÃƒÂ¤Ã‚Â»Ã‚Â¥ÃƒÂ¦Ã‚ÂÃ‚ÂÃƒÂ©Ã‚Â«Ã‹Å“ÃƒÂ¦Ã¢â€šÂ¬Ã‚Â§ÃƒÂ¨Ã†â€™Ã‚Â½
     sqlite.pragma('journal_mode = WAL')
 
-    // 优化 WAL 配置
-    sqlite.pragma('wal_autocheckpoint = 100') // 每 100 页自动 checkpoint（降低默认值）
-    sqlite.pragma('synchronous = NORMAL') // WAL 模式推荐设置
-    sqlite.pragma('busy_timeout = 5000') // 5 秒超时，防止并发冲突
+    // ÃƒÂ¤Ã‚Â¼Ã‹Å“ÃƒÂ¥Ã…â€™Ã¢â‚¬â€œ WAL ÃƒÂ©Ã¢â‚¬Â¦Ã‚ÂÃƒÂ§Ã‚Â½Ã‚Â®
+    sqlite.pragma('wal_autocheckpoint = 100') // ÃƒÂ¦Ã‚Â¯Ã‚Â 100 ÃƒÂ©Ã‚Â¡Ã‚ÂµÃƒÂ¨Ã¢â‚¬Â¡Ã‚ÂªÃƒÂ¥Ã…Â Ã‚Â¨ checkpointÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ©Ã¢â€žÂ¢Ã‚ÂÃƒÂ¤Ã‚Â½Ã…Â½ÃƒÂ©Ã‚Â»Ã‹Å“ÃƒÂ¨Ã‚Â®Ã‚Â¤ÃƒÂ¥Ã¢â€šÂ¬Ã‚Â¼ÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
+    sqlite.pragma('synchronous = NORMAL') // WAL ÃƒÂ¦Ã‚Â¨Ã‚Â¡ÃƒÂ¥Ã‚Â¼Ã‚ÂÃƒÂ¦Ã…Â½Ã‚Â¨ÃƒÂ¨Ã‚ÂÃ‚ÂÃƒÂ¨Ã‚Â®Ã‚Â¾ÃƒÂ§Ã‚Â½Ã‚Â®
+    sqlite.pragma('busy_timeout = 5000') // 5 ÃƒÂ§Ã‚Â§Ã¢â‚¬â„¢ÃƒÂ¨Ã‚Â¶Ã¢â‚¬Â¦ÃƒÂ¦Ã¢â‚¬â€Ã‚Â¶ÃƒÂ¯Ã‚Â¼Ã…â€™ÃƒÂ©Ã‹Å“Ã‚Â²ÃƒÂ¦Ã‚Â­Ã‚Â¢ÃƒÂ¥Ã‚Â¹Ã‚Â¶ÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ¥Ã¢â‚¬Â Ã‚Â²ÃƒÂ§Ã‚ÂªÃ‚Â
 
-    // 记录当前配置
+    // ÃƒÂ¨Ã‚Â®Ã‚Â°ÃƒÂ¥Ã‚Â½Ã¢â‚¬Â¢ÃƒÂ¥Ã‚Â½Ã¢â‚¬Å“ÃƒÂ¥Ã¢â‚¬Â°Ã‚ÂÃƒÂ©Ã¢â‚¬Â¦Ã‚ÂÃƒÂ§Ã‚Â½Ã‚Â®
     const journalMode = sqlite.pragma('journal_mode', { simple: true })
     const walCheckpoint = sqlite.pragma('wal_autocheckpoint', { simple: true })
     const syncMode = sqlite.pragma('synchronous', { simple: true })
@@ -79,10 +81,10 @@ export function initDatabase() {
       synchronous: syncMode
     })
 
-    // 创建 Drizzle 实例
+    // ÃƒÂ¥Ã‹â€ Ã¢â‚¬ÂºÃƒÂ¥Ã‚Â»Ã‚Âº Drizzle ÃƒÂ¥Ã‚Â®Ã…Â¾ÃƒÂ¤Ã‚Â¾Ã¢â‚¬Â¹
     db = drizzle(sqlite, { schema })
 
-    // 数据库完整性检查
+    // ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¥Ã‚Â®Ã…â€™ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â´ÃƒÂ¦Ã¢â€šÂ¬Ã‚Â§ÃƒÂ¦Ã‚Â£Ã¢â€šÂ¬ÃƒÂ¦Ã…Â¸Ã‚Â¥
     const integrityCheck = sqlite.pragma('integrity_check', { simple: true })
     if (integrityCheck !== 'ok') {
       console.error('[Database] Integrity check failed:', integrityCheck)
@@ -90,7 +92,7 @@ export function initDatabase() {
       console.log('[Database] Integrity check passed')
     }
 
-    // 启动定期 checkpoint 机制
+    // ÃƒÂ¥Ã‚ÂÃ‚Â¯ÃƒÂ¥Ã…Â Ã‚Â¨ÃƒÂ¥Ã‚Â®Ã…Â¡ÃƒÂ¦Ã…â€œÃ…Â¸ checkpoint ÃƒÂ¦Ã…â€œÃ‚ÂºÃƒÂ¥Ã‹â€ Ã‚Â¶
     startPeriodicCheckpoint(dbPath)
 
     console.log('[Database] Database initialized successfully')
@@ -102,12 +104,12 @@ export function initDatabase() {
 }
 
 /**
- * 启动定期 checkpoint 机制
+ * ÃƒÂ¥Ã‚ÂÃ‚Â¯ÃƒÂ¥Ã…Â Ã‚Â¨ÃƒÂ¥Ã‚Â®Ã…Â¡ÃƒÂ¦Ã…â€œÃ…Â¸ checkpoint ÃƒÂ¦Ã…â€œÃ‚ÂºÃƒÂ¥Ã‹â€ Ã‚Â¶
  */
 function startPeriodicCheckpoint(dbPath: string) {
   const walPath = `${dbPath}-wal`
 
-  // 每 30 秒检查 WAL 文件大小并执行 PASSIVE checkpoint
+  // ÃƒÂ¦Ã‚Â¯Ã‚Â 30 ÃƒÂ§Ã‚Â§Ã¢â‚¬â„¢ÃƒÂ¦Ã‚Â£Ã¢â€šÂ¬ÃƒÂ¦Ã…Â¸Ã‚Â¥ WAL ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ¤Ã‚Â»Ã‚Â¶ÃƒÂ¥Ã‚Â¤Ã‚Â§ÃƒÂ¥Ã‚Â°Ã‚ÂÃƒÂ¥Ã‚Â¹Ã‚Â¶ÃƒÂ¦Ã¢â‚¬Â°Ã‚Â§ÃƒÂ¨Ã‚Â¡Ã…â€™ PASSIVE checkpoint
   checkpointTimer = setInterval(async () => {
     try {
       if (!sqlite || isClosing) return
@@ -124,11 +126,11 @@ function startPeriodicCheckpoint(dbPath: string) {
     } catch (error) {
       console.error('[Database] Error during periodic checkpoint:', error)
     }
-  }, 30000) // 30 秒
+  }, 30000) // 30 ÃƒÂ§Ã‚Â§Ã¢â‚¬â„¢
 
-  checkpointTimer.unref() // 不阻止进程退出
+  checkpointTimer.unref() // ÃƒÂ¤Ã‚Â¸Ã‚ÂÃƒÂ©Ã‹Å“Ã‚Â»ÃƒÂ¦Ã‚Â­Ã‚Â¢ÃƒÂ¨Ã‚Â¿Ã¢â‚¬ÂºÃƒÂ§Ã‚Â¨Ã¢â‚¬Â¹ÃƒÂ©Ã¢â€šÂ¬Ã¢â€šÂ¬ÃƒÂ¥Ã¢â‚¬Â¡Ã‚Âº
 
-  // 每 5 分钟执行一次 TRUNCATE checkpoint，清理 WAL 文件
+  // ÃƒÂ¦Ã‚Â¯Ã‚Â 5 ÃƒÂ¥Ã‹â€ Ã¢â‚¬Â ÃƒÂ©Ã¢â‚¬â„¢Ã…Â¸ÃƒÂ¦Ã¢â‚¬Â°Ã‚Â§ÃƒÂ¨Ã‚Â¡Ã…â€™ÃƒÂ¤Ã‚Â¸Ã¢â€šÂ¬ÃƒÂ¦Ã‚Â¬Ã‚Â¡ TRUNCATE checkpointÃƒÂ¯Ã‚Â¼Ã…â€™ÃƒÂ¦Ã‚Â¸Ã¢â‚¬Â¦ÃƒÂ§Ã‚ÂÃ¢â‚¬Â  WAL ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ¤Ã‚Â»Ã‚Â¶
   truncateTimer = setInterval(() => {
     try {
       if (!sqlite || isClosing) return
@@ -139,13 +141,13 @@ function startPeriodicCheckpoint(dbPath: string) {
     } catch (error) {
       console.error('[Database] Error during truncate checkpoint:', error)
     }
-  }, 300000) // 5 分钟
+  }, 300000) // 5 ÃƒÂ¥Ã‹â€ Ã¢â‚¬Â ÃƒÂ©Ã¢â‚¬â„¢Ã…Â¸
 
   truncateTimer.unref()
 }
 
 /**
- * 执行主动 checkpoint（供外部调用）
+ * ÃƒÂ¦Ã¢â‚¬Â°Ã‚Â§ÃƒÂ¨Ã‚Â¡Ã…â€™ÃƒÂ¤Ã‚Â¸Ã‚Â»ÃƒÂ¥Ã…Â Ã‚Â¨ checkpointÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ¤Ã‚Â¾Ã¢â‚¬ÂºÃƒÂ¥Ã‚Â¤Ã¢â‚¬â€œÃƒÂ©Ã†â€™Ã‚Â¨ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
  */
 export function executeCheckpoint(mode: 'PASSIVE' | 'FULL' | 'RESTART' | 'TRUNCATE' = 'PASSIVE') {
   if (!sqlite) return
@@ -160,17 +162,19 @@ export function executeCheckpoint(mode: 'PASSIVE' | 'FULL' | 'RESTART' | 'TRUNCA
 }
 
 /**
- * 运行数据库迁移
- * 在初始化数据库后立即调用
+ * ÃƒÂ¨Ã‚Â¿Ã‚ÂÃƒÂ¨Ã‚Â¡Ã…â€™ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¨Ã‚Â¿Ã‚ÂÃƒÂ§Ã‚Â§Ã‚Â»
+ * ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ¥Ã‹â€ Ã‚ÂÃƒÂ¥Ã‚Â§Ã¢â‚¬Â¹ÃƒÂ¥Ã…â€™Ã¢â‚¬â€œÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¥Ã‚ÂÃ…Â½ÃƒÂ§Ã‚Â«Ã¢â‚¬Â¹ÃƒÂ¥Ã‚ÂÃ‚Â³ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
  */
 export function runMigrations() {
   if (!db) {
     throw new Error('[Database] Database not initialized. Call initDatabase() first.')
   }
 
-  // __dirname 在编译后指向 out/main（所有代码打包到 out/main/index.js）
-  // 而 migrations 文件被复制到 out/main/db/migrations
-  const migrationsFolder = join(__dirname, 'db', 'migrations')
+  // __dirname ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ§Ã‚Â¼Ã¢â‚¬â€œÃƒÂ¨Ã‚Â¯Ã¢â‚¬ËœÃƒÂ¥Ã‚ÂÃ…Â½ÃƒÂ¦Ã…â€™Ã¢â‚¬Â¡ÃƒÂ¥Ã‚ÂÃ¢â‚¬Ëœ out/mainÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ¦Ã¢â‚¬Â°Ã¢â€šÂ¬ÃƒÂ¦Ã…â€œÃ¢â‚¬Â°ÃƒÂ¤Ã‚Â»Ã‚Â£ÃƒÂ§Ã‚Â Ã‚ÂÃƒÂ¦Ã¢â‚¬Â°Ã¢â‚¬Å“ÃƒÂ¥Ã…â€™Ã¢â‚¬Â¦ÃƒÂ¥Ã‹â€ Ã‚Â° out/main/index.jsÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
+  // ÃƒÂ¨Ã¢â€šÂ¬Ã…â€™ migrations ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ¤Ã‚Â»Ã‚Â¶ÃƒÂ¨Ã‚Â¢Ã‚Â«ÃƒÂ¥Ã‚Â¤Ã‚ÂÃƒÂ¥Ã‹â€ Ã‚Â¶ÃƒÂ¥Ã‹â€ Ã‚Â° out/main/db/migrations
+  const builtMigrationsFolder = join(__dirname, 'db', 'migrations')
+  const sourceMigrationsFolder = join(__dirname, 'migrations')
+  const migrationsFolder = existsSync(builtMigrationsFolder) ? builtMigrationsFolder : sourceMigrationsFolder
   console.log('[Database] Running migrations from:', migrationsFolder)
 
   try {
@@ -183,9 +187,9 @@ export function runMigrations() {
 }
 
 /**
- * 初始化扩展表（向量检索 + 全文检索）
- * 创建 sqlite-vec 的 vec0 虚拟表和 FTS5 虚拟表
- * 在 runMigrations 后调用
+ * ÃƒÂ¥Ã‹â€ Ã‚ÂÃƒÂ¥Ã‚Â§Ã¢â‚¬Â¹ÃƒÂ¥Ã…â€™Ã¢â‚¬â€œÃƒÂ¦Ã¢â‚¬Â°Ã‚Â©ÃƒÂ¥Ã‚Â±Ã¢â‚¬Â¢ÃƒÂ¨Ã‚Â¡Ã‚Â¨ÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ©Ã¢â‚¬Â¡Ã‚ÂÃƒÂ¦Ã‚Â£Ã¢â€šÂ¬ÃƒÂ§Ã‚Â´Ã‚Â¢ + ÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â¨ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ¦Ã‚Â£Ã¢â€šÂ¬ÃƒÂ§Ã‚Â´Ã‚Â¢ÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
+ * ÃƒÂ¥Ã‹â€ Ã¢â‚¬ÂºÃƒÂ¥Ã‚Â»Ã‚Âº sqlite-vec ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ vec0 ÃƒÂ¨Ã¢â€žÂ¢Ã…Â¡ÃƒÂ¦Ã¢â‚¬Â¹Ã…Â¸ÃƒÂ¨Ã‚Â¡Ã‚Â¨ÃƒÂ¥Ã¢â‚¬â„¢Ã…â€™ FTS5 ÃƒÂ¨Ã¢â€žÂ¢Ã…Â¡ÃƒÂ¦Ã¢â‚¬Â¹Ã…Â¸ÃƒÂ¨Ã‚Â¡Ã‚Â¨
+ * ÃƒÂ¥Ã…â€œÃ‚Â¨ runMigrations ÃƒÂ¥Ã‚ÂÃ…Â½ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
  */
 export function initExtensions() {
   if (!sqlite) {
@@ -195,8 +199,8 @@ export function initExtensions() {
   console.log('[Database] Initializing extension tables (Vector + FTS)...')
 
   try {
-    // 1. 创建向量索引虚拟表（如果不存在）
-    // 使用 cosine 距离度量，1024 维度（BAAI/bge-m3 默认维度）
+    // 1. ÃƒÂ¥Ã‹â€ Ã¢â‚¬ÂºÃƒÂ¥Ã‚Â»Ã‚ÂºÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ©Ã¢â‚¬Â¡Ã‚ÂÃƒÂ§Ã‚Â´Ã‚Â¢ÃƒÂ¥Ã‚Â¼Ã¢â‚¬Â¢ÃƒÂ¨Ã¢â€žÂ¢Ã…Â¡ÃƒÂ¦Ã¢â‚¬Â¹Ã…Â¸ÃƒÂ¨Ã‚Â¡Ã‚Â¨ÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ¥Ã‚Â¦Ã¢â‚¬Å¡ÃƒÂ¦Ã…Â¾Ã…â€œÃƒÂ¤Ã‚Â¸Ã‚ÂÃƒÂ¥Ã‚Â­Ã‹Å“ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
+    // ÃƒÂ¤Ã‚Â½Ã‚Â¿ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ cosine ÃƒÂ¨Ã‚Â·Ã‚ÂÃƒÂ§Ã‚Â¦Ã‚Â»ÃƒÂ¥Ã‚ÂºÃ‚Â¦ÃƒÂ©Ã¢â‚¬Â¡Ã‚ÂÃƒÂ¯Ã‚Â¼Ã…â€™1024 ÃƒÂ§Ã‚Â»Ã‚Â´ÃƒÂ¥Ã‚ÂºÃ‚Â¦ÃƒÂ¯Ã‚Â¼Ã‹â€ BAAI/bge-m3 ÃƒÂ©Ã‚Â»Ã‹Å“ÃƒÂ¨Ã‚Â®Ã‚Â¤ÃƒÂ§Ã‚Â»Ã‚Â´ÃƒÂ¥Ã‚ÂºÃ‚Â¦ÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
     sqlite.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
         embedding_id TEXT PRIMARY KEY,
@@ -206,8 +210,8 @@ export function initExtensions() {
       );
     `)
 
-    // 2. 创建 FTS5 全文索引虚拟表（如果不存在）
-    // tokenize="unicode61" 支持基础的多语言分词
+    // 2. ÃƒÂ¥Ã‹â€ Ã¢â‚¬ÂºÃƒÂ¥Ã‚Â»Ã‚Âº FTS5 ÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â¨ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ§Ã‚Â´Ã‚Â¢ÃƒÂ¥Ã‚Â¼Ã¢â‚¬Â¢ÃƒÂ¨Ã¢â€žÂ¢Ã…Â¡ÃƒÂ¦Ã¢â‚¬Â¹Ã…Â¸ÃƒÂ¨Ã‚Â¡Ã‚Â¨ÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ¥Ã‚Â¦Ã¢â‚¬Å¡ÃƒÂ¦Ã…Â¾Ã…â€œÃƒÂ¤Ã‚Â¸Ã‚ÂÃƒÂ¥Ã‚Â­Ã‹Å“ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
+    // tokenize="unicode61" ÃƒÂ¦Ã¢â‚¬ÂÃ‚Â¯ÃƒÂ¦Ã…â€™Ã‚ÂÃƒÂ¥Ã…Â¸Ã‚ÂºÃƒÂ§Ã‚Â¡Ã¢â€šÂ¬ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ÃƒÂ¥Ã‚Â¤Ã…Â¡ÃƒÂ¨Ã‚Â¯Ã‚Â­ÃƒÂ¨Ã‚Â¨Ã¢â€šÂ¬ÃƒÂ¥Ã‹â€ Ã¢â‚¬Â ÃƒÂ¨Ã‚Â¯Ã‚Â
     sqlite.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
         chunk_id UNINDEXED,
@@ -225,8 +229,8 @@ export function initExtensions() {
 }
 
 /**
- * 获取数据库实例
- * 在需要执行数据库操作时调用
+ * ÃƒÂ¨Ã…Â½Ã‚Â·ÃƒÂ¥Ã‚ÂÃ¢â‚¬â€œÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¥Ã‚Â®Ã…Â¾ÃƒÂ¤Ã‚Â¾Ã¢â‚¬Â¹
+ * ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ©Ã…â€œÃ¢â€šÂ¬ÃƒÂ¨Ã‚Â¦Ã‚ÂÃƒÂ¦Ã¢â‚¬Â°Ã‚Â§ÃƒÂ¨Ã‚Â¡Ã…â€™ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¦Ã¢â‚¬Å“Ã‚ÂÃƒÂ¤Ã‚Â½Ã…â€œÃƒÂ¦Ã¢â‚¬â€Ã‚Â¶ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
  */
 export function getDatabase() {
   if (!db) {
@@ -236,8 +240,8 @@ export function getDatabase() {
 }
 
 /**
- * 优雅关闭数据库连接
- * 在 Electron app.on('before-quit') 中调用
+ * ÃƒÂ¤Ã‚Â¼Ã‹Å“ÃƒÂ©Ã¢â‚¬ÂºÃ¢â‚¬Â¦ÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â³ÃƒÂ©Ã¢â‚¬â€Ã‚Â­ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¨Ã‚Â¿Ã…Â¾ÃƒÂ¦Ã…Â½Ã‚Â¥
+ * ÃƒÂ¥Ã…â€œÃ‚Â¨ Electron app.on('before-quit') ÃƒÂ¤Ã‚Â¸Ã‚Â­ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
  */
 export function closeDatabase() {
   if (isClosing || !sqlite) {
@@ -249,7 +253,7 @@ export function closeDatabase() {
   console.log('[Database] Starting graceful database closure...')
 
   try {
-    // 清除定时器
+    // ÃƒÂ¦Ã‚Â¸Ã¢â‚¬Â¦ÃƒÂ©Ã¢â€žÂ¢Ã‚Â¤ÃƒÂ¥Ã‚Â®Ã…Â¡ÃƒÂ¦Ã¢â‚¬â€Ã‚Â¶ÃƒÂ¥Ã¢â€žÂ¢Ã‚Â¨
     if (checkpointTimer) {
       clearInterval(checkpointTimer)
       checkpointTimer = null
@@ -259,12 +263,12 @@ export function closeDatabase() {
       truncateTimer = null
     }
 
-    // 执行最终 checkpoint，强制合并所有 WAL 数据到主数据库
+    // ÃƒÂ¦Ã¢â‚¬Â°Ã‚Â§ÃƒÂ¨Ã‚Â¡Ã…â€™ÃƒÂ¦Ã…â€œÃ¢â€šÂ¬ÃƒÂ§Ã‚Â»Ã‹â€  checkpointÃƒÂ¯Ã‚Â¼Ã…â€™ÃƒÂ¥Ã‚Â¼Ã‚ÂºÃƒÂ¥Ã‹â€ Ã‚Â¶ÃƒÂ¥Ã‚ÂÃ‹â€ ÃƒÂ¥Ã‚Â¹Ã‚Â¶ÃƒÂ¦Ã¢â‚¬Â°Ã¢â€šÂ¬ÃƒÂ¦Ã…â€œÃ¢â‚¬Â° WAL ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‹â€ Ã‚Â°ÃƒÂ¤Ã‚Â¸Ã‚Â»ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“
     console.log('[Database] Executing final RESTART checkpoint before closing...')
     const checkpointResult = sqlite.pragma('wal_checkpoint(RESTART)')
     console.log('[Database] Final checkpoint result:', checkpointResult)
 
-    // 关闭数据库连接
+    // ÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â³ÃƒÂ©Ã¢â‚¬â€Ã‚Â­ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¨Ã‚Â¿Ã…Â¾ÃƒÂ¦Ã…Â½Ã‚Â¥
     sqlite.close()
     console.log('[Database] Database connection closed successfully')
 
@@ -272,18 +276,18 @@ export function closeDatabase() {
     db = null
   } catch (error) {
     console.error('[Database] Error during database closure:', error)
-    // 即使出错也要清理引用
+    // ÃƒÂ¥Ã‚ÂÃ‚Â³ÃƒÂ¤Ã‚Â½Ã‚Â¿ÃƒÂ¥Ã¢â‚¬Â¡Ã‚ÂºÃƒÂ©Ã¢â‚¬ÂÃ¢â€žÂ¢ÃƒÂ¤Ã‚Â¹Ã…Â¸ÃƒÂ¨Ã‚Â¦Ã‚ÂÃƒÂ¦Ã‚Â¸Ã¢â‚¬Â¦ÃƒÂ§Ã‚ÂÃ¢â‚¬Â ÃƒÂ¥Ã‚Â¼Ã¢â‚¬Â¢ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
     sqlite = null
     db = null
   }
 }
 
 /**
- * 获取原始 SQLite 实例（用于 pragma 等操作）
+ * ÃƒÂ¨Ã…Â½Ã‚Â·ÃƒÂ¥Ã‚ÂÃ¢â‚¬â€œÃƒÂ¥Ã…Â½Ã…Â¸ÃƒÂ¥Ã‚Â§Ã¢â‚¬Â¹ SQLite ÃƒÂ¥Ã‚Â®Ã…Â¾ÃƒÂ¤Ã‚Â¾Ã¢â‚¬Â¹ÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ÃƒÂ¤Ã‚ÂºÃ…Â½ pragma ÃƒÂ§Ã‚Â­Ã¢â‚¬Â°ÃƒÂ¦Ã¢â‚¬Å“Ã‚ÂÃƒÂ¤Ã‚Â½Ã…â€œÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
  */
 export function getSqlite() {
   return sqlite
 }
 
-// 导出类型供其他模块使用
+// ÃƒÂ¥Ã‚Â¯Ã‚Â¼ÃƒÂ¥Ã¢â‚¬Â¡Ã‚ÂºÃƒÂ§Ã‚Â±Ã‚Â»ÃƒÂ¥Ã…Â¾Ã¢â‚¬Â¹ÃƒÂ¤Ã‚Â¾Ã¢â‚¬ÂºÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â¶ÃƒÂ¤Ã‚Â»Ã¢â‚¬â€œÃƒÂ¦Ã‚Â¨Ã‚Â¡ÃƒÂ¥Ã‚ÂÃ¢â‚¬â€ÃƒÂ¤Ã‚Â½Ã‚Â¿ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
 export type Database = NonNullable<typeof db>

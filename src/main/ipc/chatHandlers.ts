@@ -1,3 +1,4 @@
+/* eslint-disable no-irregular-whitespace */
 import { ipcMain } from 'electron'
 import * as queries from '../db/queries'
 import { ProviderManager } from '../providers/ProviderManager'
@@ -12,10 +13,12 @@ import type { AppSettings } from '../../shared/types'
 import Logger from '../../shared/utils/logger'
 import { ChatSchemas, validate, validateWithEvent } from './validation'
 
+const CONTROL_CHARS_PATTERN = new RegExp('[' + String.fromCharCode(0) + '-' + String.fromCharCode(8) + String.fromCharCode(11) + String.fromCharCode(12) + String.fromCharCode(14) + '-' + String.fromCharCode(31) + String.fromCharCode(127) + ']', 'g')
+
 // Active streaming requests map (messageId -> AbortController)
 const activeStreams = new Map<string, AbortController>()
 
-// BUG-05: Cleanup guard — remove stale streams older than 5 minutes
+// BUG-05: Cleanup guard ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â remove stale streams older than 5 minutes
 const STREAM_TIMEOUT_MS = 5 * 60 * 1000
 const streamTimestamps = new Map<string, number>()
 
@@ -24,7 +27,7 @@ const RAG_MAX_TOTAL_CONTEXT_CHARS = 12000
 
 function sanitizePromptText(raw: string): string {
   return raw
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+    .replace(CONTROL_CHARS_PATTERN, ' ')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
@@ -65,7 +68,7 @@ function cleanupStaleStreams(): void {
 setInterval(cleanupStaleStreams, 2 * 60 * 1000).unref()
 
 /**
- * 构建 RAG 上下文 prompt
+ * ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Âº RAG ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€¦ ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ prompt
  */
 function buildRAGContext(
   searchResults: Array<{
@@ -147,10 +150,10 @@ function isLikelyChitChat(query: string, shortQueryLength: number): boolean {
 
   const patterns = [
     /^(hi|hello|hey)\b/,
-    /^(xin chao|chao|chào)\b/,
+    /^(xin chao|chao|chÃƒÆ’Ã†â€™Ãƒâ€š o)\b/,
     /^(good (morning|afternoon|evening))/,
-    /^(ban|bạn) (co|có) (the|thể) (giup|giúp)/,
-    /^(cam on|cảm ơn|thank you)\b/
+    /^(ban|bÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚ÂºÃƒâ€šÃ‚Â¡n) (co|cÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³) (the|thÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚Â»Ãƒâ€ Ã¢â‚¬â„¢) (giup|giÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºp)/,
+    /^(cam on|cÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚ÂºÃƒâ€šÃ‚Â£m ÃƒÆ’Ã¢â‚¬Â Ãƒâ€šÃ‚Â¡n|thank you)\b/
   ]
 
   return patterns.some((re) => re.test(q))
@@ -250,10 +253,10 @@ export function registerChatHandlers(
     validateWithEvent(ChatSchemas.sendMessage, async (event, args) => {
       const { sessionId, content } = args
 
-      // 1. 保存用户消息
+      // 1. ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â­Ãƒâ€¹Ã…â€œÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â·ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯
       queries.createMessage(sessionId, 'user', content)
 
-      // 2. 创建 assistant 消息占位符
+      // 2. ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂºÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Âº assistant ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€š ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â½Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â¬Ãƒâ€šÃ‚Â¦
       const assistantMessage = queries.createMessage(sessionId, 'assistant', '')
 
       // License guard: block chat when license is missing/invalid/expired
@@ -266,17 +269,17 @@ export function registerChatHandlers(
         return assistantMessage.id
       }
 
-      // 3. 获取历史消息作为上下文
+      // 3. ÃƒÆ’Ã‚Â¨Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â·ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â½ÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â²ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â½Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€¦ ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡
       const history = queries.getMessagesBySession(sessionId)
       let messages = history.map((m: any) => ({
         role: m.role as 'user' | 'assistant' | 'system',
         content: m.content
       }))
 
-      // 3.1 通用消息清理（过滤空消息和无效格式）
+      // 3.1 ÃƒÆ’Ã‚Â©ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¿ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â©Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€¦Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒâ€š ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€š Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°
       messages = validateAndCleanMessages(messages)
 
-      // 验证清理后是否还有有效消息
+      // ÃƒÆ’Ã‚Â©Ãƒâ€šÃ‚ÂªÃƒâ€¦Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¯Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€¦Ã‚Â½ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã…â€œÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¿Ãƒâ€¹Ã…â€œÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯
       if (messages.length === 0) {
         event.sender.send('message-error', {
           messageId: assistantMessage.id,
@@ -324,8 +327,8 @@ export function registerChatHandlers(
 
       let citationMetadata: ChatCitation[] = []
 
-      // 3.2 RAG 增强：检索相关知识并注入上下文
-      // 只有在设置了默认嵌入模型时才启用 RAG
+      // 3.2 RAG ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¢Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â£ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â´Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂºÃƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦Ãƒâ€šÃ‚Â³ÃƒÆ’Ã‚Â§Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¯ÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¹Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â³Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€¦ ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡
+      // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚ÂªÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â®Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â½Ãƒâ€šÃ‚Â®ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚ÂºÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â©Ãƒâ€šÃ‚Â»Ãƒâ€¹Ã…â€œÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â®Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂµÃƒâ€¦Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¨Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒâ€šÃ‚Â¶ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ RAG
       try {
         const effectiveSettings = (settings || {}) as Partial<AppSettings>
         const hasEmbeddingModel =
@@ -372,7 +375,7 @@ export function registerChatHandlers(
                 `RAG: Found ${searchResults.length} relevant chunks for query, kept ${citationMetadata.length} chunks after prompt budget trim (topK=${ragTopK}, threshold=${ragThreshold}, rerankEnabled=${rerankEnabled}, rerankTopN=${rerankTopN}, latency=${Date.now() - ragStartedAt}ms)`
               )
 
-              // 将 RAG 上下文作为 system message 插入到消息列表开头
+              // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â°ÃƒÂ¢Ã¢â€šÂ¬  RAG ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€¦ ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â½Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Âº system message ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â°ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤Ãƒâ€šÃ‚Â´
               if (ragContext) {
                 messages.unshift({
                   role: 'system',
@@ -390,11 +393,11 @@ export function registerChatHandlers(
           )
         }
       } catch (error) {
-        // RAG 失败不应该阻止对话，只记录警告
+        // RAG ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤Ãƒâ€šÃ‚Â±ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â´Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂºÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¯Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â©Ãƒâ€¹Ã…â€œÃƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â­Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¯Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¯Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¦Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚ÂªÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â®Ãƒâ€šÃ‚Â°ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â½ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â­Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“Ãƒâ€¦
         Logger.warn('ChatHandlers', 'RAG search failed:', error)
       }
 
-      // 4. 调用 AI Provider 流式生成
+      // 4. ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â°Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ AI Provider ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã‚Â¸ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â
       const provider = await providerManager.getActiveChatProvider()
       if (!provider) {
         event.sender.send('message-error', {
@@ -422,14 +425,14 @@ export function registerChatHandlers(
       let fullReasoningContent = ''
       let usageMetadata: any = null
 
-      // 调用 Provider 流式生成,获取 AbortController（基于 AI SDK fullStream）
+      // ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â°Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ Provider ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã‚Â¸ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â,ÃƒÆ’Ã‚Â¨Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â·ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ AbortControllerÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚ÂºÃƒâ€¦Ã‚Â½ AI SDK fullStreamÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°
       const abortController = await provider.sendMessageStream(
         messages,
-        // onChunk - 处理 AI SDK fullStream 的各种 part 类型
+        // onChunk - ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬  AI SDK fullStream ÃƒÆ’Ã‚Â§Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â part ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â±Ãƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹
         (chunk) => {
           const { metadata, content, done } = chunk
 
-          // 1. 推理块开始
+          // 1. ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹
           if (metadata?.reasoningStart) {
             event.sender.send('message-chunk', {
               messageId: assistantMessage.id,
@@ -437,7 +440,7 @@ export function registerChatHandlers(
               reasoningId: metadata.reasoningId
             })
           }
-          // 2. 推理增量内容
+          // 2. ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¢Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã‚Â©ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬ ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â®Ãƒâ€šÃ‚Â¹
           else if (metadata?.isReasoning) {
             fullReasoningContent += content
 
@@ -448,7 +451,7 @@ export function registerChatHandlers(
               reasoningId: metadata.reasoningId
             })
           }
-          // 3. 推理块结束
+          // 3. ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â»ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€¦Ã‚Â¸
           else if (metadata?.reasoningEnd) {
             event.sender.send('message-chunk', {
               messageId: assistantMessage.id,
@@ -456,7 +459,7 @@ export function registerChatHandlers(
               reasoningId: metadata.reasoningId
             })
           }
-          // 4. 普通文本内容（text-delta）
+          // 4. ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢Ãƒâ€šÃ‚Â®ÃƒÆ’Ã‚Â©ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬ ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â®Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¹Ã¢â‚¬Â text-deltaÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°
           else if (content) {
             fullTextContent += content
 
@@ -467,14 +470,14 @@ export function registerChatHandlers(
             })
           }
 
-          // 5. 流式传输完成
+          // 5. ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¼Ãƒâ€š ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â®Ãƒâ€¦Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â
           if (done) {
-            // 保存 usage metadata
+            // ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â­Ãƒâ€¹Ã…â€œ usage metadata
             if (metadata?.usage) {
               usageMetadata = metadata
             }
 
-            // 发送完成事件
+            // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÆ’Ã‚Â©ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â®Ãƒâ€¦Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚ÂºÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¶
             const finishMetadata: ChatMessageMetadata = {
               ...(metadata || {}),
               citations: citationMetadata

@@ -360,9 +360,9 @@ function ensureInlineCitationPlacement(content: string, citations: ChatCitation[
 
 function removeCitationBoilerplateLines(content: string): string {
   const patterns = [
-    /^\s*thông tin này được tìm thấy\b/i,
-    /^\s*thông tin trên được tìm thấy\b/i,
-    /^\s*nguồn thông tin này\b/i,
+    /^\s*thÃƒÂ´ng tin nÃƒÂ y Ã„â€˜Ã†Â°Ã¡Â»Â£c tÃƒÂ¬m thÃ¡ÂºÂ¥y\b/i,
+    /^\s*thÃƒÂ´ng tin trÃƒÂªn Ã„â€˜Ã†Â°Ã¡Â»Â£c tÃƒÂ¬m thÃ¡ÂºÂ¥y\b/i,
+    /^\s*nguÃ¡Â»â€œn thÃƒÂ´ng tin nÃƒÂ y\b/i,
     /^\s*this information was found\b/i,
     /^\s*the information was found\b/i,
     /^\s*source:\b/i
@@ -385,11 +385,11 @@ function buildChatNoteTitle(content: string): string {
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/\[(\d+)\]\(citation:\1\)/g, ' ')
     .replace(/\[(\d+)\]/g, ' ')
-    .replace(/[#>*_`~\-]+/g, ' ')
+    .replace(/[-#>*_`~]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (!cleaned) return 'Ghi chú từ chat'
+  if (!cleaned) return 'Ghi chÃƒÂº tÃ¡Â»Â« chat'
   const max = 60
   return cleaned.length <= max ? cleaned : `${cleaned.slice(0, max).trim()}...`
 }

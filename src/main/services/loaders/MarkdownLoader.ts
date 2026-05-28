@@ -8,9 +8,22 @@ import { extname } from 'path'
 import { remark } from 'remark'
 import remarkGfm from 'remark-gfm'
 import { visit } from 'unist-util-visit'
-import type { Root, Heading, Content } from 'mdast'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
+type MarkdownNode = {
+  type: string
+  depth?: number
+  value?: string
+  children?: MarkdownNode[]
+  position?: {
+    start: { offset?: number }
+    end: { offset?: number }
+  }
+}
+
+type Root = MarkdownNode
+type Heading = MarkdownNode & { depth: number }
+type Content = MarkdownNode
 
 /**
  * Markdown 文档加载器
@@ -44,7 +57,7 @@ export class MarkdownLoader implements IDocumentLoader {
       const remarkGfmPlugin =
         typeof remarkGfm === 'function' ? remarkGfm : (remarkGfm as any).default
       const processor = remarkFn().use(remarkGfmPlugin)
-      const ast = processor.parse(content) as Root
+      const ast = processor.parse(content) as unknown as Root
 
       // 提取标题
       const title = this.extractTitle(ast)
@@ -80,7 +93,7 @@ export class MarkdownLoader implements IDocumentLoader {
   private extractTitle(ast: Root): string | undefined {
     let title: string | undefined
 
-    visit(ast, 'heading', (node: Heading) => {
+    visit(ast as any, 'heading', (node: Heading) => {
       if (!title && node.depth === 1) {
         title = this.nodeToText(node)
         return false // 停止遍历
@@ -98,7 +111,7 @@ export class MarkdownLoader implements IDocumentLoader {
     const sections: SectionInfo[] = []
     const stack: { section: SectionInfo; level: number }[] = []
 
-    visit(ast, (node) => {
+    visit(ast as any, (node: MarkdownNode) => {
       if (node.type === 'heading') {
         const heading = node as Heading
         const title = this.nodeToText(heading)
@@ -173,7 +186,7 @@ export class MarkdownLoader implements IDocumentLoader {
    */
   private hasCodeBlocks(ast: Root): boolean {
     let hasCode = false
-    visit(ast, 'code', () => {
+    visit(ast as any, 'code', () => {
       hasCode = true
       return false
     })
@@ -185,7 +198,7 @@ export class MarkdownLoader implements IDocumentLoader {
    */
   private hasTables(ast: Root): boolean {
     let hasTable = false
-    visit(ast, 'table', () => {
+    visit(ast as any, 'table', () => {
       hasTable = true
       return false
     })

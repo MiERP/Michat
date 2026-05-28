@@ -266,10 +266,7 @@ export class KnowledgeService {
   }
 
   private buildChunkOptionsForMimeType(mimeType: string | undefined): ChunkOptions | undefined {
-    if (
-      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-      mimeType === 'application/vnd.ms-excel'
-    ) {
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
       // Spreadsheet rows can be token-dense; use tighter chunking for stable local embedding.
       return {
         chunkSize: 220,
@@ -290,6 +287,24 @@ export class KnowledgeService {
 
     const placeholders = chunkIds.map(() => '?').join(',')
     sqlite.prepare(`DELETE FROM fts_chunks WHERE chunk_id IN (${placeholders})`).run(...chunkIds)
+  }
+
+  private async cleanupDocumentIndex(notebookId: string, documentId: string): Promise<void> {
+    const db = getDatabase()
+    const docChunks = db
+      .select({ id: chunks.id })
+      .from(chunks)
+      .where(eq(chunks.documentId, documentId))
+      .all()
+
+    if (docChunks.length === 0) return
+
+    const chunkIds = docChunks.map((chunk) => chunk.id)
+    const vectorStore = await vectorStoreManager.getStore(notebookId)
+    await vectorStore.deleteByChunkIds(chunkIds)
+    this.deleteFtsChunkIds(chunkIds)
+    db.delete(embeddings).where(inArray(embeddings.chunkId, chunkIds)).run()
+    db.delete(chunks).where(eq(chunks.documentId, documentId)).run()
   }
 
   /**
@@ -458,6 +473,7 @@ export class KnowledgeService {
       )
       return documentId
     } catch (error) {
+      await this.cleanupDocumentIndex(notebookId, documentId)
       db.update(documents)
         .set({ status: 'failed', errorMessage: (error as Error).message, updatedAt: new Date() })
         .where(eq(documents.id, documentId))
@@ -475,13 +491,30 @@ export class KnowledgeService {
     const db = getDatabase()
     const documentId = `doc_${randomUUID()}`
     let localFilePath: string | undefined
+    const now = new Date()
 
     try {
       onProgress?.('parsing_file', 0)
       localFilePath = await this.copyFileToKnowledgeDir(filePath, documentId)
+
+      db.insert(documents)
+        .values({
+          id: documentId,
+          notebookId,
+          title: basename(filePath) || 'Untitled',
+          type: 'file',
+          sourceUri: filePath,
+          localFilePath,
+          status: 'processing',
+          chunkCount: 0,
+          createdAt: now,
+          updatedAt: now
+        })
+        .run()
+
       const parseResult = await this.fileParserService.parseFile(filePath)
       const contentHash = createHash('md5').update(parseResult.content).digest('hex')
-      const now = new Date()
+      const fileInfo = await stat(filePath).catch(() => undefined)
 
       const docType =
         parseResult.mimeType === 'text/plain' || parseResult.mimeType === 'text/markdown'
@@ -505,27 +538,22 @@ export class KnowledgeService {
       }
 
       onProgress?.('creating_document', 5)
-      const newDoc: NewDocument = {
-        id: documentId,
-        notebookId,
+      db.update(documents)
+        .set({
         title: parseResult.title || basename(filePath) || 'Untitled',
         type: docType,
-        sourceUri: filePath,
-        localFilePath,
         content: parseResult.content,
         contentHash,
         mimeType: parseResult.mimeType,
-        fileSize: parseResult.metadata?.fileSize as number | undefined,
+        fileSize: (parseResult.metadata?.fileSize as number | undefined) ?? fileInfo?.size,
         metadata: {
           ...(parseResult.metadata || {}),
           ...(structureMetadata || {})
         },
-        status: 'processing',
-        chunkCount: 0,
-        createdAt: now,
         updatedAt: now
-      }
-      db.insert(documents).values(newDoc).run()
+        })
+        .where(eq(documents.id, documentId))
+        .run()
 
       await this._indexContent(
         documentId,
@@ -537,8 +565,14 @@ export class KnowledgeService {
       return documentId
     } catch (error) {
       if (localFilePath) await this.deleteLocalFile(localFilePath)
+      await this.cleanupDocumentIndex(notebookId, documentId)
       db.update(documents)
-        .set({ status: 'failed', errorMessage: (error as Error).message, updatedAt: new Date() })
+        .set({
+          status: 'failed',
+          localFilePath: null,
+          errorMessage: (error as Error).message,
+          updatedAt: new Date()
+        })
         .where(eq(documents.id, documentId))
         .run()
       Logger.error('KnowledgeService', 'Failed to add document from file:', error)
@@ -614,9 +648,6 @@ export class KnowledgeService {
       indexedFiles,
       failedFiles
     }
-  }
-      onProgress
-    )
   }
 
   async addNoteToKnowledge(

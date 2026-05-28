@@ -1,13 +1,13 @@
 /**
  * ExcelLoader
- * Parse XLSX/XLS files and preserve table structure for chunking.
+ * Parse XLSX files and preserve table structure for chunking.
  */
 
 import { readFile } from 'fs/promises'
 import { extname } from 'path'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import Logger from '../../../shared/utils/logger'
-import type { IDocumentLoader, DocumentLoadResult, LoadOptions } from './types'
+import type { IDocumentLoader, DocumentLoadResult } from './types'
 
 interface TableBlock {
   sheet: string
@@ -18,12 +18,9 @@ interface TableBlock {
 }
 
 export class ExcelLoader implements IDocumentLoader {
-  readonly supportedMimeTypes = [
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel'
-  ]
+  readonly supportedMimeTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
 
-  readonly supportedExtensions = ['xlsx', 'xls']
+  readonly supportedExtensions = ['xlsx']
 
   canLoad(filePathOrMimeType: string): boolean {
     const lower = filePathOrMimeType.toLowerCase()
@@ -33,40 +30,32 @@ export class ExcelLoader implements IDocumentLoader {
     )
   }
 
-  async loadFromPath(filePath: string, options?: LoadOptions): Promise<DocumentLoadResult> {
+  async loadFromPath(filePath: string): Promise<DocumentLoadResult> {
     const buffer = await readFile(filePath)
-    return this.loadFromBuffer(buffer, options)
+    return this.loadFromBuffer(buffer)
   }
 
-  async loadFromBuffer(buffer: Buffer, _options?: LoadOptions): Promise<DocumentLoadResult> {
+  async loadFromBuffer(buffer: Buffer): Promise<DocumentLoadResult> {
     try {
-      const workbook = XLSX.read(buffer, {
-        type: 'buffer',
-        cellDates: true,
-        dense: true
-      })
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.load(buffer)
 
       const chunks: string[] = []
       const tables: TableBlock[] = []
       let currentOffset = 0
 
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName]
-        if (!sheet) continue
+      workbook.eachSheet((worksheet) => {
+        const rows: Array<Array<string | number | boolean | Date | null>> = []
+        worksheet.eachRow({ includeEmpty: false }, (row) => {
+          const values = Array.isArray(row.values) ? row.values.slice(1) : []
+          rows.push(values as Array<string | number | boolean | Date | null>)
+        })
 
-        const rows = XLSX.utils.sheet_to_json(sheet, {
-          header: 1,
-          defval: '',
-          raw: false
-        }) as Array<Array<string | number | boolean | null>>
+        const normalizedRows = rows.filter((row) =>
+          row.some((cell) => String(cell ?? '').trim().length > 0)
+        )
 
-        if (rows.length === 0) continue
-
-        const normalizedRows = rows
-          .map((row) => (Array.isArray(row) ? row : []))
-          .filter((row) => row.some((cell) => String(cell ?? '').trim().length > 0))
-
-        if (normalizedRows.length === 0) continue
+        if (normalizedRows.length === 0) return
 
         const header = normalizedRows[0].map((cell) => String(cell ?? '').trim())
         const dataRows = normalizedRows.slice(1)
@@ -74,7 +63,7 @@ export class ExcelLoader implements IDocumentLoader {
 
         const lines: string[] = []
         lines.push(
-          `[[TABLE_START:sheet=${sheetName};rows=${normalizedRows.length};cols=${columnCount}]]`
+          `[[TABLE_START:sheet=${worksheet.name};rows=${normalizedRows.length};cols=${columnCount}]]`
         )
 
         if (header.length > 0) {
@@ -92,7 +81,7 @@ export class ExcelLoader implements IDocumentLoader {
         chunks.push(blockText)
 
         tables.push({
-          sheet: sheetName,
+          sheet: worksheet.name,
           startOffset: currentOffset,
           endOffset: currentOffset + blockText.length,
           rowCount: normalizedRows.length,
@@ -100,7 +89,7 @@ export class ExcelLoader implements IDocumentLoader {
         })
 
         currentOffset += blockText.length
-      }
+      })
 
       const content = chunks.join('').trim()
       if (!content) {
@@ -109,11 +98,11 @@ export class ExcelLoader implements IDocumentLoader {
 
       return {
         content,
-        title: workbook.Props?.Title,
+        title: workbook.title,
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         metadata: {
-          sheetCount: workbook.SheetNames.length,
-          sheets: workbook.SheetNames,
+          sheetCount: workbook.worksheets.length,
+          sheets: workbook.worksheets.map((sheet) => sheet.name),
           tables
         }
       }

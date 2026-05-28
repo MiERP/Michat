@@ -24,6 +24,7 @@ export interface ProviderDescriptor {
   name: string // 供应商标识(如 'openai', 'deepseek')
   displayName: string // 显示名称(如 'OpenAI', 'DeepSeek')
   isBuiltin: boolean // 是否为内置供应商
+  locality?: 'local' | 'remote' // local-first privacy boundary
 
   // 默认配置
   defaultBaseUrl: string // 默认 API 地址

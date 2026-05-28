@@ -7,26 +7,94 @@ import { z } from 'zod'
 import { Result, Err, Ok } from '../../shared/types/result'
 import Logger from '../../shared/utils/logger'
 
+const promptLanguageSchema = z.object({
+  'vi-VN': z.string().optional(),
+  'en-US': z.string().optional()
+})
+
+const promptsSchema = z.object({
+  mindMap: promptLanguageSchema.optional(),
+  quiz: promptLanguageSchema.optional(),
+  chat: promptLanguageSchema.optional()
+})
+
+const appSettingsUpdateSchema = z
+  .object({
+    theme: z.enum(['light', 'dark']).optional(),
+    language: z.enum(['vi-VN', 'en-US']).optional(),
+    autoLaunch: z.boolean().optional(),
+    hasCompletedOnboarding: z.boolean().optional(),
+    defaultChatModel: z.string().optional(),
+    defaultEmbeddingModel: z.string().optional(),
+    defaultRerankModel: z.string().optional(),
+    rerankEnabled: z.boolean().optional(),
+    rerankTopN: z.number().int().min(1).max(100).optional(),
+    rerankUseHeuristicFallback: z.boolean().optional(),
+    ragTopK: z.number().int().min(1).max(50).optional(),
+    ragThreshold: z.number().min(0).max(1).optional(),
+    ragSkipShortQueryLength: z.number().int().min(0).max(200).optional(),
+    ragEnableChitChatHeuristic: z.boolean().optional(),
+    allowRemoteProviders: z.boolean().optional(),
+    prompts: promptsSchema.optional()
+  })
+  .strict()
+
+const settingValueSchemas = {
+  theme: appSettingsUpdateSchema.shape.theme.unwrap(),
+  language: appSettingsUpdateSchema.shape.language.unwrap(),
+  autoLaunch: appSettingsUpdateSchema.shape.autoLaunch.unwrap(),
+  hasCompletedOnboarding: appSettingsUpdateSchema.shape.hasCompletedOnboarding.unwrap(),
+  defaultChatModel: appSettingsUpdateSchema.shape.defaultChatModel.unwrap(),
+  defaultEmbeddingModel: appSettingsUpdateSchema.shape.defaultEmbeddingModel.unwrap(),
+  defaultRerankModel: appSettingsUpdateSchema.shape.defaultRerankModel.unwrap(),
+  rerankEnabled: appSettingsUpdateSchema.shape.rerankEnabled.unwrap(),
+  rerankTopN: appSettingsUpdateSchema.shape.rerankTopN.unwrap(),
+  rerankUseHeuristicFallback: appSettingsUpdateSchema.shape.rerankUseHeuristicFallback.unwrap(),
+  ragTopK: appSettingsUpdateSchema.shape.ragTopK.unwrap(),
+  ragThreshold: appSettingsUpdateSchema.shape.ragThreshold.unwrap(),
+  ragSkipShortQueryLength: appSettingsUpdateSchema.shape.ragSkipShortQueryLength.unwrap(),
+  ragEnableChitChatHeuristic: appSettingsUpdateSchema.shape.ragEnableChitChatHeuristic.unwrap(),
+  allowRemoteProviders: appSettingsUpdateSchema.shape.allowRemoteProviders.unwrap(),
+  prompts: appSettingsUpdateSchema.shape.prompts.unwrap()
+}
+
+const settingKeys = Object.keys(settingValueSchemas) as [
+  keyof typeof settingValueSchemas,
+  ...Array<keyof typeof settingValueSchemas>
+]
+const settingKeySchema = z.enum(settingKeys)
+
 /**
- * 设置相关的验证 schemas
+ * Settings validation schemas
  */
 export const SettingsSchemas = {
   get: z.object({
-    key: z.string().min(1, 'Settings key cannot be empty')
+    key: settingKeySchema
   }),
 
-  set: z.object({
-    key: z.string().min(1, 'Settings key cannot be empty'),
-    value: z.any()
-  }),
+  set: z
+    .object({
+      key: settingKeySchema,
+      value: z.unknown()
+    })
+    .superRefine((args, ctx) => {
+      const result = settingValueSchemas[args.key].safeParse(args.value)
+      if (!result.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['value'],
+          message: result.error.issues.map((issue) => issue.message).join(', ')
+        })
+      }
+    }),
 
   update: z.object({
-    updates: z.record(z.string(), z.any())
+    updates: appSettingsUpdateSchema
   })
 }
 
 /**
- * 笔记本相关的验证 schemas
+ * Notebook validation schemas
  */
 export const NotebookSchemas = {
   createNotebook: z.object({
@@ -85,13 +153,23 @@ export const NoteSchemas = {
   })
 }
 
+const providerConfigSchema = z
+  .object({
+    baseUrl: z.string().url().optional(),
+    embeddingBaseUrl: z.string().url().optional(),
+    apiKey: z.string().optional(),
+    model: z.string().optional(),
+    models: z.array(z.string()).optional()
+  })
+  .passthrough()
+
 /**
- * Provider 相关的验证 schemas
+ * Provider validation schemas
  */
 export const ProviderSchemas = {
   saveProviderConfig: z.object({
     providerName: z.string().min(1, { message: 'Provider name cannot be empty' }),
-    config: z.record(z.string(), z.any()),
+    config: providerConfigSchema,
     enabled: z.boolean()
   }),
 
@@ -105,7 +183,7 @@ export const ProviderSchemas = {
 
   validateProviderConfig: z.object({
     providerName: z.string().min(1, 'Provider name cannot be empty'),
-    config: z.record(z.string(), z.any())
+    config: providerConfigSchema
   }),
 
   fetchModels: z.object({

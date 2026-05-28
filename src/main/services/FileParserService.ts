@@ -23,7 +23,6 @@ export type SupportedFileType =
   | 'pptx'
   | 'ppt'
   | 'xlsx'
-  | 'xls'
   | 'txt'
   | 'md'
   | 'markdown'
@@ -129,7 +128,6 @@ export class FileParserService {
       'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
       'application/vnd.ms-powerpoint': 'ppt',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-      'application/vnd.ms-excel': 'xls',
       'text/plain': 'txt',
       'text/markdown': 'md'
     }
@@ -147,7 +145,6 @@ export class FileParserService {
       pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       ppt: 'application/vnd.ms-powerpoint',
       xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      xls: 'application/vnd.ms-excel',
       txt: 'text/plain',
       text: 'text/plain',
       md: 'text/markdown',

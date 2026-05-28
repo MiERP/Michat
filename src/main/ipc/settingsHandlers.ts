@@ -43,8 +43,10 @@ export function registerSettingsHandlers(): void {
   ipcMain.handle(
     'settings:set',
     validate(SettingsSchemas.set, async (args) => {
-      await settingsManager.setSetting(args.key as keyof AppSettings, args.value)
-      return await settingsManager.getSetting(args.key as keyof AppSettings)
+      const key = args.key as keyof AppSettings
+      const value = args.value as AppSettings[typeof key]
+      await settingsManager.setSetting(key, value)
+      return await settingsManager.getSetting(key)
     })
   )
 

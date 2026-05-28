@@ -183,20 +183,6 @@ export function registerKnowledgeHandlers(
   )
 
   // 从 URL 添加文档
-  ipcMain.handle(
-            }
-          )
-          return { success: true, documentId }
-        } catch (error) {
-          Logger.error('KnowledgeHandlers', 'Error adding document from URL:', error)
-          return { success: false, error: (error as Error).message }
-        }
-      })(event, args)
-
-      return validated
-    }
-  )
-
   // 从 Note 添加到知识库
   ipcMain.handle('knowledge:add-note', async (event: IpcMainInvokeEvent, args: unknown) => {
     const validated = await validate(KnowledgeSchemas.addNote, async (params) => {
@@ -392,11 +378,11 @@ export function registerKnowledgeHandlers(
       filters: [
         {
           name: 'Documents',
-          extensions: ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'txt', 'md']
+          extensions: ['pdf', 'docx', 'doc', 'xlsx', 'pptx', 'ppt', 'txt', 'md']
         },
         { name: 'PDF', extensions: ['pdf'] },
         { name: 'Word', extensions: ['docx', 'doc'] },
-        { name: 'Excel', extensions: ['xlsx', 'xls'] },
+        { name: 'Excel', extensions: ['xlsx'] },
         { name: 'PowerPoint', extensions: ['pptx', 'ppt'] },
         { name: 'Text', extensions: ['txt', 'md'] },
         { name: 'All Files', extensions: ['*'] }

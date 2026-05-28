@@ -1,6 +1,6 @@
 /**
  * DocxLoader
- * 使用 mammoth 解析 Word 文档，并提取结构信息
+ * Ã¤Â½Â¿Ã§â€Â¨ mammoth Ã¨Â§Â£Ã¦Å¾Â Word Ã¦â€“â€¡Ã¦Â¡Â£Ã¯Â¼Å’Ã¥Â¹Â¶Ã¦ÂÂÃ¥Ââ€“Ã§Â»â€œÃ¦Å¾â€žÃ¤Â¿Â¡Ã¦ÂÂ¯
  */
 
 import { readFile } from 'fs/promises'
@@ -12,8 +12,8 @@ import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
 
 /**
- * Word 文档加载器
- * 基于 mammoth，支持 DOCX 和 DOC
+ * Word Ã¦â€“â€¡Ã¦Â¡Â£Ã¥Å Â Ã¨Â½Â½Ã¥â„¢Â¨
+ * Ã¥Å¸ÂºÃ¤ÂºÅ½ mammothÃ¯Â¼Å’Ã¦â€Â¯Ã¦Å’Â DOCX Ã¥â€™Å’ DOC
  */
 export class DocxLoader implements IDocumentLoader {
   readonly supportedMimeTypes = [
@@ -34,7 +34,7 @@ export class DocxLoader implements IDocumentLoader {
     const extension = extname(filePath).toLowerCase()
 
     if (extension === '.doc') {
-      return this.loadLegacyDoc(filePath, options)
+      return this.loadLegacyDoc(filePath)
     }
 
     const buffer = await readFile(filePath)
@@ -45,11 +45,11 @@ export class DocxLoader implements IDocumentLoader {
     const opts = { preserveStructure: true, ...options }
 
     try {
-      // 提取纯文本
+      // Ã¦ÂÂÃ¥Ââ€“Ã§ÂºÂ¯Ã¦â€“â€¡Ã¦Å“Â¬
       const textResult = await mammoth.extractRawText({ buffer })
       const content = textResult.value.trim()
 
-      // 提取结构信息（将文档转换为 HTML，从中提取标题）
+      // Ã¦ÂÂÃ¥Ââ€“Ã§Â»â€œÃ¦Å¾â€žÃ¤Â¿Â¡Ã¦ÂÂ¯Ã¯Â¼Ë†Ã¥Â°â€ Ã¦â€“â€¡Ã¦Â¡Â£Ã¨Â½Â¬Ã¦ÂÂ¢Ã¤Â¸Âº HTMLÃ¯Â¼Å’Ã¤Â»Å½Ã¤Â¸Â­Ã¦ÂÂÃ¥Ââ€“Ã¦Â â€¡Ã©Â¢ËœÃ¯Â¼â€°
       let sections: SectionInfo[] | undefined
       let title: string | undefined
 
@@ -57,11 +57,11 @@ export class DocxLoader implements IDocumentLoader {
         const htmlResult = await mammoth.convertToHtml({ buffer })
         const $ = cheerio.load(htmlResult.value)
 
-        // 提取第一个标题作为文档标题
+        // Ã¦ÂÂÃ¥Ââ€“Ã§Â¬Â¬Ã¤Â¸â‚¬Ã¤Â¸ÂªÃ¦Â â€¡Ã©Â¢ËœÃ¤Â½Å“Ã¤Â¸ÂºÃ¦â€“â€¡Ã¦Â¡Â£Ã¦Â â€¡Ã©Â¢Ëœ
         const firstH1 = $('h1').first().text().trim()
         title = firstH1 || undefined
 
-        // 提取章节结构
+        // Ã¦ÂÂÃ¥Ââ€“Ã§Â«Â Ã¨Å â€šÃ§Â»â€œÃ¦Å¾â€ž
         sections = this.extractSectionsFromHtml($, content)
       }
 
@@ -88,7 +88,7 @@ export class DocxLoader implements IDocumentLoader {
   }
 
   /**
-   * 从 HTML 中提取章节结构
+   * Ã¤Â»Å½ HTML Ã¤Â¸Â­Ã¦ÂÂÃ¥Ââ€“Ã§Â«Â Ã¨Å â€šÃ§Â»â€œÃ¦Å¾â€ž
    */
   private extractSectionsFromHtml($: cheerio.CheerioAPI, fullContent: string): SectionInfo[] {
     const sections: SectionInfo[] = []
@@ -102,11 +102,11 @@ export class DocxLoader implements IDocumentLoader {
 
       if (!title) continue
 
-      // 尝试在全文中定位这个标题
+      // Ã¥Â°ÂÃ¨Â¯â€¢Ã¥Å“Â¨Ã¥â€¦Â¨Ã¦â€“â€¡Ã¤Â¸Â­Ã¥Â®Å¡Ã¤Â½ÂÃ¨Â¿â„¢Ã¤Â¸ÂªÃ¦Â â€¡Ã©Â¢Ëœ
       const startOffset = fullContent.indexOf(title)
       if (startOffset === -1) continue
 
-      // 计算到下一个同级或更高级标题的内容
+      // Ã¨Â®Â¡Ã§Â®â€”Ã¥Ë†Â°Ã¤Â¸â€¹Ã¤Â¸â‚¬Ã¤Â¸ÂªÃ¥ÂÅ’Ã§ÂºÂ§Ã¦Ë†â€“Ã¦â€ºÂ´Ã©Â«ËœÃ§ÂºÂ§Ã¦Â â€¡Ã©Â¢ËœÃ§Å¡â€žÃ¥â€ â€¦Ã¥Â®Â¹
       let endOffset = fullContent.length
       for (let j = i + 1; j < headings.length; j++) {
         const nextHeading = $(headings[j])
@@ -134,28 +134,28 @@ export class DocxLoader implements IDocumentLoader {
       })
     }
 
-    // 构建层级关系
+    // Ã¦Å¾â€žÃ¥Â»ÂºÃ¥Â±â€šÃ§ÂºÂ§Ã¥â€¦Â³Ã§Â³Â»
     return this.buildHierarchy(sections)
   }
 
   /**
-   * 构建章节层级关系
+   * Ã¦Å¾â€žÃ¥Â»ÂºÃ§Â«Â Ã¨Å â€šÃ¥Â±â€šÃ§ÂºÂ§Ã¥â€¦Â³Ã§Â³Â»
    */
   private buildHierarchy(flatSections: SectionInfo[]): SectionInfo[] {
     const root: SectionInfo[] = []
     const stack: SectionInfo[] = []
 
     for (const section of flatSections) {
-      // 弹出比当前章节级别高的节点
+      // Ã¥Â¼Â¹Ã¥â€¡ÂºÃ¦Â¯â€Ã¥Â½â€œÃ¥â€°ÂÃ§Â«Â Ã¨Å â€šÃ§ÂºÂ§Ã¥Ë†Â«Ã©Â«ËœÃ§Å¡â€žÃ¨Å â€šÃ§â€šÂ¹
       while (stack.length > 0 && stack[stack.length - 1].level >= section.level) {
         stack.pop()
       }
 
       if (stack.length === 0) {
-        // 顶级章节
+        // Ã©Â¡Â¶Ã§ÂºÂ§Ã§Â«Â Ã¨Å â€š
         root.push(section)
       } else {
-        // 子章节
+        // Ã¥Â­ÂÃ§Â«Â Ã¨Å â€š
         const parent = stack[stack.length - 1]
         if (!parent.children) {
           parent.children = []
@@ -170,11 +170,11 @@ export class DocxLoader implements IDocumentLoader {
   }
 
   
-  private async loadLegacyDoc(filePath: string, options?: LoadOptions): Promise<DocumentLoadResult> {
+  private async loadLegacyDoc(filePath: string): Promise<DocumentLoadResult> {
     Logger.info('DocxLoader', `Parsing legacy .doc file: `)
     try {
       const buffer = await readFile(filePath)
-      const text = await officeparser.parseOfficeAsync(buffer)
+      const text = await (officeparser as unknown as { parseOfficeAsync: (input: Buffer) => Promise<string> }).parseOfficeAsync(buffer)
       const content = text.trim()
       if (!content) throw new Error('No readable text content found in legacy .doc file')
       return {

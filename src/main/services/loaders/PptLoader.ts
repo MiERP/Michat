@@ -38,7 +38,7 @@ export class PptLoader implements IDocumentLoader {
 
     try {
       // 使用 officeparser 提取文本
-      const text = await officeParser.parseOfficeAsync(buffer)
+      const text = await (officeParser as unknown as { parseOfficeAsync: (input: Buffer) => Promise<string> }).parseOfficeAsync(buffer)
       const content = text.trim()
 
       // 按启发式规则分隔幻灯片

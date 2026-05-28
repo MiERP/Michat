@@ -11,6 +11,7 @@ export const BUILTIN_PROVIDERS: ProviderDescriptor[] = [
     name: 'llama',
     displayName: 'Llama Server',
     isBuiltin: true,
+    locality: 'local',
     defaultBaseUrl: 'http://127.0.0.1:8000/v1',
     defaultChatModel: 'local-chat',
     capabilities: {
@@ -23,6 +24,7 @@ export const BUILTIN_PROVIDERS: ProviderDescriptor[] = [
     name: 'llama-embed',
     displayName: 'Llama Embedding',
     isBuiltin: true,
+    locality: 'local',
     defaultBaseUrl: 'http://127.0.0.1:8001/v1',
     defaultEmbeddingModel: 'local-embedding',
     capabilities: {

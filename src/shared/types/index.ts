@@ -105,6 +105,7 @@ export interface AppSettings {
   ragThreshold?: number
   ragSkipShortQueryLength?: number
   ragEnableChitChatHeuristic?: boolean
+  allowRemoteProviders?: boolean
   prompts?: {
     mindMap?: {
       'vi-VN'?: string // 中文思维导图生成提示词

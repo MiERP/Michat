@@ -24,6 +24,8 @@ import { PanelHeader } from '../ui/panel-header'
 import DocumentList from './source/DocumentList'
 import type { KnowledgeDocument } from '../../../../shared/types/knowledge'
 
+type AddSourceType = 'text' | 'note'
+
 // 添加来源类型
 
 // 添加来源弹窗组件
@@ -53,7 +55,7 @@ function AddSourceModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
- else if (type === 'text' && title && content) {
+    if (type === 'text' && title.trim() && content.trim()) {
       onSubmit({ title, content })
     } else if (type === 'note' && selectedNoteId) {
       onSubmit({ noteId: selectedNoteId })
@@ -330,20 +332,6 @@ export default function SourcePanel(): ReactElement {
     setShowAddMenu(false)
   }, [notebookId, defaultEmbeddingModel, selectFolder, addDocumentsFromFolder, t, setShowAddMenu])
 
-  // 处理 URL 导入
-    async (data: { url?: string }) => {
-
-      // 检查是否配置了默认嵌入模型
-      if (!defaultEmbeddingModel) {
-        alert(t('noEmbeddingModelConfigured'))
-        setModalType(null)
-        return
-      }
-
-      setModalType(null)
-    },
-  )
-
   // 处理文本粘贴
   const handleTextPaste = useCallback(
     async (data: { title?: string; content?: string }) => {
@@ -446,12 +434,13 @@ export default function SourcePanel(): ReactElement {
   // 处理弹窗提交
   const handleModalSubmit = useCallback(
     (data: { title?: string; content?: string; noteId?: string }) => {
-      } else if (modalType === 'text') {
+      if (modalType === 'text') {
         handleTextPaste(data)
       } else if (modalType === 'note') {
         handleNoteImport(data)
       }
     },
+    [modalType, handleTextPaste, handleNoteImport]
   )
 
   return (
@@ -506,15 +495,6 @@ export default function SourcePanel(): ReactElement {
                     </Button>
                     <Button
                       onClick={() => {
-                        setShowAddMenu(false)
-                      }}
-                      variant="ghost"
-                      className="w-full justify-start text-sm font-normal rounded-none"
-                    >
-                      <Globe className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      onClick={() => {
                         setModalType('text')
                         setShowAddMenu(false)
                       }}
@@ -564,7 +544,7 @@ export default function SourcePanel(): ReactElement {
       )}
 
       {/* 添加来源弹窗 - 使用 key 强制在 type 变化时重新挂载组件 */}
-      {modalType && modalType !== 'file' && (
+      {modalType && (
         <AddSourceModal
           key={modalType}
           type={modalType}

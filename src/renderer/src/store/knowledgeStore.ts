@@ -59,6 +59,18 @@ interface KnowledgeStore {
     }
     error?: string
   }>
+  addNoteToKnowledge: (
+    notebookId: string,
+    noteId: string
+  ) => Promise<{ success: boolean; documentId?: string; error?: string }>
+  search: (notebookId: string, query: string, options?: SearchOptions) => Promise<void>
+  deleteDocument: (
+    notebookId: string,
+    documentId: string
+  ) => Promise<{ success: boolean; error?: string }>
+  selectFiles: () => Promise<string[]>
+  selectFolder: () => Promise<string | null>
+}
 
 export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   // 初始状态

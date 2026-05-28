@@ -8,6 +8,7 @@ import { BUILTIN_PROVIDERS } from './registry/builtinProviders'
 import { AISDKProvider } from './base/AISDKProvider'
 import { settingsManager, providerConfigManager } from '../config'
 import Logger from '../../shared/utils/logger'
+import { canUseProviderForLocalFirst } from './providerPolicy'
 
 /**
  * ProviderManager
@@ -60,6 +61,16 @@ export class ProviderManager {
     }
 
     // 配置 provider
+    const settings = await settingsManager.getAllSettings()
+    const descriptor = this.registry.getDescriptor(name)
+    if (!descriptor || !canUseProviderForLocalFirst(descriptor, config, !!settings.allowRemoteProviders)) {
+      Logger.error(
+        'ProviderManager',
+        `Provider ${name} is blocked by local-first policy. Enable remote providers explicitly to use non-local endpoints.`
+      )
+      return null
+    }
+
     provider.configure(config.config)
     return provider
   }
