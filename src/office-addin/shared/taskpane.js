@@ -71,6 +71,12 @@ function normalizeIntentText(text) {
     .replace(/[\u0300-\u036f]/g, '')
 }
 
+function isGreetingOnly(text) {
+  return /^(hi|hello|hey|chao|chao ban|xin chao|xin chao ban|alo|hello michat|hi michat)[!. ]*$/.test(
+    normalizeIntentText(text)
+  )
+}
+
 function routeLocalIntent(text, host) {
   var normalized = normalizeIntentText(text)
   if (
@@ -736,6 +742,11 @@ function sendMessage() {
   showChatTab('chat-messages')
   updateContextBadge('none')
   updateSkillBadge([])
+
+  if (isGreetingOnly(text)) {
+    addMessage('assistant', 'Chào bạn! Mình có thể hỗ trợ gì cho tài liệu này?')
+    return
+  }
 
   var msgEl = addMessage('assistant', 'Thinking...')
   msgEl.className = 'message assistant pending'

@@ -131,6 +131,18 @@ describe('Office taskpane UX', () => {
     )
   })
 
+  it('answers greetings locally in Vietnamese without document context or skills', () => {
+    const js = taskpaneJs()
+    const sendMessageSource = extractFunctionSource(js, 'sendMessage')
+
+    expect(js).toContain('function isGreetingOnly(text)')
+    expect(sendMessageSource).toContain('if (isGreetingOnly(text))')
+    expect(sendMessageSource).toContain('Chào bạn! Mình có thể hỗ trợ gì cho tài liệu này?')
+    expect(sendMessageSource.indexOf('if (isGreetingOnly(text))')).toBeLessThan(
+      sendMessageSource.indexOf('getDocumentContextForChat()')
+    )
+  })
+
   it('registers the live Office runtime session with the MiChat bridge', () => {
     const js = taskpaneJs()
 
