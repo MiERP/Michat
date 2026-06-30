@@ -492,7 +492,7 @@ export class OfficeBridgeService {
         source: 'selection',
         selectedText,
         instruction:
-          'The user selected text in Word. Treat selectedText as the only target text for this request.',
+          'This is the only Office document evidence for this request. The user selected text in Word. Treat selectedText as the only target text for this request.',
         metadata: { selectedCharCount: selectedText.length }
       }).slice(0, 16000)
     }
@@ -506,7 +506,7 @@ export class OfficeBridgeService {
       source: context.source,
       content,
       instruction:
-        'No Word selection was provided. Use document content only as background context.',
+        'This is the only Office document evidence for this request. No Word selection was provided. Use content, outline, and paragraphs as document evidence. Do not treat skill instructions as document evidence.',
       metadata,
       outline,
       paragraphs,

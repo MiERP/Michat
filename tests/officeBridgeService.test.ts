@@ -144,9 +144,26 @@ describe('OfficeBridgeService', () => {
     })
 
     expect(formatted).toContain('selected clause')
+    expect(formatted).toContain('only Office document evidence')
     expect(formatted).not.toContain('FULL DOCUMENT SHOULD NOT LEAK')
     expect(formatted).not.toContain('paragraphs')
     expect(formatted).not.toContain('outline')
+  })
+
+  it('marks full Word context as the only document evidence', () => {
+    bridge = new OfficeBridgeService()
+
+    const formatted = (bridge as any).formatDocumentContext({
+      mode: 'document',
+      source: 'document',
+      content: 'Điều 1. Phạm vi điều chỉnh',
+      paragraphs: [{ text: 'Điều 2. Giải thích từ ngữ' }],
+      outline: [{ text: 'Chương I' }]
+    })
+
+    expect(formatted).toContain('only Office document evidence')
+    expect(formatted).toContain('Do not treat skill instructions as document evidence')
+    expect(formatted).toContain('Điều 1. Phạm vi điều chỉnh')
   })
 
   it('builds short Office output budgets for fast paths', () => {
