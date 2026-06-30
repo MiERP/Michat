@@ -28,6 +28,35 @@ describe('OfficeSkillService', () => {
     ).toEqual(['docx', 'doc-coauthoring', 'internal-comms'])
   })
 
+  it('requires all Word skills for non-greeting Word chat', () => {
+    const service = new OfficeSkillService()
+
+    expect(
+      service.selectSkillNames({
+        host: 'word',
+        userText: 'Tóm tắt tài liệu này'
+      })
+    ).toEqual(['docx', 'doc-coauthoring', 'internal-comms'])
+  })
+
+  it('requires only the Excel skill for non-greeting Excel chat', () => {
+    const service = new OfficeSkillService()
+
+    expect(
+      service.selectSkillNames({
+        host: 'excel',
+        userText: 'Phân tích bảng này'
+      })
+    ).toEqual(['xlsx'])
+  })
+
+  it('does not inject Office skills for simple greetings', () => {
+    const service = new OfficeSkillService()
+
+    expect(service.selectSkillNames({ host: 'word', userText: 'Chào bạn' })).toEqual([])
+    expect(service.selectSkillNames({ host: 'excel', userText: 'hello' })).toEqual([])
+  })
+
   it('routes Excel and file-type requests to spreadsheet and file skills', () => {
     const service = new OfficeSkillService()
 

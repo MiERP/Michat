@@ -40,6 +40,8 @@ const ALLOWED_SKILLS: OfficeSkillName[] = [
 
 const DEFAULT_MAX_CHARS_PER_SKILL = 9000
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
+const WORD_REQUIRED_SKILLS: OfficeSkillName[] = ['docx', 'doc-coauthoring', 'internal-comms']
+const EXCEL_REQUIRED_SKILLS: OfficeSkillName[] = ['xlsx']
 
 export class OfficeSkillService {
   private rootDir: string
@@ -66,11 +68,14 @@ export class OfficeSkillService {
       [request.userText, request.documentTitle, this.contextText(request.documentContext)].join(' ')
     )
 
+    if (this.isGreetingOnly(text)) return []
+
     if (request.host === 'word') {
-      selected.add('docx')
-      selected.add('doc-coauthoring')
+      for (const skillName of WORD_REQUIRED_SKILLS) selected.add(skillName)
     }
-    if (request.host === 'excel') selected.add('xlsx')
+    if (request.host === 'excel') {
+      for (const skillName of EXCEL_REQUIRED_SKILLS) selected.add(skillName)
+    }
 
     for (const skillName of this.parseRequestedSkills(request.requestedSkills)) {
       selected.add(skillName)
@@ -219,6 +224,12 @@ export class OfficeSkillService {
 
   private hasAny(text: string, needles: string[]): boolean {
     return needles.some((needle) => text.includes(needle))
+  }
+
+  private isGreetingOnly(text: string): boolean {
+    return /^(hi|hello|hey|chao|chao ban|xin chao|xin chao ban|chào|chào bạn|alo|hello michat|hi michat)[!. ]*$/.test(
+      text
+    )
   }
 
   private clampMaxChars(value: unknown): number {
