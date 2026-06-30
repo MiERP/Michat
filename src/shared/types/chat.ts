@@ -53,12 +53,11 @@ export interface ChatMessage extends Omit<DBChatMessage, 'metadata' | 'reasoning
 
 /**
  * API 消息格式（用于与 LLM Provider 通信）
- * 这是简化版本，只包含 API 需要的字段
  */
 export interface APIMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
-  reasoning_content?: string // DeepSeek Reasoner 特有字段
+  reasoning_content?: string
 }
 
 /**
@@ -66,9 +65,9 @@ export interface APIMessage {
  */
 export interface StreamChunk {
   content: string
-  reasoningContent?: string // DeepSeek Reasoner 推理过程内容
+  reasoningContent?: string
   done: boolean
-  reasoningDone?: boolean // 推理过程是否完成
+  reasoningDone?: boolean
   metadata?: {
     model?: string
     finishReason?: string
@@ -78,10 +77,15 @@ export interface StreamChunk {
       totalTokens?: number
     }
     citations?: ChatCitation[]
-    // 推理相关元数据（AI SDK v5 推理流式传输）
-    isReasoning?: boolean // 当前内容是否为推理过程
-    reasoningStart?: boolean // 推理块开始标记
-    reasoningEnd?: boolean // 推理块结束标记
-    reasoningId?: string // 推理块 ID
+    isReasoning?: boolean
+    reasoningStart?: boolean
+    reasoningEnd?: boolean
+    reasoningId?: string
+    toolCallStart?: boolean
+    toolCallId?: string
+    toolCallName?: string
+    toolCallArgs?: string | Record<string, unknown>
+    toolResult?: boolean
+    toolCallResult?: string
   }
 }

@@ -4,6 +4,7 @@
  */
 
 import type { APIMessage, StreamChunk } from '../../shared/types/chat'
+import type { ToolDefinition } from '../../shared/types/tool'
 
 // ==================== 导出共享类型 ====================
 export type { APIMessage as ChatMessage, StreamChunk }
@@ -87,7 +88,8 @@ export interface LLMProvider {
     messages: APIMessage[],
     onChunk: (chunk: StreamChunk) => void,
     onError: (error: Error) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    tools?: ToolDefinition[]
   ): Promise<AbortController>
   validateConfig?(config: any): Promise<boolean>
   supportsEmbedding?(): boolean

@@ -161,6 +161,15 @@ const api = {
   // Check if API key encryption is available
   checkEncryption: (): Promise<{ encrypted: boolean }> => ipcRenderer.invoke('check-encryption'),
 
+  // Office Integration
+  office: {
+    getStatus: () => ipcRenderer.invoke('office:get-status'),
+    getSettings: () => ipcRenderer.invoke('office:get-settings'),
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke('office:set-enabled', enabled),
+    openManifestFolder: () => ipcRenderer.invoke('office:open-manifest-folder'),
+    installManifests: () => ipcRenderer.invoke('office:install-manifests')
+  },
+
   // Llama model management
   llama: {
     listModels: () => ipcRenderer.invoke('llama:list-models'),

@@ -22,6 +22,7 @@ export const defaultSettings: AppSettings = {
   ragSkipShortQueryLength: 12,
   ragEnableChitChatHeuristic: true,
   allowRemoteProviders: false,
+  officeIntegrationEnabled: false,
   prompts: {
     mindMap: {
       'vi-VN': `Bạn là MiMi chuyên gia phân tích cấu trúc tri thức, chịu trách nhiệm trích xuất cấu trúc kiến thức cốt lõi từ nội dung sổ ghi chú.

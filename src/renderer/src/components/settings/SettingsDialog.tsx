@@ -1,4 +1,4 @@
-import { Globe, Database, HelpCircle, MessageSquare, Keyboard } from 'lucide-react'
+import { Globe, Database, HelpCircle, MessageSquare, Keyboard, Monitor } from 'lucide-react'
 import { useState, useEffect, useMemo, ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import GeneralSettings from './GeneralSettings'
@@ -7,6 +7,7 @@ import ProvidersSettings from './ProvidersSettings'
 import PromptsSettings from './PromptsSettings'
 import ShortcutSettings from './ShortcutSettings'
 import AboutSettings from './AboutSettings'
+import OfficeIntegrationSettings from './OfficeIntegrationSettings'
 import SettingsContentPanel from './SettingsContentPanel'
 import { Dialog, DialogContent } from '../ui/dialog'
 import {
@@ -34,6 +35,7 @@ export default function SettingsDialog(): ReactElement {
   const [pendingSettings, setPendingSettings] = useState<AppSettings | null>(null)
   const [originalProviders, setOriginalProviders] = useState<ProviderConfig[]>([])
   const [pendingProviders, setPendingProviders] = useState<ProviderConfig[]>([])
+  const [officeStatusRefreshKey, setOfficeStatusRefreshKey] = useState(0)
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -96,6 +98,13 @@ export default function SettingsDialog(): ReactElement {
       description: t('shortcutsDesc')
     },
     {
+      id: 'office',
+      icon: Monitor,
+      label: 'Office',
+      title: 'Office Integration',
+      description: 'MiChat AI assistant for Microsoft Word and Excel'
+    },
+    {
       id: 'about',
       icon: HelpCircle,
       label: t('about'),
@@ -128,6 +137,10 @@ export default function SettingsDialog(): ReactElement {
     // 保存通用设置
     if (pendingSettings) {
       await window.api.settings.update(pendingSettings)
+      if (originalSettings?.officeIntegrationEnabled !== pendingSettings.officeIntegrationEnabled) {
+        await window.api.office.setEnabled(pendingSettings.officeIntegrationEnabled === true)
+        setOfficeStatusRefreshKey((key) => key + 1)
+      }
       setOriginalSettings(pendingSettings)
     }
 
@@ -226,6 +239,13 @@ export default function SettingsDialog(): ReactElement {
                     <PromptsSettings
                       settings={pendingSettings}
                       onSettingsChange={updatePendingSettings}
+                    />
+                  )}
+                  {activeSection === 'office' && (
+                    <OfficeIntegrationSettings
+                      settings={pendingSettings!}
+                      onSettingsChange={updatePendingSettings}
+                      refreshKey={officeStatusRefreshKey}
                     />
                   )}
                   {activeSection === 'shortcuts' && <ShortcutSettings />}

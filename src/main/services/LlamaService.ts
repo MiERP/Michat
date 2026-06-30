@@ -49,6 +49,31 @@ function inferModelTypeFromFilename(filename: string): 'chat' | 'embedding' | 'u
   return 'unknown'
 }
 
+function detectModelContextWindow(filename: string): number | null {
+  const id = filename.toLowerCase()
+
+  if (id.includes('gemma-4')) {
+    if (id.includes('e2b') || id.includes('e4b')) {
+      return 131072
+    }
+    return 262144
+  }
+  if (id.includes('qwen3.5')) {
+    return 262144
+  }
+  if (id.includes('qwen3')) {
+    return 32768
+  }
+  if (id.includes('mixtral') || id.includes('mistral')) {
+    return 32768
+  }
+  if (id.includes('llama-4')) {
+    return 262144
+  }
+
+  return null
+}
+
 export type MachineInfo = {
   cpuCores: number
   cpuThreads: number
@@ -234,9 +259,20 @@ export class LlamaService {
 
     const useGpu = (info.gpuVendor === 'NVIDIA' || info.gpuVendor === 'AMD') && info.hasDGPU
 
+    const modelContext = this.getDetectedModelContext()
+
+    let chatCtxSize: number
+    if (modelContext && !isLowSpec) {
+      chatCtxSize = Math.min(modelContext, isMidSpec ? 16384 : 131072)
+    } else if (modelContext && isLowSpec) {
+      chatCtxSize = Math.min(modelContext, 8192)
+    } else {
+      chatCtxSize = isLowSpec ? 2048 : isMidSpec ? 4096 : 8192
+    }
+
     const profile: RuntimeProfile = {
       backend,
-      chatCtxSize: isLowSpec ? 2048 : isMidSpec ? 4096 : 8192,
+      chatCtxSize,
       embeddingCtxSize: 1024,
       threads,
       batchSize: isLowSpec ? 128 : 512,
@@ -251,6 +287,19 @@ export class LlamaService {
     )
 
     return profile
+  }
+
+  private getDetectedModelContext(): number | null {
+    const modelsDir = this.getModelsDir()
+    if (!modelsDir) return null
+
+    try {
+      const chatModel = this.getDefaultModelFile('chat')
+      if (!chatModel) return null
+      return detectModelContextWindow(chatModel)
+    } catch {
+      return null
+    }
   }
 
   /**

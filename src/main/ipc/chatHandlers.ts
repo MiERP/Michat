@@ -6,6 +6,7 @@ import { SessionAutoSwitchService } from '../services/SessionAutoSwitchService'
 import { KnowledgeService } from '../services/KnowledgeService'
 import { LlamaService } from '../services/LlamaService'
 import { LicenseService } from '../services/LicenseService'
+import { ToolRegistry } from '../services/ToolRegistry'
 import { validateAndCleanMessages } from '../utils/messageValidator'
 import { settingsManager } from '../config'
 import type { ChatCitation, ChatMessageMetadata } from '../../shared/types/chat'
@@ -198,7 +199,8 @@ export function registerChatHandlers(
   providerManager: ProviderManager,
   sessionAutoSwitchService: SessionAutoSwitchService,
   knowledgeService: KnowledgeService,
-  llamaService: LlamaService
+  llamaService: LlamaService,
+  toolRegistry?: ToolRegistry
 ) {
   // ==================== Chat Session ====================
   ipcMain.handle(
@@ -421,6 +423,10 @@ export function registerChatHandlers(
         }
       }
 
+      const activeTools = toolRegistry?.hasTools()
+        ? toolRegistry.getDefinitions()
+        : undefined
+
       let fullTextContent = ''
       let fullReasoningContent = ''
       let usageMetadata: any = null
@@ -428,12 +434,25 @@ export function registerChatHandlers(
       // ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â°Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ Provider ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã‚Â¸ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â,ÃƒÆ’Ã‚Â¨Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â·ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ AbortControllerÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚ÂºÃƒâ€¦Ã‚Â½ AI SDK fullStreamÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°
       const abortController = await provider.sendMessageStream(
         messages,
-        // onChunk - ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬  AI SDK fullStream ÃƒÆ’Ã‚Â§Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â part ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â±Ãƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹
         (chunk) => {
           const { metadata, content, done } = chunk
 
-          // 1. ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹
-          if (metadata?.reasoningStart) {
+          if (metadata?.toolCallStart) {
+            event.sender.send('message-chunk', {
+              messageId: assistantMessage.id,
+              type: 'tool-call-start',
+              toolCallId: metadata.toolCallId,
+              toolCallName: metadata.toolCallName
+            })
+          } else if (metadata?.toolResult) {
+            event.sender.send('message-chunk', {
+              messageId: assistantMessage.id,
+              type: 'tool-result',
+              toolCallId: metadata.toolCallId,
+              toolCallName: metadata.toolCallName,
+              result: metadata.toolCallResult
+            })
+          } else if (metadata?.reasoningStart) {
             event.sender.send('message-chunk', {
               messageId: assistantMessage.id,
               type: 'reasoning-start',
@@ -546,10 +565,10 @@ export function registerChatHandlers(
           } finally {
             cleanupStream(assistantMessage.id)
           }
-        }
+        },
+        activeTools
       )
 
-      // BUG-05 Fix: Track stream with timestamp for stale cleanup
       trackStream(assistantMessage.id, abortController)
 
       return assistantMessage.id

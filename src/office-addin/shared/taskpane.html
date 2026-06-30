@@ -1,0 +1,165 @@
+﻿<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' 'unsafe-inline' https://localhost:18327 https://appsforoffice.microsoft.com; connect-src https://localhost:18327; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MiChat AI</title>
+    <link rel="stylesheet" href="/shared/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <div class="status-bar">
+          <span id="status-indicator" class="status-dot disconnected"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+        <div class="model-badge" id="model-badge">Michat</div>
+      </header>
+
+      <main class="content">
+        <div id="connection-view" class="view">
+          <div class="connection-card">
+            <div class="logo">MiChat</div>
+            <h2>Office Add-in</h2>
+            <p id="bridge-status" class="bridge-status">Checking connection...</p>
+            <div id="document-info" class="doc-info hidden">
+              <p><strong>Host:</strong> <span id="doc-host">-</span></p>
+              <p><strong>Version:</strong> 0.1.0</p>
+            </div>
+            <button id="btn-read" class="btn btn-primary hidden" onclick="readDocument()">
+              Read Selection
+            </button>
+          </div>
+        </div>
+
+        <div id="chat-view" class="view active">
+          <div class="chat-tabs">
+            <button
+              class="chat-tab active"
+              data-tab="chat-messages"
+              onclick="showChatTab('chat-messages')"
+            >
+              Trò chuyện
+            </button>
+            <button
+              class="chat-tab"
+              data-tab="quick-actions"
+              onclick="showChatTab('quick-actions')"
+            >
+              Tác vụ
+            </button>
+          </div>
+
+          <div id="chat-messages" class="chat-panel active">
+            <div id="message-list" class="message-list"></div>
+            <div class="context-badge" id="context-badge">Context: None</div>
+            <div class="skill-badge" id="skill-badge">Skills: None</div>
+            <div class="input-area">
+              <div class="composer">
+                <textarea
+                  id="chat-input"
+                  placeholder="Ask MiChat about your document..."
+                  rows="2"
+                ></textarea>
+                <div class="composer-actions">
+                  <button
+                    id="btn-read-inline"
+                    class="composer-icon-btn"
+                    onclick="readDocument()"
+                    title="Read selection/document"
+                  >
+                    &#128203;
+                  </button>
+                  <button id="btn-send" class="send-btn" onclick="sendMessage()" title="Send">
+                    &#9658;
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="quick-actions" class="chat-panel">
+            <p class="section-label" id="action-guide">
+              Bôi đen nội dung trong Office, rồi chọn tác vụ cần làm.
+            </p>
+            <div id="word-actions" class="action-grid host-actions">
+              <button class="action-btn" onclick="runQuickAction('summarize')">
+                <span class="action-icon">&#9436;</span>
+                <span class="action-label">Tóm tắt</span>
+                <span class="action-help">Rút gọn nội dung chính của đoạn đã chọn.</span>
+              </button>
+              <button class="action-btn" onclick="runQuickAction('rewrite')">
+                <span class="action-icon">&#9998;</span>
+                <span class="action-label">Viết lại</span>
+                <span class="action-help">Diễn đạt lại rõ ràng, tự nhiên hơn.</span>
+              </button>
+              <button class="action-btn" onclick="runQuickAction('polish')">
+                <span class="action-icon">&#10003;</span>
+                <span class="action-label">Chỉnh văn phong</span>
+                <span class="action-help">Sửa lỗi, làm câu chữ mượt và chuyên nghiệp.</span>
+              </button>
+              <button class="action-btn" onclick="showTranslateMenu()">
+                <span class="action-icon">&#127758;</span>
+                <span class="action-label">Dịch</span>
+                <span class="action-help">Chọn ngôn ngữ dịch cho đoạn đã bôi đen.</span>
+              </button>
+            </div>
+            <div id="excel-actions" class="action-grid host-actions hidden">
+              <button class="action-btn" onclick="runQuickAction('formula')">
+                <span class="action-icon">&#402;</span>
+                <span class="action-label">Tạo công thức</span>
+                <span class="action-help">Đề xuất công thức Excel cho vùng chọn.</span>
+              </button>
+              <button class="action-btn" onclick="runQuickAction('fill_data')">
+                <span class="action-icon">&#9998;</span>
+                <span class="action-label">Điền dữ liệu</span>
+                <span class="action-help">Tạo dữ liệu dạng bảng để ghi vào ô.</span>
+              </button>
+              <button class="action-btn" onclick="runQuickAction('analyze_table')">
+                <span class="action-icon">&#128202;</span>
+                <span class="action-label">Phân tích bảng</span>
+                <span class="action-help">Tóm tắt xu hướng và điểm bất thường.</span>
+              </button>
+              <button class="action-btn" onclick="runQuickAction('clean_data')">
+                <span class="action-icon">&#10003;</span>
+                <span class="action-label">Làm sạch dữ liệu</span>
+                <span class="action-help">Chuẩn hóa dữ liệu và phát hiện lỗi.</span>
+              </button>
+            </div>
+            <div id="translate-menu" class="translate-menu hidden">
+              <button class="translate-option" onclick="runQuickAction('translate_vi')">
+                &#127475;&#127473; Tiếng Việt
+              </button>
+              <button class="translate-option" onclick="runQuickAction('translate_en')">
+                &#127468;&#127463; Tiếng Anh
+              </button>
+              <button class="translate-option" onclick="runQuickAction('translate_ja')">
+                &#127471;&#127477; Tiếng Nhật
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <div id="confirm-dialog" class="confirm-overlay hidden">
+        <div class="confirm-box">
+          <p class="confirm-title">Apply to Document?</p>
+          <p class="confirm-text" id="confirm-text">This will modify your document.</p>
+          <div class="confirm-actions">
+            <button class="btn btn-secondary" onclick="cancelWrite()">Cancel</button>
+            <button class="btn btn-primary" id="confirm-apply-btn" onclick="confirmWrite()">
+              Apply
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="/shared/taskpane.js"></script>
+  </body>
+</html>

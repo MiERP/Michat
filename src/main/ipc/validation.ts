@@ -35,6 +35,7 @@ const appSettingsUpdateSchema = z
     ragSkipShortQueryLength: z.number().int().min(0).max(200).optional(),
     ragEnableChitChatHeuristic: z.boolean().optional(),
     allowRemoteProviders: z.boolean().optional(),
+    officeIntegrationEnabled: z.boolean().optional(),
     prompts: promptsSchema.optional()
   })
   .strict()
@@ -55,6 +56,7 @@ const settingValueSchemas = {
   ragSkipShortQueryLength: appSettingsUpdateSchema.shape.ragSkipShortQueryLength.unwrap(),
   ragEnableChitChatHeuristic: appSettingsUpdateSchema.shape.ragEnableChitChatHeuristic.unwrap(),
   allowRemoteProviders: appSettingsUpdateSchema.shape.allowRemoteProviders.unwrap(),
+  officeIntegrationEnabled: appSettingsUpdateSchema.shape.officeIntegrationEnabled.unwrap(),
   prompts: appSettingsUpdateSchema.shape.prompts.unwrap()
 }
 

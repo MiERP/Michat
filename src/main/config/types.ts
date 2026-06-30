@@ -19,5 +19,4 @@ export interface StoreSchema {
   shortcuts: ShortcutConfig[]
 }
 
-// 重新导出 AppSettings 以保持向后兼容
 export type { AppSettings }

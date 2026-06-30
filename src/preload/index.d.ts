@@ -282,6 +282,22 @@ declare global {
         ) => Promise<{ success: boolean; outputPath?: string; error?: string }>
       }
 
+      // Office Integration
+      office: {
+        getStatus: () => Promise<{ running: boolean; port: number; address: string }>
+        getSettings: () => Promise<{ enabled: boolean }>
+        setEnabled: (enabled: boolean) => Promise<{ success: boolean }>
+        openManifestFolder: () => Promise<{ success: boolean; error?: string }>
+        installManifests: () => Promise<{
+          success: boolean
+          path?: string
+          catalogPath?: string
+          manifests?: Array<{ host: 'word' | 'excel'; sourcePath: string; installedPath: string }>
+          warnings?: string[]
+          error?: string
+        }>
+      }
+
       // Llama model management
       llama: {
         listModels: () => Promise<

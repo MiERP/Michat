@@ -7,6 +7,11 @@
   "bge-m3-q4_k_m.gguf": {
     "filename": "bge-m3-q4_k_m.gguf",
     "type": "embedding",
-    "addedAt": "2026-04-16T06:38:37.925Z"
+    "addedAt": "2026-06-22T12:37:09.678Z"
+  },
+  "gemma-4-E2B-it-Q4_K_M.gguf": {
+    "filename": "gemma-4-E2B-it-Q4_K_M.gguf",
+    "type": "chat",
+    "addedAt": "2026-06-22T12:37:02.390Z"
   }
 }

@@ -4,7 +4,9 @@ import { ProviderSchemas, SettingsSchemas } from '../src/main/ipc/validation'
 describe('ipc validation schemas', () => {
   it('accepts known settings keys with correctly typed values', () => {
     expect(SettingsSchemas.set.parse({ key: 'language', value: 'vi-VN' }).key).toBe('language')
+    expect(SettingsSchemas.set.parse({ key: 'officeIntegrationEnabled', value: true }).value).toBe(true)
     expect(SettingsSchemas.update.parse({ updates: { allowRemoteProviders: false, ragTopK: 5 } }).updates.ragTopK).toBe(5)
+    expect(SettingsSchemas.update.parse({ updates: { officeIntegrationEnabled: true } }).updates.officeIntegrationEnabled).toBe(true)
   })
 
   it('rejects unknown settings keys and invalid values', () => {

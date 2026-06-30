@@ -15,6 +15,7 @@ import type { BaseProvider, LLMProviderConfig } from '../capabilities/BaseProvid
 import type { ChatCapability } from '../capabilities/ChatCapability'
 import type { EmbeddingCapability } from '../capabilities/EmbeddingCapability'
 import type { APIMessage, StreamChunk } from '../../../shared/types/chat'
+import type { ToolDefinition } from '../../../shared/types/tool'
 import type { EmbeddingConfig, EmbeddingResult } from '../capabilities/EmbeddingCapability'
 import type { ProviderDescriptor } from '../registry/ProviderDescriptor'
 import Logger from '../../../shared/utils/logger'
@@ -206,7 +207,8 @@ export class AISDKProvider implements BaseProvider {
     messages: APIMessage[],
     onChunk: (chunk: StreamChunk) => void,
     onError: (error: Error) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    tools?: ToolDefinition[]
   ): Promise<AbortController> {
     if (!this.aiProvider) {
       const error = new Error(
@@ -243,12 +245,26 @@ export class AISDKProvider implements BaseProvider {
         const model = this.aiProvider!(modelId) as any
 
         // ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â°Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ AI SDK streamText
+        const toolsConfig = tools && tools.length > 0
+          ? tools.reduce(
+              (acc: Record<string, any>, t: ToolDefinition) => {
+                acc[t.name] = {
+                  description: t.description,
+                  parameters: t.parameters
+                }
+                return acc
+              },
+              {}
+            )
+          : undefined
+
         const result = streamText({
           model,
           messages: coreMessages,
           temperature: this.config.temperature,
           maxOutputTokens: this.config.maxTokens,
-          abortSignal: abortController.signal
+          abortSignal: abortController.signal,
+          ...(toolsConfig ? { tools: toolsConfig } : {})
         })
 
         // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂºÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
@@ -272,9 +288,38 @@ export class AISDKProvider implements BaseProvider {
 
           // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â±Ãƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â§Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â©Ãƒâ€ Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬
           switch (part.type) {
+            case 'tool-call': {
+              const tc = part as any
+              onChunk({
+                content: '',
+                done: false,
+                metadata: {
+                  toolCallStart: true,
+                  toolCallId: tc.toolCallId,
+                  toolCallName: tc.toolName,
+                  toolCallArgs: tc.args
+                }
+              })
+              break
+            }
+
+            case 'tool-result': {
+              const tr = part as any
+              onChunk({
+                content: '',
+                done: false,
+                metadata: {
+                  toolResult: true,
+                  toolCallId: tr.toolCallId,
+                  toolCallName: tr.toolName,
+                  toolCallResult: JSON.stringify(tr.result)
+                }
+              })
+              break
+            }
+
             case 'reasoning-start':
               if (!emitReasoningChunks) break
-              // ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹
               onChunk({
                 content: '',
                 done: false,

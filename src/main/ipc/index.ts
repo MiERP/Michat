@@ -6,6 +6,7 @@ import { MindMapService } from '../services/MindMapService'
 import { QuizService } from '../services/QuizService'
 import { ShortcutManager } from '../services/ShortcutManager'
 import { LlamaService } from '../services/LlamaService'
+import { ToolRegistry } from '../services/ToolRegistry'
 import type Store from 'electron-store'
 import type { StoreSchema } from '../config/types'
 import { registerChatHandlers } from './chatHandlers'
@@ -22,6 +23,8 @@ import { registerShortcutHandlers } from './shortcutHandlers'
 import { registerLlamaHandlers } from './llamaHandlers'
 import { registerLicenseHandlers } from './licenseHandlers'
 import { registerTemplateHandlers } from './templateHandlers'
+import { registerOfficeHandlers } from './officeHandlers'
+import { OfficeBridgeService } from '../services/office/OfficeBridgeService'
 
 /**
  * 注册所有 IPC Handlers
@@ -33,14 +36,21 @@ export function registerAllHandlers(
   updateService: UpdateService,
   shortcutManager: ShortcutManager,
   store: Store<StoreSchema>,
-  llamaService: LlamaService
+  llamaService: LlamaService,
+  officeBridgeService: OfficeBridgeService
 ) {
   // 实例化 MindMapService
   const mindMapService = new MindMapService(providerManager)
-  // 实例化 QuizService
   const quizService = new QuizService(providerManager)
+  const toolRegistry = new ToolRegistry()
 
-  registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
+  registerChatHandlers(
+    providerManager,
+    sessionAutoSwitchService,
+    knowledgeService,
+    llamaService,
+    toolRegistry
+  )
   registerProviderHandlers(providerManager, llamaService)
   registerSettingsHandlers()
   registerNotebookHandlers()
@@ -54,6 +64,7 @@ export function registerAllHandlers(
   registerLlamaHandlers(llamaService)
   registerLicenseHandlers()
   registerTemplateHandlers()
+  registerOfficeHandlers(officeBridgeService)
   console.log('[IPC] All handlers registered')
 }
 

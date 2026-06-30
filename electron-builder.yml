@@ -18,6 +18,8 @@ asarUnpack:
 extraResources:
   - from: resources
     to: .
+  - from: src/office-addin
+    to: office-addin
 win:
   executableName: michat
 nsis:
