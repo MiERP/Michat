@@ -48,6 +48,7 @@ export default function ProcessPanel({
   const [editingTitle, setEditingTitle] = useState('')
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const wasStreamingRef = useRef(false)
   const lastCompositionEndAtRef = useRef(0)
 
   const currentNotebookId = currentSession?.notebookId
@@ -65,11 +66,11 @@ export default function ProcessPanel({
   const canStop = currentSession && isCurrentNotebookStreaming
   const licenseHint = licenseStatus.valid
     ? !licenseChecked
-      ? 'Đang kiểm tra bản quyền...'
+      ? 'Ãƒâ€žÃ‚Âang kiÃƒÂ¡Ã‚Â»Ã†â€™m tra bÃƒÂ¡Ã‚ÂºÃ‚Â£n quyÃƒÂ¡Ã‚Â»Ã‚Ân...'
       : ''
     : licenseStatus.expiresAt
-      ? `Bản quyền đã hết hạn vào ngày ${licenseStatus.expiresAt}.`
-      : 'Bản quyền không hợp lệ hoặc chưa được kích hoạt.'
+      ? `BÃƒÂ¡Ã‚ÂºÃ‚Â£n quyÃƒÂ¡Ã‚Â»Ã‚Ân Ãƒâ€žÃ¢â‚¬ËœÃƒÆ’Ã‚Â£ hÃƒÂ¡Ã‚ÂºÃ‚Â¿t hÃƒÂ¡Ã‚ÂºÃ‚Â¡n vÃƒÆ’Ã‚Â o ngÃƒÆ’Ã‚Â y ${licenseStatus.expiresAt}.`
+      : 'BÃƒÂ¡Ã‚ÂºÃ‚Â£n quyÃƒÂ¡Ã‚Â»Ã‚Ân khÃƒÆ’Ã‚Â´ng hÃƒÂ¡Ã‚Â»Ã‚Â£p lÃƒÂ¡Ã‚Â»Ã¢â‚¬Â¡ hoÃƒÂ¡Ã‚ÂºÃ‚Â·c chÃƒâ€ Ã‚Â°a Ãƒâ€žÃ¢â‚¬ËœÃƒâ€ Ã‚Â°ÃƒÂ¡Ã‚Â»Ã‚Â£c kÃƒÆ’Ã‚Â­ch hoÃƒÂ¡Ã‚ÂºÃ‚Â¡t.'
 
   // Check if there are available providers and get default model
   const checkProvider = async (): Promise<void> => {
@@ -148,20 +149,22 @@ export default function ProcessPanel({
     setInput('')
   }
 
+
+
   const handleStop = async (): Promise<void> => {
     if (!canStop || !currentNotebookId) return
     await abortMessage(currentNotebookId)
   }
 
-  // 使用 ref 存储 handleSend 函数的引用，避免事件监听器频繁重注册
+  // ÃƒÂ¤Ã‚Â½Ã‚Â¿ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ ref ÃƒÂ¥Ã‚Â­Ã‹Å“ÃƒÂ¥Ã¢â‚¬Å¡Ã‚Â¨ handleSend ÃƒÂ¥Ã¢â‚¬Â¡Ã‚Â½ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ÃƒÂ¥Ã‚Â¼Ã¢â‚¬Â¢ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ÃƒÂ¯Ã‚Â¼Ã…â€™ÃƒÂ©Ã‚ÂÃ‚Â¿ÃƒÂ¥Ã¢â‚¬Â¦Ã‚ÂÃƒÂ¤Ã‚ÂºÃ¢â‚¬Â¹ÃƒÂ¤Ã‚Â»Ã‚Â¶ÃƒÂ§Ã¢â‚¬ÂºÃ¢â‚¬ËœÃƒÂ¥Ã‚ÂÃ‚Â¬ÃƒÂ¥Ã¢â€žÂ¢Ã‚Â¨ÃƒÂ©Ã‚Â¢Ã¢â‚¬ËœÃƒÂ§Ã‚Â¹Ã‚ÂÃƒÂ©Ã¢â‚¬Â¡Ã‚ÂÃƒÂ¦Ã‚Â³Ã‚Â¨ÃƒÂ¥Ã¢â‚¬Â Ã…â€™
   const handleSendRef = useRef<() => void>(() => {})
 
-  // 保持 ref 指向最新的 handleSend 函数
+  // ÃƒÂ¤Ã‚Â¿Ã‚ÂÃƒÂ¦Ã…â€™Ã‚Â ref ÃƒÂ¦Ã…â€™Ã¢â‚¬Â¡ÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ¦Ã…â€œÃ¢â€šÂ¬ÃƒÂ¦Ã¢â‚¬â€œÃ‚Â°ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ handleSend ÃƒÂ¥Ã¢â‚¬Â¡Ã‚Â½ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°
   useEffect(() => {
     handleSendRef.current = handleSend
   })
 
-  // 监听发送消息快捷键（只注册一次）
+  // ÃƒÂ§Ã¢â‚¬ÂºÃ¢â‚¬ËœÃƒÂ¥Ã‚ÂÃ‚Â¬ÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ©Ã¢â€šÂ¬Ã‚ÂÃƒÂ¦Ã‚Â¶Ã‹â€ ÃƒÂ¦Ã‚ÂÃ‚Â¯ÃƒÂ¥Ã‚Â¿Ã‚Â«ÃƒÂ¦Ã‚ÂÃ‚Â·ÃƒÂ©Ã¢â‚¬ÂÃ‚Â®ÃƒÂ¯Ã‚Â¼Ã‹â€ ÃƒÂ¥Ã‚ÂÃ‚ÂªÃƒÂ¦Ã‚Â³Ã‚Â¨ÃƒÂ¥Ã¢â‚¬Â Ã…â€™ÃƒÂ¤Ã‚Â¸Ã¢â€šÂ¬ÃƒÂ¦Ã‚Â¬Ã‚Â¡ÃƒÂ¯Ã‚Â¼Ã¢â‚¬Â°
   useEffect(() => {
     const handleSendShortcut = () => {
       handleSendRef.current()
@@ -200,6 +203,13 @@ export default function ProcessPanel({
   useEffect(() => {
     adjustTextareaHeight()
   }, [input])
+
+  useEffect(() => {
+    if (wasStreamingRef.current && !isCurrentNotebookStreaming) {
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+    wasStreamingRef.current = isCurrentNotebookStreaming
+  }, [isCurrentNotebookStreaming])
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     // IME-safe: do not handle Enter while composition is active
@@ -276,7 +286,7 @@ export default function ProcessPanel({
               size="icon"
               className="w-8 h-8 shrink-0"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              title={isLeftCollapsed ? '展开知识库' : '折叠知识库'}
+              title={isLeftCollapsed ? 'ÃƒÂ¥Ã‚Â±Ã¢â‚¬Â¢ÃƒÂ¥Ã‚Â¼Ã¢â€šÂ¬ÃƒÂ§Ã…Â¸Ã‚Â¥ÃƒÂ¨Ã‚Â¯Ã¢â‚¬Â ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“' : 'ÃƒÂ¦Ã…Â Ã‹Å“ÃƒÂ¥Ã‚ÂÃ‚Â ÃƒÂ§Ã…Â¸Ã‚Â¥ÃƒÂ¨Ã‚Â¯Ã¢â‚¬Â ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“'}
             >
               {isLeftCollapsed ? (
                 <PanelLeftOpen className="w-4 h-4" />
@@ -322,7 +332,7 @@ export default function ProcessPanel({
               size="icon"
               className="w-8 h-8 shrink-0"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              title={isRightCollapsed ? '展开笔记' : '折叠笔记'}
+              title={isRightCollapsed ? 'ÃƒÂ¥Ã‚Â±Ã¢â‚¬Â¢ÃƒÂ¥Ã‚Â¼Ã¢â€šÂ¬ÃƒÂ§Ã‚Â¬Ã¢â‚¬ÂÃƒÂ¨Ã‚Â®Ã‚Â°' : 'ÃƒÂ¦Ã…Â Ã‹Å“ÃƒÂ¥Ã‚ÂÃ‚Â ÃƒÂ§Ã‚Â¬Ã¢â‚¬ÂÃƒÂ¨Ã‚Â®Ã‚Â°'}
             >
               {isRightCollapsed ? (
                 <PanelRightOpen className="w-4 h-4" />
@@ -334,12 +344,12 @@ export default function ProcessPanel({
         }
       />
 
-      {/* 对话消息区域 - 使用 absolute 定位占满剩余空间 */}
+      {/* ÃƒÂ¥Ã‚Â¯Ã‚Â¹ÃƒÂ¨Ã‚Â¯Ã‚ÂÃƒÂ¦Ã‚Â¶Ã‹â€ ÃƒÂ¦Ã‚ÂÃ‚Â¯ÃƒÂ¥Ã…â€™Ã‚ÂºÃƒÂ¥Ã…Â¸Ã…Â¸ - ÃƒÂ¤Ã‚Â½Ã‚Â¿ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ absolute ÃƒÂ¥Ã‚Â®Ã…Â¡ÃƒÂ¤Ã‚Â½Ã‚ÂÃƒÂ¥Ã‚ÂÃ‚Â ÃƒÂ¦Ã‚Â»Ã‚Â¡ÃƒÂ¥Ã¢â‚¬Â°Ã‚Â©ÃƒÂ¤Ã‚Â½Ã¢â€žÂ¢ÃƒÂ§Ã‚Â©Ã‚ÂºÃƒÂ©Ã¢â‚¬â€Ã‚Â´ */}
       <div className="absolute top-14 bottom-0 left-0 right-0 overflow-hidden">
         <MessageList messages={messages} />
       </div>
 
-      {/* 底部渐变遮罩 - 独立于消息区域，避免堆叠上下文问题 */}
+      {/* ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Â¢ÃƒÂ©Ã†â€™Ã‚Â¨ÃƒÂ¦Ã‚Â¸Ã‚ÂÃƒÂ¥Ã‚ÂÃ‹Å“ÃƒÂ©Ã‚ÂÃ‚Â®ÃƒÂ§Ã‚Â½Ã‚Â© - ÃƒÂ§Ã¢â‚¬Â¹Ã‚Â¬ÃƒÂ§Ã‚Â«Ã¢â‚¬Â¹ÃƒÂ¤Ã‚ÂºÃ…Â½ÃƒÂ¦Ã‚Â¶Ã‹â€ ÃƒÂ¦Ã‚ÂÃ‚Â¯ÃƒÂ¥Ã…â€™Ã‚ÂºÃƒÂ¥Ã…Â¸Ã…Â¸ÃƒÂ¯Ã‚Â¼Ã…â€™ÃƒÂ©Ã‚ÂÃ‚Â¿ÃƒÂ¥Ã¢â‚¬Â¦Ã‚ÂÃƒÂ¥Ã‚Â Ã¢â‚¬Â ÃƒÂ¥Ã‚ÂÃ‚Â ÃƒÂ¤Ã‚Â¸Ã…Â ÃƒÂ¤Ã‚Â¸Ã¢â‚¬Â¹ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ©Ã¢â‚¬â€Ã‚Â®ÃƒÂ©Ã‚Â¢Ã‹Å“ */}
       <div
         className="absolute bottom-0 left-0 right-0 h-48 pointer-events-none rounded-b-xl z-10"
         style={{
@@ -348,10 +358,9 @@ export default function ProcessPanel({
         }}
       />
 
-      {/* 底部输入区域 - 绝对定位浮动在底部 */}
+      {/* ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Â¢ÃƒÂ©Ã†â€™Ã‚Â¨ÃƒÂ¨Ã‚Â¾Ã¢â‚¬Å“ÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â¥ÃƒÂ¥Ã…â€™Ã‚ÂºÃƒÂ¥Ã…Â¸Ã…Â¸ - ÃƒÂ§Ã‚Â»Ã‚ÂÃƒÂ¥Ã‚Â¯Ã‚Â¹ÃƒÂ¥Ã‚Â®Ã…Â¡ÃƒÂ¤Ã‚Â½Ã‚ÂÃƒÂ¦Ã‚ÂµÃ‚Â®ÃƒÂ¥Ã…Â Ã‚Â¨ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Â¢ÃƒÂ©Ã†â€™Ã‚Â¨ */}
       <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none shrink-0 z-20">
         <div className="relative bg-muted/95 backdrop-blur-md rounded-lg border border-border focus-within:ring-2 focus-within:ring-ring shadow-lg pointer-events-auto">
-          {/* 多行输入框 */}
           <Textarea
             ref={textareaRef}
             value={input}
@@ -366,7 +375,7 @@ export default function ProcessPanel({
               !currentSession
                 ? t('selectSession')
                 : !licenseChecked
-                  ? 'Đang kiểm tra bản quyền...'
+                  ? 'Ãƒâ€žÃ‚Âang kiÃƒÂ¡Ã‚Â»Ã†â€™m tra bÃƒÂ¡Ã‚ÂºÃ‚Â£n quyÃƒÂ¡Ã‚Â»Ã‚Ân...'
                 : !licenseStatus.valid
                   ? licenseHint
                 : !hasProvider
@@ -387,13 +396,13 @@ export default function ProcessPanel({
             className="w-full bg-transparent border-0 pl-4 pr-14 py-3 text-sm text-foreground placeholder-muted-foreground resize-none focus-visible:ring-0 focus-visible:ring-offset-0 overflow-y-auto min-h-[84px] max-h-[280px]"
           />
 
-          {/* 发送/停止按钮 - 动态切换 */}
+          {/* ÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ©Ã¢â€šÂ¬Ã‚Â/ÃƒÂ¥Ã‚ÂÃ…â€œÃƒÂ¦Ã‚Â­Ã‚Â¢ÃƒÂ¦Ã…â€™Ã¢â‚¬Â°ÃƒÂ©Ã¢â‚¬â„¢Ã‚Â® - ÃƒÂ¥Ã…Â Ã‚Â¨ÃƒÂ¦Ã¢â€šÂ¬Ã‚ÂÃƒÂ¥Ã‹â€ Ã¢â‚¬Â¡ÃƒÂ¦Ã‚ÂÃ‚Â¢ */}
           {isCurrentNotebookStreaming ? (
-            // 停止按钮
+            // ÃƒÂ¥Ã‚ÂÃ…â€œÃƒÂ¦Ã‚Â­Ã‚Â¢ÃƒÂ¦Ã…â€™Ã¢â‚¬Â°ÃƒÂ©Ã¢â‚¬â„¢Ã‚Â®
             <Button
               onClick={handleStop}
               disabled={!canStop}
-              title="停止生成"
+              title="ÃƒÂ¥Ã‚ÂÃ…â€œÃƒÂ¦Ã‚Â­Ã‚Â¢ÃƒÂ§Ã¢â‚¬ÂÃ…Â¸ÃƒÂ¦Ã‹â€ Ã‚Â"
               variant="destructive"
               size="icon"
               className="absolute right-2 bottom-3 w-8 h-8 rounded-full"
@@ -401,13 +410,13 @@ export default function ProcessPanel({
               <StopCircle className="w-4 h-4" />
             </Button>
           ) : (
-            // 发送按钮
+            // ÃƒÂ¥Ã‚ÂÃ¢â‚¬ËœÃƒÂ©Ã¢â€šÂ¬Ã‚ÂÃƒÂ¦Ã…â€™Ã¢â‚¬Â°ÃƒÂ©Ã¢â‚¬â„¢Ã‚Â®
             <Button
               onClick={handleSend}
               disabled={!canSend}
               title={
                 !licenseChecked
-                  ? 'Đang kiểm tra bản quyền...'
+                  ? 'Ãƒâ€žÃ‚Âang kiÃƒÂ¡Ã‚Â»Ã†â€™m tra bÃƒÂ¡Ã‚ÂºÃ‚Â£n quyÃƒÂ¡Ã‚Â»Ã‚Ân...'
                   : !licenseStatus.valid
                   ? licenseHint
                   : !hasProvider
@@ -427,3 +436,4 @@ export default function ProcessPanel({
     </Card>
   )
 }
+

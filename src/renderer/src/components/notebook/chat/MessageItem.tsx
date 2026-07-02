@@ -324,7 +324,7 @@ export default function MessageItem({ message }: MessageItemProps): ReactElement
   )
 }
 
-function linkifyCitationMarkers(content: string, citations: ChatCitation[]): string {
+export function linkifyCitationMarkers(content: string, citations: ChatCitation[]): string {
   if (!content || citations.length === 0) return content
 
   const validIndexes = new Set(citations.map((citation) => citation.index))
@@ -342,11 +342,11 @@ function linkifyCitationMarkers(content: string, citations: ChatCitation[]): str
     .join('')
 }
 
-function ensureInlineCitationPlacement(content: string, citations: ChatCitation[]): string {
+export function ensureInlineCitationPlacement(content: string, citations: ChatCitation[]): string {
   if (!content || citations.length === 0) return content
 
-  const cleaned = removeCitationBoilerplateLines(content)
   const validIndexes = new Set(citations.map((citation) => citation.index))
+  const cleaned = stripInvalidCitationMarkers(removeCitationBoilerplateLines(content), validIndexes)
   const hasValidMarker = [...cleaned.matchAll(/\[(\d+)\](?!\s*\()/g)].some((match) =>
     validIndexes.has(Number(match[1]))
   )
@@ -358,6 +358,18 @@ function ensureInlineCitationPlacement(content: string, citations: ChatCitation[
   return cleaned
 }
 
+function stripInvalidCitationMarkers(content: string, validIndexes: Set<number>): string {
+  const segments = content.split(/(```[\s\S]*?```)/g)
+  return segments
+    .map((segment) => {
+      if (segment.startsWith('```')) return segment
+      return segment.replace(/\[(\d+)\](?!\s*\()/g, (match, rawIndex) => {
+        const index = Number(rawIndex)
+        return Number.isFinite(index) && validIndexes.has(index) ? match : ''
+      })
+    })
+    .join('')
+}
 function removeCitationBoilerplateLines(content: string): string {
   const patterns = [
     /^\s*thÃƒÂ´ng tin nÃƒÂ y Ã„â€˜Ã†Â°Ã¡Â»Â£c tÃƒÂ¬m thÃ¡ÂºÂ¥y\b/i,

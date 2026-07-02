@@ -1,6 +1,4 @@
 /**
- * IPC 参数验证
- * 使用 Zod 进行运行时类型验证，防止注入攻击和无效数据
  */
 
 import { z } from 'zod'
@@ -123,7 +121,6 @@ export const NotebookSchemas = {
 }
 
 /**
- * 笔记相关的验证 schemas
  */
 export const NoteSchemas = {
   createNote: z.object({
@@ -197,7 +194,6 @@ export const ProviderSchemas = {
 }
 
 /**
- * 知识库相关的验证 schemas
  */
 export const KnowledgeSchemas = {
   addDocument: z.object({
@@ -308,7 +304,6 @@ export const KnowledgeSchemas = {
 }
 
 /**
- * 聊天相关的验证 schemas
  */
 export const ChatSchemas = {
   sendMessage: z.object({
@@ -316,7 +311,8 @@ export const ChatSchemas = {
     content: z
       .string()
       .min(1, 'Message content cannot be empty')
-      .max(10000, 'Message content cannot exceed 10000 characters')
+      .max(10000, 'Message content cannot exceed 10000 characters'),
+    mode: z.enum(['chat', 'ask']).optional().default('chat')
   }),
 
   createSession: z.object({
@@ -351,12 +347,8 @@ export const ChatSchemas = {
 }
 
 /**
- * 验证函数包装器
- * 将 IPC handler 包装为自动验证参数的函数
  *
  * @param schema Zod schema
- * @param handler IPC handler 函数
- * @returns 包装后的 handler
  *
  * @example
  * ```ts
@@ -430,12 +422,8 @@ export function validateWithEvent<TSchema extends z.ZodType, TResult>(
 }
 
 /**
- * 验证单个参数
- * 适用于只有一个参数的简单 handler
  *
  * @param schema Zod schema
- * @param value 要验证的值
- * @returns Result 对象
  *
  * @example
  * ```ts
@@ -452,7 +440,7 @@ export function validateParam<T>(schema: z.ZodType<T>, value: unknown): Result<T
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errorMessage = error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ')
-      return Err(new Error(`验证失败: ${errorMessage}`))
+      return Err(new Error(`Validation failed: ${errorMessage}`))
     }
     return Err(error instanceof Error ? error : new Error(String(error)))
   }

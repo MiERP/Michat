@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react'
-import { FileText, Network, Trash2, Loader2, Edit2, ClipboardList } from 'lucide-react'
+import { FileText, Network, Trash2, Loader2, Edit2, ClipboardList, Podcast } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   DndContext,
@@ -46,7 +46,6 @@ interface ItemListProps {
   onRefresh?: () => void
 }
 
-// 单个可排序的 Item 组件
 function SortableItemRow({
   item,
   currentNote,
@@ -85,9 +84,11 @@ function SortableItemRow({
   const isNote = item.type === 'note'
   const isMindMap = item.type === 'mindmap'
   const isQuiz = item.type === 'quiz'
+  const isAudio = item.type === 'audio'
   const note = isNote ? (item.resource as Note) : null
   const mindMap = isMindMap ? item.resource : null
   const quiz = isQuiz ? item.resource : null
+  const podcastScript = isAudio ? item.resource : null
   const isCurrentNote = isNote && currentNote?.id === item.resourceId
   const isGenerating =
     (isMindMap || isQuiz) && (mindMap?.status === 'generating' || quiz?.status === 'generating')
@@ -95,7 +96,7 @@ function SortableItemRow({
     (isMindMap || isQuiz) && (mindMap?.status === 'failed' || quiz?.status === 'failed')
 
   const handleRename = () => {
-    const currentTitle = isNote ? note?.title : isMindMap ? mindMap?.title : quiz?.title
+    const currentTitle = isNote ? note?.title : isMindMap ? mindMap?.title : isQuiz ? quiz?.title : podcastScript?.title
     setNewTitle(currentTitle || '')
     setIsRenameDialogOpen(true)
   }
@@ -110,6 +111,8 @@ function SortableItemRow({
         await window.api.mindmap.update(mindMap.id, { title: newTitle.trim() })
       } else if (isQuiz && quiz) {
         await window.api.quiz.update(quiz.id, { title: newTitle.trim() })
+      } else if (isAudio && podcastScript) {
+        await window.api.podcast.update(podcastScript.id, { title: newTitle.trim() })
       }
       setIsRenameDialogOpen(false)
       onRefresh?.()
@@ -157,6 +160,7 @@ function SortableItemRow({
         {isNote && <FileText className="w-4 h-4 text-muted-foreground" />}
         {isMindMap && !isGenerating && <Network className="w-4 h-4 text-chart-1" />}
         {isQuiz && !isGenerating && <ClipboardList className="w-4 h-4 text-chart-2" />}
+        {isAudio && <Podcast className="w-4 h-4 text-chart-3" />}
         {(isMindMap || isQuiz) && isGenerating && (
           <Loader2 className="w-4 h-4 text-chart-1 animate-spin" />
         )}
@@ -204,6 +208,14 @@ function SortableItemRow({
             </p>
           </>
         )}
+        {isAudio && podcastScript && (
+          <>
+            <h3 className="text-sm font-medium truncate">{podcastScript.title}</h3>
+            <p className="text-xs text-muted-foreground line-clamp-2">
+              {String(podcastScript.script || '').slice(0, 120)}
+            </p>
+          </>
+        )}
         <p className="text-xs text-muted-foreground">
           {new Date(item.updatedAt).toLocaleDateString(
             i18n.language === 'vi-VN' ? 'vi-VN' : 'en-US'
@@ -221,7 +233,7 @@ function SortableItemRow({
         variant="ghost"
         size="icon"
         className="opacity-0 group-hover:opacity-100 w-8 h-8 mt-0.5 text-destructive hover:bg-destructive/10 hover:text-destructive cursor-pointer"
-        title={isNote ? t('deleteNote') : isMindMap ? t('deleteMindMap') : t('deleteQuiz')}
+        title={isNote ? t('deleteNote') : isMindMap ? t('deleteMindMap') : isQuiz ? t('deleteQuiz') : 'Delete podcast script'}
       >
         <Trash2 className="w-4 h-4" />
       </Button>
@@ -260,14 +272,16 @@ function SortableItemRow({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {isNote ? t('renameNote') : isMindMap ? t('renameMindMap') : t('renameQuiz')}
+              {isNote ? t('renameNote') : isMindMap ? t('renameMindMap') : isQuiz ? t('renameQuiz') : 'Rename podcast script'}
             </DialogTitle>
             <DialogDescription>
               {isNote
                 ? t('renameNoteDesc')
                 : isMindMap
                   ? t('renameMindMapDesc')
-                  : t('renameNoteDesc')}
+                  : isQuiz
+                    ? t('renameNoteDesc')
+                    : 'Update the podcast script title.'}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -285,7 +299,9 @@ function SortableItemRow({
                   ? t('noteTitlePlaceholder')
                   : isMindMap
                     ? t('mindMapTitlePlaceholder')
-                    : t('noteTitlePlaceholder')
+                    : isQuiz
+                      ? t('noteTitlePlaceholder')
+                      : 'Podcast title'
               }
             />
           </div>
@@ -305,13 +321,15 @@ function SortableItemRow({
         isOpen={isDeleteDialogOpen}
         onClose={() => setIsDeleteDialogOpen(false)}
         onConfirm={handleConfirmDelete}
-        title={isNote ? t('deleteNote') : isMindMap ? t('deleteMindMap') : t('deleteQuiz')}
+        title={isNote ? t('deleteNote') : isMindMap ? t('deleteMindMap') : isQuiz ? t('deleteQuiz') : 'Delete podcast script'}
         message={
           isNote
             ? t('deleteNoteWarning')
             : isMindMap
               ? t('confirmDeleteMindMap')
-              : t('confirmDeleteQuiz')
+              : isQuiz
+                ? t('confirmDeleteQuiz')
+                : 'Delete this podcast script?'
         }
       />
     </>
@@ -330,7 +348,6 @@ export default function ItemList({
   const { t, i18n } = useTranslation('notebook')
   const [localItems, setLocalItems] = useState(items)
 
-  // 配置传感器 - 避免轻微抖动触发拖拽
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -339,7 +356,6 @@ export default function ItemList({
     })
   )
 
-  // 处理拖拽结束
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event
 
@@ -350,7 +366,6 @@ export default function ItemList({
       const newItems = arrayMove(localItems, oldIndex, newIndex)
       setLocalItems(newItems)
 
-      // 批量更新 order 值
       const updates: Record<string, number> = {}
       newItems.forEach((item, index) => {
         updates[item.id] = index
@@ -360,13 +375,11 @@ export default function ItemList({
         await window.api.items.batchUpdateOrder(updates)
       } catch (error) {
         console.error('Failed to update item order:', error)
-        // 如果更新失败，恢复原来的顺序
         setLocalItems(items)
       }
     }
   }
 
-  // 当外部 items 改变时，更新本地状态
   useEffect(() => {
     setLocalItems(items)
   }, [items])

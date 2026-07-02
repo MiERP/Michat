@@ -3,7 +3,7 @@
  * 基于 sqlite-vec 扩展的向量存储实现
  */
 
-import { getSqlite } from '../db'
+import { ensureVectorTableDimensions, getSqlite } from '../db'
 import type { VectorStore, VectorItem, QueryResult, QueryOptions, VectorStoreConfig } from './types'
 import Logger from '../../shared/utils/logger'
 
@@ -19,6 +19,7 @@ export class SQLiteVectorStore implements VectorStore {
   async initialize(config: VectorStoreConfig): Promise<void> {
     this.notebookId = config.notebookId
     this.dimensions = config.dimensions || 1024
+    ensureVectorTableDimensions(this.dimensions)
     this.initialized = true
     Logger.info('SQLiteVectorStore', `Initialized for notebook: ${this.notebookId}`)
   }

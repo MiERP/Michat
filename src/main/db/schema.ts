@@ -311,6 +311,33 @@ export const quizSessions = sqliteTable(
 export type QuizSession = typeof quizSessions.$inferSelect
 export type NewQuizSession = typeof quizSessions.$inferInsert
 
+
+export const podcastScripts = sqliteTable(
+  'podcast_scripts',
+  {
+    id: text('id').primaryKey(),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    script: text('script').notNull(),
+    audioPath: text('audio_path'),
+    status: text('status', { enum: ['script_ready', 'audio_ready', 'failed'] })
+      .notNull()
+      .default('script_ready'),
+    errorMessage: text('error_message'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    notebookIdx: index('idx_podcast_scripts_notebook').on(table.notebookId, table.updatedAt),
+    statusIdx: index('idx_podcast_scripts_status').on(table.status)
+  })
+)
+
+export type PodcastScript = typeof podcastScripts.$inferSelect
+export type NewPodcastScript = typeof podcastScripts.$inferInsert
+
 /**
  * Items 表
  * 统一管理笔记本下的所有内容项（笔记、思维导图、PPT、音频等）

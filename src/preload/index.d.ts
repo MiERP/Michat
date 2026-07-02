@@ -14,7 +14,6 @@ import type { UpdateState, UpdateCheckResult, UpdateOperationResult } from '../s
 import type { LicenseStatus } from '../shared/types/license'
 import type { MindMap, Quiz, QuizSession } from '../main/db/schema'
 
-// 重新导出共享类型
 export type {
   ChatSession,
   ChatMessage,
@@ -42,21 +41,16 @@ declare global {
   interface Window {
     electron: ElectronAPI
     api: {
-      // 获取平台信息
       getPlatform: () => Promise<string>
 
-      // 获取应用版本号
       getAppVersion: () => Promise<string>
 
-      // 许可证
       license: {
         getStatus: () => Promise<LicenseStatus>
       }
 
-      // 在默认浏览器中打开外部链接
       openExternalUrl: (url: string) => Promise<{ success: boolean; error?: string }>
 
-      // 应用设置相关
       settings: {
         getAll: () => Promise<AppSettings>
         get: <K extends keyof AppSettings>(key: K) => Promise<AppSettings[K]>
@@ -69,7 +63,6 @@ declare global {
         ) => () => void
       }
 
-      // Notebook 相关
       createNotebook: (title: string, description?: string) => Promise<Notebook>
       getAllNotebooks: () => Promise<Notebook[]>
       getNotebook: (id: string) => Promise<Notebook | null>
@@ -79,14 +72,12 @@ declare global {
       ) => Promise<void>
       deleteNotebook: (id: string) => Promise<void>
 
-      // Note 相关
       createNote: (notebookId: string, content: string, customTitle?: string) => Promise<Note>
       getNotes: (notebookId: string) => Promise<Note[]>
       getNote: (id: string) => Promise<Note | null>
       updateNote: (id: string, updates: Partial<Pick<Note, 'title' | 'content'>>) => Promise<void>
       deleteNote: (id: string) => Promise<void>
 
-      // Items 相关（统一管理笔记、思维导图等）
       items: {
         getAll: (notebookId: string) => Promise<any[]>
         updateOrder: (itemId: string, order: number) => Promise<{ success: boolean }>
@@ -94,7 +85,6 @@ declare global {
         delete: (itemId: string, deleteResource?: boolean) => Promise<{ success: boolean }>
       }
 
-      // Mind Map 相关
       mindmap: {
         getLatest: (notebookId: string) => Promise<MindMap | null>
         get: (mindMapId: string) => Promise<MindMap | null>
@@ -113,7 +103,6 @@ declare global {
         ) => () => void
       }
 
-      // Quiz 相关
       quiz: {
         getLatest: (notebookId: string) => Promise<Quiz | null>
         get: (quizId: string) => Promise<Quiz | null>
@@ -138,19 +127,32 @@ declare global {
         ) => () => void
       }
 
-      // Chat Session 相关
       createChatSession: (notebookId: string, title: string) => Promise<ChatSession>
       getChatSessions: (notebookId: string) => Promise<ChatSession[]>
       getActiveSession: (notebookId: string) => Promise<ChatSession | null>
       updateSessionTitle: (sessionId: string, title: string) => Promise<void>
       deleteSession: (sessionId: string) => Promise<void>
 
-      // Chat Message 相关
       getMessages: (sessionId: string) => Promise<ChatMessage[]>
-      sendMessage: (sessionId: string, content: string) => Promise<string>
+      sendMessage: (sessionId: string, content: string, mode?: 'chat' | 'ask') => Promise<string>
       abortMessage: (messageId: string) => Promise<{ success: boolean; reason?: string }>
+      podcast: {
+        generateScript: (notebookId: string) => Promise<{
+          success: boolean
+          id?: string
+          title?: string
+          script?: string
+          error?: string
+          cancelled?: boolean
+        }>
+        update: (id: string, updates: { title?: string }) => Promise<{ success: boolean; error?: string }>
+        cancel: (notebookId: string) => Promise<{ success: boolean; error?: string }>
+        onProgress: (
+          callback: (data: { notebookId: string; stage: string; progress: number }) => void
+        ) => () => void
+        synthesizeAudio: () => Promise<{ success: boolean; error?: string }>
+      }
 
-      // 流式消息监听（AI SDK 流式协议格式）
       onMessageChunk: (
         callback: (data: {
           messageId: string
@@ -162,12 +164,10 @@ declare global {
       ) => () => void
       onMessageError: (callback: (data: { messageId: string; error: string }) => void) => () => void
 
-      // Session 自动切换监听
       onSessionAutoSwitched: (
         callback: (data: { oldSessionId: string; newSessionId: string }) => void
       ) => () => void
 
-      // Provider 配置相关
       saveProviderConfig: (config: ProviderConfig) => Promise<{ encrypted: boolean }>
       getProviderConfig: (providerName: string) => Promise<ProviderConfig | null>
       getAllProviderConfigs: () => Promise<ProviderConfig[]>
@@ -200,9 +200,7 @@ declare global {
       // Check if secure encryption is available for API keys
       checkEncryption: () => Promise<{ encrypted: boolean }>
 
-      // 知识库相关
       knowledge: {
-        // 添加文档
         addDocument: (
           notebookId: string,
           options: AddDocumentOptions
@@ -227,14 +225,12 @@ declare global {
           notebookId: string,
           noteId: string
         ) => Promise<{ success: boolean; documentId?: string; error?: string }>
-        // 搜索
         search: (
           notebookId: string,
           query: string,
           options?: SearchOptions
         ) => Promise<{ success: boolean; results: KnowledgeSearchResult[]; error?: string }>
 
-        // 文档管理
         getDocuments: (notebookId: string) => Promise<KnowledgeDocument[]>
         getDocument: (documentId: string) => Promise<KnowledgeDocument | null>
         getDocumentChunks: (documentId: string) => Promise<KnowledgeChunk[]>
@@ -253,17 +249,13 @@ declare global {
         deleteDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
         reindexDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
 
-        // 统计
         getStats: (notebookId: string) => Promise<KnowledgeStats>
 
-        // 文件选择对话框
         selectFiles: () => Promise<string[]>
         selectFolder: () => Promise<string | null>
 
-        // 打开源文件
         openSource: (documentId: string) => Promise<{ success: boolean; error?: string }>
 
-        // 索引进度监听
         onIndexProgress: (callback: (progress: IndexProgress) => void) => () => void
       }
 
@@ -287,12 +279,12 @@ declare global {
         listModels: () => Promise<
           Array<{
             filename: string
-            type: 'chat' | 'embedding' | 'unknown'
+            type: 'chat' | 'embedding' | 'reranker' | 'unknown'
             sizeMB: number
             addedAt: string | null
           }>
         >
-        importModel: (type: 'chat' | 'embedding') => Promise<{
+        importModel: (type: 'chat' | 'embedding' | 'reranker') => Promise<{
           success: boolean
           filename?: string
           sizeMB?: number
@@ -304,24 +296,18 @@ declare global {
           binary: string | null
           chatPort: number
           embedPort: number
-          backend: 'cuda-12.4-x64' | 'cuda-13.1-x64' | 'vulkan-x64' | 'cpu-x64'
+          backend: 'llama-bin'
           chatCtxSize: number
           embeddingCtxSize: number
           threads: number
         }>
       }
 
-      // 应用更新相关
       update: {
-        // 检查更新
         check: () => Promise<UpdateCheckResult>
-        // 下载更新
         download: () => Promise<UpdateOperationResult>
-        // 安装更新（退出并安装）
         install: () => Promise<UpdateOperationResult>
-        // 获取当前更新状态
         getState: () => Promise<UpdateCheckResult>
-        // 监听更新状态变化
         onStateChanged: (callback: (state: UpdateState) => void) => () => void
       }
     }

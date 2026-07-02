@@ -55,9 +55,15 @@ export interface ChatMessage extends Omit<DBChatMessage, 'metadata' | 'reasoning
  * API 消息格式（用于与 LLM Provider 通信）
  * 这是简化版本，只包含 API 需要的字段
  */
+export interface ChatImageAttachment {
+  name: string
+  mimeType: string
+  dataUrl: string
+}
+
 export interface APIMessage {
   role: 'user' | 'assistant' | 'system'
-  content: string
+  content: string | Array<{ type: 'text'; text: string } | { type: 'image'; image: ChatImageAttachment }>
   reasoning_content?: string // DeepSeek Reasoner 特有字段
 }
 

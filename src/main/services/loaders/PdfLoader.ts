@@ -5,11 +5,40 @@
 
 import { readFile } from 'fs/promises'
 import { extname } from 'path'
+import { spawn } from 'child_process'
 // Dùng bản legacy build cho môi trường Node.js
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import type { PDFDocumentProxy, TextItem } from 'pdfjs-dist/types/src/display/api'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, PageInfo } from './types'
+
+export async function runLocalPdfOcr(filePath: string): Promise<string> {
+  const command = process.env.KN_OCR_PDF_COMMAND
+  if (!command) return ''
+
+  const args = (process.env.KN_OCR_PDF_ARGS || '{input}')
+    .split(' ')
+    .filter(Boolean)
+    .map((arg) => (arg === '{input}' ? filePath : arg.replaceAll('{input}', filePath)))
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true })
+    let stdout = ''
+    let stderr = ''
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) resolve(stdout.trim())
+      else reject(new Error(stderr.trim() || `OCR command failed with exit code ${code}`))
+    })
+  })
+}
 
 /**
  * Bộ nạp tài liệu PDF
@@ -49,7 +78,20 @@ export class PdfLoader implements IDocumentLoader {
 
   async loadFromPath(filePath: string, options?: LoadOptions): Promise<DocumentLoadResult> {
     const buffer = await readFile(filePath)
-    return this.loadFromBuffer(buffer, options)
+    const parsed = await this.loadFromBuffer(buffer, options)
+    if (!process.env.KN_OCR_PDF_COMMAND || parsed.content.trim().length > 40) return parsed
+
+    const ocrText = await runLocalPdfOcr(filePath)
+    if (!ocrText) return parsed
+
+    return {
+      ...parsed,
+      content: ocrText,
+      metadata: {
+        ...(parsed.metadata || {}),
+        ocr: true
+      }
+    }
   }
 
   async loadFromBuffer(buffer: Buffer, options?: LoadOptions): Promise<DocumentLoadResult> {

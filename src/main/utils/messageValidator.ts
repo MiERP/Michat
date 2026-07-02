@@ -9,8 +9,9 @@ export function validateAndCleanMessages(messages: APIMessage[]): APIMessage[] {
   const cleaned = messages.filter((msg) => {
     if (!msg) return false
     if (!msg.role || !['user', 'assistant', 'system'].includes(msg.role)) return false
-    if (typeof msg.content !== 'string') return false
-    if (msg.content.trim() === '') return false
+    if (typeof msg.content === 'string') return msg.content.trim() !== ''
+    if (!Array.isArray(msg.content)) return false
+    if (!msg.content.some((part) => part.type === 'text' && part.text.trim())) return false
     return true
   })
 

@@ -4,6 +4,7 @@ import { KnowledgeService } from '../services/KnowledgeService'
 import { UpdateService } from '../services/UpdateService'
 import { MindMapService } from '../services/MindMapService'
 import { QuizService } from '../services/QuizService'
+import { PodcastService } from '../services/PodcastService'
 import { ShortcutManager } from '../services/ShortcutManager'
 import { LlamaService } from '../services/LlamaService'
 import type Store from 'electron-store'
@@ -16,6 +17,7 @@ import { registerNoteHandlers } from './noteHandlers'
 import { registerKnowledgeHandlers } from './knowledgeHandlers'
 import { registerMindMapHandlers } from './mindmapHandlers'
 import { registerQuizHandlers } from './quizHandlers'
+import { registerPodcastHandlers } from './podcastHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import { registerItemHandlers } from './itemHandlers'
 import { registerShortcutHandlers } from './shortcutHandlers'
@@ -24,7 +26,7 @@ import { registerLicenseHandlers } from './licenseHandlers'
 import { registerTemplateHandlers } from './templateHandlers'
 
 /**
- * 注册所有 IPC Handlers
+ * æ³¨å†Œæ‰€æœ‰ IPC Handlers
  */
 export function registerAllHandlers(
   providerManager: ProviderManager,
@@ -35,10 +37,11 @@ export function registerAllHandlers(
   store: Store<StoreSchema>,
   llamaService: LlamaService
 ) {
-  // 实例化 MindMapService
+  // å®žä¾‹åŒ– MindMapService
   const mindMapService = new MindMapService(providerManager)
-  // 实例化 QuizService
+  // å®žä¾‹åŒ– QuizService
   const quizService = new QuizService(providerManager)
+  const podcastService = new PodcastService(providerManager)
 
   registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
   registerProviderHandlers(providerManager, llamaService)
@@ -48,6 +51,7 @@ export function registerAllHandlers(
   registerKnowledgeHandlers(knowledgeService, llamaService)
   registerMindMapHandlers(mindMapService)
   registerQuizHandlers(quizService)
+  registerPodcastHandlers(podcastService)
   registerUpdateHandlers(updateService)
   registerItemHandlers()
   registerShortcutHandlers(shortcutManager, store)
@@ -65,6 +69,7 @@ export {
   registerNoteHandlers,
   registerKnowledgeHandlers,
   registerQuizHandlers,
+  registerPodcastHandlers,
   registerLicenseHandlers,
   registerTemplateHandlers
 }

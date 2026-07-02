@@ -17,7 +17,7 @@
   "defaultEmbeddingModel": "Mô hình embedding mặc định",
   "defaultEmbeddingModelDesc": "Chọn mô hình embedding dùng để lập chỉ mục cho cơ sở tri thức",
   "defaultRerankModel": "Mô hình rerank mặc định",
-  "defaultRerankModelDesc": "Chọn mô hình rerank dùng để sắp xếp lại ứng viên truy hồi",
+  "defaultRerankModelDesc": "Model rerank local cho llama.cpp, ví dụ BAAI/bge-reranker-v2-m3 hoặc Qwen3-Reranker-0.6B/4B; chạy server với --embedding --rerank --pooling rank.",
   "rerankEnabled": "Bật Rerank",
   "rerankEnabledDesc": "Chạy bước rerank sau hybrid retrieval trước khi chọn chunk cuối",
   "rerankTopN": "Rerank Top N",

@@ -27,9 +27,11 @@ export const BUILTIN_PROVIDERS: ProviderDescriptor[] = [
     locality: 'local',
     defaultBaseUrl: 'http://127.0.0.1:8001/v1',
     defaultEmbeddingModel: 'local-embedding',
+    defaultRerankModel: 'local-rerank',
     capabilities: {
       chat: false,
-      embedding: true
+      embedding: true,
+      rerank: true
     },
     createProvider: (descriptor) => new AISDKProvider(descriptor)
   }

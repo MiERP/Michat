@@ -20,12 +20,13 @@ type RuntimeProfile = {
 
 export type ModelMetadata = {
   filename: string
-  type: 'chat' | 'embedding'
+  type: 'chat' | 'embedding' | 'reranker'
   addedAt: string
 }
 
-function inferModelTypeFromFilename(filename: string): 'chat' | 'embedding' | 'unknown' {
+function inferModelTypeFromFilename(filename: string): 'chat' | 'embedding' | 'reranker' | 'unknown' {
   const id = filename.toLowerCase()
+  if (id.includes('rerank') || id.includes('cross-encoder')) return 'reranker'
   if (id.includes('bge') || id.includes('embed') || id.includes('embedding') || id.includes('e5')) {
     return 'embedding'
   }
@@ -65,6 +66,7 @@ export class LlamaService {
   private embedProc: ChildProcess | null = null
   private machine: MachineInfo | null = null
   private runtimeProfile: RuntimeProfile | null = null
+  private chatUsesVision = false
 
   private isWin(): boolean {
     return process.platform === 'win32'
@@ -258,7 +260,7 @@ export class LlamaService {
    * Priority:
    *  1) KN_LLAMA_SERVER_BIN (absolute path)
    *  2) bundled resources (if you bundled it)
-   *  3) start-llama-auto backend folder chosen by pickBackend()
+   *  3) unified llama-bin folder chosen by pickBackend()
    *  4) fallbacks across all folders
    */
   getLlamaServerBin(): string | null {
@@ -285,6 +287,28 @@ export class LlamaService {
     return null
   }
 
+
+  getChatMmprojFile(): string | null {
+    const override = process.env.KN_LLAMA_MMPROJ
+    if (override && fs.existsSync(override)) return override
+
+    const modelsDir = this.getModelsDir()
+    const chatModel = this.getDefaultModelFile('chat')
+    if (!modelsDir || !chatModel) return null
+
+    const modelBase = basename(chatModel, '.gguf').toLowerCase()
+    const modelPrefix = modelBase.replace(/[-_.](ud|q\d|iq\d|f\d).*$/i, '')
+    const candidates = fs
+      .readdirSync(modelsDir)
+      .filter((file) => /mmproj.*\.gguf$/i.test(file))
+      .map((file) => join(modelsDir, file))
+
+    return (
+      candidates.find((file) => basename(file).toLowerCase().includes(modelPrefix)) ||
+      candidates.find((file) => basename(file).toLowerCase().includes('mmproj')) ||
+      null
+    )
+  }
   private getDefaultModelFile(kind: ServerKind): string | null {
     const modelsDir = this.getModelsDir()
     if (!modelsDir) return null
@@ -399,7 +423,7 @@ export class LlamaService {
     }
   }
 
-  private buildArgs(kind: ServerKind, modelPath: string): string[] {
+  private buildArgs(kind: ServerKind, modelPath: string, useVision = false): string[] {
     const host = this.getHost()
     const port = this.getPort(kind)
 
@@ -458,6 +482,8 @@ export class LlamaService {
       // Disable chain-of-thought/reasoning mode by default for local chat:
       // it adds latency and causes the UI to stream internal thinking.
       args.push('--reasoning', reasoningMode)
+      const mmproj = useVision ? this.getChatMmprojFile() : null
+      if (mmproj) args.push('--mmproj', mmproj)
     }
 
     if (runtime.nGpuLayers > 0) {
@@ -480,8 +506,8 @@ export class LlamaService {
     return args
   }
 
-  private spawnServer(kind: ServerKind, bin: string, modelPath: string): void {
-    const args = this.buildArgs(kind, modelPath)
+  private spawnServer(kind: ServerKind, bin: string, modelPath: string, useVision = false): void {
+    const args = this.buildArgs(kind, modelPath, useVision)
     const label = kind === 'chat' ? 'chat' : 'embedding'
 
     Logger.info('LlamaService', `Starting ${label} server: ${bin} ${args.join(' ')}`)
@@ -532,6 +558,7 @@ export class LlamaService {
 
     if (kind === 'chat') {
       this.chatProc = proc
+      this.chatUsesVision = useVision
     } else {
       this.embedProc = proc
     }
@@ -546,7 +573,14 @@ export class LlamaService {
     return false
   }
 
-  async ensureChatStarted(): Promise<boolean> {
+  private stopChatServerForModeSwitch(): void {
+    if (!this.chatProc) return
+    Logger.info('LlamaService', 'Restarting chat server to switch text/vision mode')
+    this.chatProc.kill()
+    this.chatProc = null
+  }
+
+  async ensureChatStarted(useVision = false): Promise<boolean> {
     const chatModel = this.getDefaultModelFile('chat')
     if (!chatModel) {
       Logger.warn(
@@ -556,9 +590,20 @@ export class LlamaService {
       return false
     }
 
-    if (await this.isServerUp('chat')) return true
+    if (useVision && !this.getChatMmprojFile()) {
+      Logger.warn('LlamaService', 'Vision request needs mmproj, but no projector file was found')
+      return false
+    }
 
-    Logger.warn('LlamaService', 'Chat server is down. Attempting auto-restart...')
+    const chatUp = await this.isServerUp('chat')
+    if (chatUp && this.chatUsesVision === useVision) return true
+    if (chatUp && this.chatUsesVision !== useVision && !this.chatProc) {
+      Logger.warn('LlamaService', 'Chat server is running outside MiChat; cannot switch text/vision mode automatically')
+      return false
+    }
+    if (this.chatUsesVision !== useVision) this.stopChatServerForModeSwitch()
+
+    Logger.warn('LlamaService', 'Chat server is down or in wrong mode. Attempting auto-restart...')
 
     this.detectMachineInfo()
 
@@ -571,7 +616,7 @@ export class LlamaService {
       return false
     }
 
-    this.spawnServer('chat', bin, chatModel)
+    this.spawnServer('chat', bin, chatModel, useVision)
 
     const ready = await this.waitForServer('chat', 20000)
     if (!ready) {
@@ -579,7 +624,7 @@ export class LlamaService {
       return false
     }
 
-    Logger.info('LlamaService', 'Chat server is up')
+    Logger.info('LlamaService', `Chat server is up (${useVision ? 'vision' : 'text'} mode)`)
     return true
   }
 
@@ -715,7 +760,7 @@ export class LlamaService {
     if (!metaPath) return {}
     try {
       if (fs.existsSync(metaPath)) {
-        return JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+        return JSON.parse(fs.readFileSync(metaPath, 'utf-8').replace(/^\uFEFF/, ''))
       }
     } catch (e) {
       Logger.warn('LlamaService', 'Failed to read metadata.json:', e)
@@ -727,7 +772,7 @@ export class LlamaService {
     const metaPath = this.getMetadataPath()
     if (!metaPath) return
     try {
-      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), { encoding: 'utf-8' })
     } catch (e) {
       Logger.error('LlamaService', 'Failed to write metadata.json:', e)
     }
@@ -738,7 +783,7 @@ export class LlamaService {
    */
   listModels(): Array<{
     filename: string
-    type: 'chat' | 'embedding' | 'unknown'
+    type: 'chat' | 'embedding' | 'reranker' | 'unknown'
     sizeMB: number
     addedAt: string | null
   }> {
@@ -768,7 +813,7 @@ export class LlamaService {
    */
   async importModel(
     sourcePath: string,
-    type: 'chat' | 'embedding'
+    type: 'chat' | 'embedding' | 'reranker'
   ): Promise<{ filename: string; sizeMB: number }> {
     const modelsDir = this.getModelsDir()
     if (!modelsDir) {
@@ -787,7 +832,7 @@ export class LlamaService {
 
   private async importModelToDir(
     sourcePath: string,
-    type: 'chat' | 'embedding',
+    type: 'chat' | 'embedding' | 'reranker',
     modelsDir: string
   ): Promise<{ filename: string; sizeMB: number }> {
     const filename = basename(sourcePath)
@@ -797,9 +842,17 @@ export class LlamaService {
 
     const destPath = join(modelsDir, filename)
 
-    // Check if already exists
     if (fs.existsSync(destPath)) {
-      throw new Error(`Model "${filename}" already exists in models directory`)
+      const metadata = this.readMetadata()
+      metadata[filename] = {
+        filename,
+        type,
+        addedAt: metadata[filename]?.addedAt || new Date().toISOString()
+      }
+      this.writeMetadata(metadata)
+
+      const stats = fs.statSync(destPath)
+      return { filename, sizeMB: Math.round(stats.size / (1024 * 1024)) }
     }
 
     // Verify source exists

@@ -24,6 +24,17 @@ import { ProviderManager } from '../providers/ProviderManager'
 import Logger from '../../shared/utils/logger'
 import { isPathInsideDirectory } from '../security/guards'
 
+export function buildFtsMatchQuery(query: string): string {
+  const tokens = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+
+  return [...new Set(tokens)].map((token) => `${token}*`).join(' OR ')
+}
+
 export interface AddDocumentOptions {
   title: string
   type: 'file' | 'note' | 'url' | 'text'
@@ -34,6 +45,11 @@ export interface AddDocumentOptions {
   fileSize?: number
   metadata?: Record<string, unknown>
   chunkOptions?: ChunkOptions
+}
+
+type ChunkIndexContext = {
+  documentTitle?: string
+  documentMetadata?: Record<string, unknown>
 }
 
 export interface SearchOptions {
@@ -197,6 +213,23 @@ export class KnowledgeService {
     return page?.pageNumber
   }
 
+  private buildContextualChunkText(chunk: { content: string; startOffset: number; endOffset: number; metadata?: Record<string, unknown> }, context?: ChunkIndexContext): string {
+    const parts: string[] = []
+    const title = context?.documentTitle?.trim()
+    if (title) parts.push(`Title: ${title}`)
+
+    const pageNumber = this.getPageNumberForChunk(
+      context?.documentMetadata,
+      chunk.startOffset,
+      chunk.endOffset
+    )
+    if (pageNumber) parts.push(`Page: ${pageNumber}`)
+
+    if (chunk.metadata?.type === 'table') parts.push('Content type: table')
+
+    return parts.length ? `${parts.join('\n')}\n\n${chunk.content}` : chunk.content
+  }
+
   private resolveFilteredDocumentIds(
     notebookId: string,
     metadataFilter: SearchOptions['metadataFilter']
@@ -318,7 +351,8 @@ export class KnowledgeService {
     notebookId: string,
     content: string,
     chunkOptions?: ChunkOptions,
-    onProgress?: IndexProgressCallback
+    onProgress?: IndexProgressCallback,
+    indexContext?: ChunkIndexContext
   ): Promise<void> {
     const db = getDatabase()
     const now = new Date()
@@ -336,8 +370,9 @@ export class KnowledgeService {
 
     for (const chunk of chunkResults) {
       const chunkId = `chunk_${randomUUID()}`
+      const indexedContent = this.buildContextualChunkText(chunk, indexContext)
       chunkIds.push(chunkId)
-      chunkContents.push(chunk.content)
+      chunkContents.push(indexedContent)
 
       const newChunk: NewChunk = {
         id: chunkId,
@@ -358,7 +393,7 @@ export class KnowledgeService {
       if (sqlite) {
         sqlite
           .prepare('INSERT INTO fts_chunks (chunk_id, notebook_id, content) VALUES (?, ?, ?)')
-          .run(chunkId, notebookId, chunk.content)
+          .run(chunkId, notebookId, indexedContent)
       }
     }
 
@@ -366,20 +401,18 @@ export class KnowledgeService {
     onProgress?.('generating_embeddings', 30)
     const embeddingResults = await this.embeddingService.embedBatch(
       chunkContents,
-      { dimensions: 1024 },
+      undefined,
       (completed, total) => {
         onProgress?.('generating_embeddings', Math.round(30 + (completed / total) * 50))
       }
     )
 
     const detectedDimensions = embeddingResults.length > 0 ? embeddingResults[0].dimensions : 1024
-    if (embeddingResults.length > 0 && detectedDimensions !== 1024) {
-      throw new Error(
-        `Unsupported embedding dimensions: ${detectedDimensions}. Current sqlite-vec schema requires 1024 dimensions.`
-      )
+    if (embeddingResults.some((result) => result.dimensions !== detectedDimensions)) {
+      throw new Error('Embedding provider returned mixed dimensions in one batch')
     }
     if (embeddingResults.length > 0) {
-      vectorStoreManager.setDefaultDimensions(1024)
+      vectorStoreManager.setDefaultDimensions(detectedDimensions)
       Logger.debug('KnowledgeService', `Detected embedding dimensions: ${detectedDimensions}`)
     }
 
@@ -469,7 +502,8 @@ export class KnowledgeService {
         notebookId,
         options.content,
         options.chunkOptions,
-        onProgress
+        onProgress,
+        { documentTitle: options.title, documentMetadata: options.metadata }
       )
       return documentId
     } catch (error) {
@@ -512,7 +546,7 @@ export class KnowledgeService {
         })
         .run()
 
-      const parseResult = await this.fileParserService.parseFile(filePath)
+      const parseResult = await this.fileParserService.parseFile(filePath, { ocrEnabled: true })
       const contentHash = createHash('md5').update(parseResult.content).digest('hex')
       const fileInfo = await stat(filePath).catch(() => undefined)
 
@@ -555,12 +589,21 @@ export class KnowledgeService {
         .where(eq(documents.id, documentId))
         .run()
 
+      const documentMetadata = {
+        ...(parseResult.metadata || {}),
+        ...(structureMetadata || {})
+      }
+
       await this._indexContent(
         documentId,
         notebookId,
         parseResult.content,
         chunkOptions,
-        onProgress
+        onProgress,
+        {
+          documentTitle: parseResult.title || basename(filePath) || 'Untitled',
+          documentMetadata
+        }
       )
       return documentId
     } catch (error) {
@@ -691,13 +734,12 @@ export class KnowledgeService {
 
     // 1. Vector Search
     const queryEmbedding = await this.embeddingService.embed(query)
-    if (queryEmbedding.dimensions !== 1024) {
-      throw new Error(
-        `Unsupported query embedding dimensions: ${queryEmbedding.dimensions}. Current sqlite-vec schema requires 1024 dimensions.`
-      )
-    }
 
-    const vectorStore = await vectorStoreManager.getStore(notebookId, undefined, 1024)
+    const vectorStore = await vectorStoreManager.getStore(
+      notebookId,
+      undefined,
+      queryEmbedding.dimensions
+    )
     const vectorResults = await vectorStore.query(queryEmbedding.embedding, {
       topK: retrievalCandidateLimit,
       threshold,
@@ -709,14 +751,14 @@ export class KnowledgeService {
     if (sqlite) {
       try {
         // Simple sanitization for FTS match query (remove special chars that break FTS syntax)
-        const safeQuery = query.replace(/["'*]/g, ' ').trim()
+        const safeQuery = buildFtsMatchQuery(query)
         if (safeQuery) {
           let sqlText = `
             SELECT chunk_id, rank 
             FROM fts_chunks 
             WHERE notebook_id = ? AND fts_chunks MATCH ? 
           `
-          const ftsParams: any[] = [notebookId, `"${safeQuery}" OR ${safeQuery}`]
+          const ftsParams: any[] = [notebookId, safeQuery]
 
           if (filteredChunkIds && filteredChunkIds.length > 0) {
             const placeholders = filteredChunkIds.map(() => '?').join(',')

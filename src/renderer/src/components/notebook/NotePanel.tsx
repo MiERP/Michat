@@ -7,7 +7,9 @@ import {
   ClipboardCheck,
   BookOpenText,
   ExternalLink,
-  Loader2
+  Loader2,
+  Podcast,
+  XCircle
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
@@ -24,7 +26,6 @@ import UnsavedChangesDialog from '../common/UnsavedChangesDialog'
 import DeleteNoteConfirmDialog from '../common/DeleteNoteConfirmDialog'
 import type { Note } from '../../../../shared/types'
 
-// 编辑器面板子组件 - 管理编辑状态
 interface NoteEditorPanelProps {
   note: Note
   isSaving: boolean
@@ -47,16 +48,13 @@ function NoteEditorPanel({
   const [editTitle, setEditTitle] = useState(note.title)
   const [editContent, setEditContent] = useState(note.content)
 
-  // 检测是否有未保存的修改
   useEffect(() => {
     const hasChanges = editTitle !== note.title || editContent !== note.content
     onUnsavedChange(hasChanges)
   }, [editTitle, editContent, note.title, note.content, onUnsavedChange])
 
   const handleSave = () => {
-    // 如果标题为空或只有空格，使用默认标题
     const finalTitle = editTitle.trim() || t('untitledNote')
-    // 更新显示的标题，让用户看到自动设置的标题
     if (!editTitle.trim()) {
       setEditTitle(finalTitle)
     }
@@ -141,63 +139,61 @@ export default function NotePanel(): ReactElement {
   const { selected, isLoading, clearCitation } = useCitationStore()
   const visibleItems = items.filter((item) => item.type !== 'mindmap')
 
-  // 管理未保存状态
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
-  // Dialog 状态管理
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showQuizStartDialog, setShowQuizStartDialog] = useState(false)
+  const [podcastProgress, setPodcastProgress] = useState<{ stage: string; progress: number } | null>(null)
 
-  // 监听Notebook切换，清空当前编辑状态
   useEffect(() => {
     if (notebookId) {
-      // 清空当前编辑状态，避免显示旧Notebook的内容
       setCurrentNote(null)
       clearCitation()
-      // 使用 setTimeout 将状态更新推迟到下一个事件循环
       setTimeout(() => setHasUnsavedChanges(false), 0)
     }
   }, [notebookId, setCurrentNote, clearCitation])
 
-  // 加载 items 列表
   useEffect(() => {
     if (notebookId) {
       loadItems(notebookId)
     }
   }, [notebookId, loadItems])
 
-  // 创建新笔记
+  useEffect(() => {
+    if (!window.api.podcast?.onProgress) return
+
+    return window.api.podcast.onProgress((data) => {
+      if (data.notebookId === notebookId) {
+        setPodcastProgress({ stage: data.stage, progress: data.progress })
+      }
+    })
+  }, [notebookId])
+
   const handleCreateNote = async () => {
     if (!notebookId) return
     await createNote(notebookId, t('newNoteContent'), t('newNote'))
   }
 
-  // 保存笔记
   const handleSave = async (title: string, content: string) => {
     if (!currentNote) return
     await updateNote(currentNote.id, { title, content })
   }
 
-  // 删除笔记
   const handleDelete = async () => {
     if (!currentNote) return
     setShowDeleteDialog(true)
   }
 
-  // 确认删除笔记
   const confirmDelete = async () => {
     if (!currentNote) return
-    // 找到对应的 item
     const item = items.find((item) => item.type === 'note' && item.resourceId === currentNote.id)
     if (item) {
       await deleteItem(item.id, true) // 同时删除资源
     }
   }
 
-  // 返回列表页面
   const handleBack = () => {
-    // 如果有未保存的修改，提示用户
     if (hasUnsavedChanges) {
       setShowUnsavedDialog(true)
       return
@@ -206,13 +202,11 @@ export default function NotePanel(): ReactElement {
     setHasUnsavedChanges(false)
   }
 
-  // 确认离开（有未保存修改时）
   const confirmLeave = () => {
     setCurrentNote(null)
     setHasUnsavedChanges(false)
   }
 
-  // 打开答题窗口（查看特定版本）
   const handleOpenQuiz = async (quizId: string) => {
     try {
       if (notebookId) {
@@ -223,16 +217,38 @@ export default function NotePanel(): ReactElement {
     }
   }
 
-  // 打开答题启动对话框
   const handleGenerateQuiz = () => {
     setShowQuizStartDialog(true)
   }
 
-  // 开始生成答题
+  const handleGeneratePodcast = async () => {
+    if (!notebookId || podcastProgress) return
+    setPodcastProgress({ stage: 'starting', progress: 1 })
+
+    if (!window.api.podcast?.generateScript) {
+      console.error('[NotePanel] Podcast API is not available')
+      setPodcastProgress(null)
+      return
+    }
+
+    const result = await window.api.podcast.generateScript(notebookId)
+    if (result.success) {
+      await loadItems(notebookId)
+    } else if (!result.cancelled) {
+      console.error('[NotePanel] Podcast generation failed:', result.error)
+    }
+    setPodcastProgress(null)
+  }
+
+  const handleCancelPodcast = async () => {
+    if (!notebookId) return
+    await window.api.podcast?.cancel?.(notebookId)
+    setPodcastProgress(null)
+  }
+
   const handleQuizStart = async (params: QuizStartParams) => {
     if (!notebookId) return
     try {
-      // 立即开始生成（异步）
       window.api.quiz
         .generate(notebookId, {
           questionCount: params.questionCount,
@@ -241,12 +257,10 @@ export default function NotePanel(): ReactElement {
         })
         .then((result) => {
           if (result.success) {
-            // 生成完成后重新加载列表
             loadItems(notebookId)
           }
         })
 
-      // 等待一小段时间后刷新列表，以显示"正在生成"的 item
       setTimeout(() => {
         loadItems(notebookId)
       }, 500)
@@ -270,7 +284,6 @@ export default function NotePanel(): ReactElement {
   return (
     <div className="flex flex-col bg-card rounded-xl overflow-hidden h-full shadow-md">
       {isEditing && currentNote ? (
-        // 编辑器页面 - 使用 key 强制在切换笔记时重新挂载
         <NoteEditorPanel
           key={currentNote.id}
           note={currentNote}
@@ -282,7 +295,6 @@ export default function NotePanel(): ReactElement {
           onUnsavedChange={setHasUnsavedChanges}
         />
       ) : (
-        // 列表页面
         <>
           {/* 顶部工具栏 */}
           <PanelHeader
@@ -301,6 +313,20 @@ export default function NotePanel(): ReactElement {
                   <ClipboardCheck className="w-4 h-4" />
                 </Button>
                 <Button
+                  onClick={podcastProgress ? handleCancelPodcast : handleGeneratePodcast}
+                  variant="ghost"
+                  size="icon"
+                  className="w-8 h-8"
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  title={podcastProgress ? 'Cancel podcast script' : 'Generate podcast script'}
+                >
+                  {podcastProgress ? (
+                    <XCircle className="w-4 h-4 text-destructive" />
+                  ) : (
+                    <Podcast className="w-4 h-4" />
+                  )}
+                </Button>
+                <Button
                   onClick={handleCreateNote}
                   variant="ghost"
                   size="icon"
@@ -316,6 +342,20 @@ export default function NotePanel(): ReactElement {
 
           {/* Items 列表（上半） + Citation 预览（下半） */}
           <div className="flex-1 min-h-0 flex flex-col">
+            {podcastProgress && (
+              <div className="px-4 py-2 border-b border-border text-xs text-muted-foreground" role="status">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Podcast: {podcastProgress.stage}</span>
+                  <span>{Math.round(podcastProgress.progress)}%</span>
+                </div>
+                <div className="mt-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.max(1, Math.min(100, podcastProgress.progress))}%` }}
+                  />
+                </div>
+              </div>
+            )}
             <div className="basis-1/2 min-h-[180px] border-b border-border">
               <ScrollArea className="h-full">
                 <ItemList

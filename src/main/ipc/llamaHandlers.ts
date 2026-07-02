@@ -17,7 +17,7 @@ export function registerLlamaHandlers(llamaService: LlamaService) {
   })
 
   // Import a .gguf model file (opens file dialog, copies to models dir)
-  ipcMain.handle('llama:import-model', async (_event, args: { type: 'chat' | 'embedding' }) => {
+  ipcMain.handle('llama:import-model', async (_event, args: { type: 'chat' | 'embedding' | 'reranker' }) => {
     try {
       const result = await dialog.showOpenDialog({
         title: `Select ${args.type} model (.gguf)`,

@@ -4,6 +4,7 @@ node_modules
 # Build output
 dist
 out
+out-dev
 
 # Local runtime assets and sample/private documents
 resources/models/*.gguf

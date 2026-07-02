@@ -23,7 +23,7 @@ interface ProviderConfig {
 
 interface GgufModel {
   filename: string
-  type: 'chat' | 'embedding' | 'unknown'
+  type: 'chat' | 'embedding' | 'reranker' | 'unknown'
   sizeMB: number
   addedAt: string | null
 }
@@ -113,9 +113,7 @@ export default function GeneralSettings({
         })
       }
     })
-
-    // Fallback trực tiếp từ local GGUF nếu provider-config chưa sync kịp
-    if (chatModels.length === 0 || embeddingModels.length === 0) {
+    if (chatModels.length === 0 || embeddingModels.length === 0 || rerankModels.length === 0) {
       localModels.forEach((m) => {
         const modelObj = { id: `llama:${m.filename}`, provider: 'llama', label: m.filename }
         if (m.type === 'chat' && !chatModels.some((x) => x.id === modelObj.id)) {
@@ -123,6 +121,9 @@ export default function GeneralSettings({
         }
         if (m.type === 'embedding' && !embeddingModels.some((x) => x.id === modelObj.id)) {
           embeddingModels.push(modelObj)
+        }
+        if (m.type === 'reranker' && !rerankModels.some((x) => x.id === modelObj.id)) {
+          rerankModels.push(modelObj)
         }
       })
     }

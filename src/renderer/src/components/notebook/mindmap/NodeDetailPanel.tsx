@@ -22,10 +22,10 @@ export default function NodeDetailPanel() {
   const handleAskQuestion = async (chunkContent: string) => {
     if (!currentSession) return
 
-    const question = `基于以下内容,请详细解释:\n\n${chunkContent}`
-    await sendMessage(currentSession.id, question)
+    const question = `åŸºäºŽä»¥ä¸‹å†…å®¹,è¯·è¯¦ç»†è§£é‡Š:\n\n${chunkContent}`
+    await sendMessage(currentSession.id, question, 'ask')
 
-    // 关闭思维导图Dialog,聚焦到对话面板
+    // å…³é—­æ€ç»´å¯¼å›¾Dialog,èšç„¦åˆ°å¯¹è¯é¢æ¿
     setDialogOpen(false)
   }
 

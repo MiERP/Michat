@@ -61,7 +61,7 @@
   "defaultEmbeddingModel": "Default Embedding Model",
   "defaultEmbeddingModelDesc": "Select the embedding model for knowledge base indexing",
   "defaultRerankModel": "Default Rerank Model",
-  "defaultRerankModelDesc": "Select the rerank model used to reorder retrieval candidates",
+  "defaultRerankModelDesc": "Local llama.cpp rerank model, e.g. BAAI/bge-reranker-v2-m3 or Qwen3-Reranker-0.6B/4B; start server with --embedding --rerank --pooling rank.",
   "rerankEnabled": "Enable Rerank",
   "rerankEnabledDesc": "Run reranking after hybrid retrieval before final chunk selection",
   "rerankTopN": "Rerank Top N",

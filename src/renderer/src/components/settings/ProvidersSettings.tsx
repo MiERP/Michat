@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, ReactElement } from 'react'
-import { HardDrive, Download, Trash2, Cpu, Database, Check } from 'lucide-react'
+import { HardDrive, Download, Trash2, Cpu, Database, Check, ListFilter } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 
 interface GgufModel {
   filename: string
-  type: 'chat' | 'embedding' | 'unknown'
+  type: 'chat' | 'embedding' | 'reranker' | 'unknown'
   sizeMB: number
   addedAt: string | null
 }
@@ -44,12 +44,14 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
   const [importing, setImporting] = useState(false)
   const [defaultChatModel, setDefaultChatModel] = useState<string>('')
   const [defaultEmbeddingModel, setDefaultEmbeddingModel] = useState<string>('')
+  const [defaultRerankModel, setDefaultRerankModel] = useState<string>('')
 
   const loadDefaults = useCallback(async () => {
     try {
       const settings = await window.api.settings.getAll()
       setDefaultChatModel(settings.defaultChatModel || '')
       setDefaultEmbeddingModel(settings.defaultEmbeddingModel || '')
+      setDefaultRerankModel(settings.defaultRerankModel || '')
     } catch (error) {
       console.error('Failed to load default model settings:', error)
     }
@@ -72,7 +74,7 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
     loadDefaults()
   }, [loadModels, loadDefaults])
 
-  const handleImport = async (type: 'chat' | 'embedding') => {
+  const handleImport = async (type: 'chat' | 'embedding' | 'reranker') => {
     setImporting(true)
     try {
       const result = await window.api.llama.importModel(type)
@@ -96,6 +98,8 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
         await window.api.settings.update({ defaultChatModel: `llama:${model.filename}` })
       } else if (model.type === 'embedding') {
         await window.api.settings.update({ defaultEmbeddingModel: `llama:${model.filename}` })
+      } else if (model.type === 'reranker') {
+        await window.api.settings.update({ defaultRerankModel: `llama:${model.filename}` })
       } else {
         return
       }
@@ -126,6 +130,7 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
 
   const chatModels = models.filter((m) => m.type === 'chat')
   const embedModels = models.filter((m) => m.type === 'embedding')
+  const rerankModels = models.filter((m) => m.type === 'reranker')
   const unknownModels = models.filter((m) => m.type === 'unknown')
 
   const formatSize = (mb: number) => {
@@ -136,6 +141,7 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
   const isModelDefault = (model: GgufModel): boolean => {
     if (model.type === 'chat') return defaultChatModel === `llama:${model.filename}`
     if (model.type === 'embedding') return defaultEmbeddingModel === `llama:${model.filename}`
+    if (model.type === 'reranker') return defaultRerankModel === `llama:${model.filename}`
     return false
   }
 
@@ -146,6 +152,8 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
           <Cpu className="w-4 h-4 text-blue-500 shrink-0" />
         ) : model.type === 'embedding' ? (
           <Database className="w-4 h-4 text-emerald-500 shrink-0" />
+        ) : model.type === 'reranker' ? (
+          <ListFilter className="w-4 h-4 text-amber-500 shrink-0" />
         ) : (
           <HardDrive className="w-4 h-4 text-muted-foreground shrink-0" />
         )}
@@ -153,7 +161,7 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
           <div className="text-sm font-medium truncate">{model.filename}</div>
           <div className="text-xs text-muted-foreground">
             {formatSize(model.sizeMB)}
-            {model.addedAt && ` · ${new Date(model.addedAt).toLocaleDateString()}`}
+            {model.addedAt && ` ? ${new Date(model.addedAt).toLocaleDateString()}`}
           </div>
         </div>
       </div>
@@ -168,7 +176,7 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
             className="h-8"
           >
             <Check className="w-3.5 h-3.5 mr-1" />
-            {isModelDefault(model) ? 'Mặc định' : 'Dùng làm mặc định'}
+            {isModelDefault(model) ? 'Default' : 'Use as default'}
           </Button>
         )}
 
@@ -214,6 +222,15 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
               ? t('importing') || 'Importing...'
               : t('importEmbedModel') || 'Import Embedding Model'}
           </Button>
+          <Button
+            onClick={() => handleImport('reranker')}
+            disabled={importing}
+            variant="outline"
+            className="flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            {importing ? t('importing') || 'Importing...' : t('importRerankModel') || 'Import Rerank Model'}
+          </Button>
         </div>
 
         {chatModels.length > 0 && (
@@ -238,6 +255,20 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
             </h3>
             <div className="space-y-1">
               {embedModels.map((m) => (
+                <ModelRow key={m.filename} model={m} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {rerankModels.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <ListFilter className="w-4 h-4 text-amber-500" />
+              {t('rerankModels') || 'Rerank Models'} ({rerankModels.length})
+            </h3>
+            <div className="space-y-1">
+              {rerankModels.map((m) => (
                 <ModelRow key={m.filename} model={m} />
               ))}
             </div>

@@ -8,8 +8,9 @@ import { ProviderSchemas, validate } from './validation'
 import Logger from '../../shared/utils/logger'
 import { assertLoopbackHttpUrl } from '../security/guards'
 
-function inferModelTypeFromFilename(filename: string): 'chat' | 'embedding' | 'unknown' {
+function inferModelTypeFromFilename(filename: string): 'chat' | 'embedding' | 'reranker' | 'unknown' {
   const id = filename.toLowerCase()
+  if (id.includes('rerank') || id.includes('cross-encoder')) return 'reranker'
   if (id.includes('bge') || id.includes('embed') || id.includes('embedding') || id.includes('e5')) {
     return 'embedding'
   }

@@ -3,12 +3,10 @@ import type { Note } from '../../../shared/types'
 import type { MindMap } from '../../../main/db/schema'
 
 /**
- * Item 类型
  */
 export type ItemType = 'note' | 'mindmap' | 'quiz' | 'ppt' | 'audio' | 'video'
 
 /**
- * Item 详情
  */
 export interface ItemDetail {
   id: string
@@ -22,15 +20,12 @@ export interface ItemDetail {
 }
 
 /**
- * 从 items 数组中派生 notes 数组
- * 提取为辅助函数以保持逻辑一致性
  */
 const deriveNotes = (items: ItemDetail[]): Note[] => {
   return items.filter((item) => item.type === 'note').map((item) => item.resource as Note)
 }
 
 interface ItemStore {
-  // 状态
   items: ItemDetail[]
   notes: Note[] // 派生状态，从items中过滤type='note'的项
   currentNote: Note | null
@@ -42,7 +37,6 @@ interface ItemStore {
   setCurrentNote: (note: Note | null) => void
   setIsEditing: (isEditing: boolean) => void
 
-  // 异步操作
   loadItems: (notebookId: string) => Promise<void>
   loadNotes: (notebookId: string) => Promise<void>
   createNote: (notebookId: string, content: string, customTitle?: string) => Promise<Note>
@@ -67,7 +61,6 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
       const items = await window.api.items.getAll(notebookId)
       console.log(`[ItemStore] Loaded ${items.length} items`)
 
-      // 派生 notes 列表
       const notes = deriveNotes(items)
 
       set({ items, notes })
@@ -78,7 +71,6 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
   },
 
   loadNotes: async (notebookId: string) => {
-    // loadNotes 实际上调用 loadItems，因为notes是从items派生的
     await get().loadItems(notebookId)
   },
 
@@ -89,7 +81,6 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
       const note = await window.api.createNote(notebookId, content, customTitle)
       console.log('[ItemStore] Note created:', note.id)
 
-      // 重新加载 items 列表
       await get().loadItems(notebookId)
 
       set({
@@ -125,7 +116,6 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
           return item
         })
 
-        // 重新派生 notes 数组，保持与 items 同步
         const notes = deriveNotes(updatedItems)
 
         const updatedCurrentNote =
@@ -159,7 +149,6 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
           deletedItem?.type === 'note' && state.currentNote?.id === deletedItem.resourceId
 
         const updatedItems = state.items.filter((item) => item.id !== itemId)
-        // 重新派生 notes 数组，保持与 items 同步
         const notes = deriveNotes(updatedItems)
 
         return {

@@ -17,8 +17,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-function vectorFor(text: string): Float32Array {
-  const vector = new Float32Array(1024)
+function vectorFor(text: string, dimensions = 1024): Float32Array {
+  const vector = new Float32Array(dimensions)
   const lower = text.toLowerCase()
   if (lower.includes('local-first') || lower.includes('local first')) vector[0] = 1
   if (lower.includes('privacy') || lower.includes('riÃªng tÆ°') || lower.includes('quyá»n riÃªng tÆ°')) vector[1] = 1
@@ -31,9 +31,9 @@ function vectorFor(text: string): Float32Array {
 
 function embedding(text: string, config?: EmbeddingConfig): EmbeddingResult {
   return {
-    embedding: vectorFor(text),
+    embedding: vectorFor(text, config?.dimensions || 1024),
     model: config?.model || 'fake-local-embedding',
-    dimensions: 1024,
+    dimensions: config?.dimensions || 1024,
     tokensUsed: text.length
   }
 }
@@ -42,18 +42,19 @@ class FakeProviderManager {
   public embeddingCalls: string[] = []
   public failEmbeddings = false
   public remoteCalls = 0
+  public embeddingDimensions = 1024
 
   async getActiveEmbeddingProvider() {
     return {
       createEmbedding: async (text: string, config?: EmbeddingConfig) => {
         this.embeddingCalls.push(text)
         if (this.failEmbeddings) throw new Error('fake local embedding failure')
-        return embedding(text, config)
+        return embedding(text, { ...config, dimensions: this.embeddingDimensions })
       },
       createEmbeddings: async (texts: string[], config?: EmbeddingConfig) => {
         this.embeddingCalls.push(...texts)
         if (this.failEmbeddings) throw new Error('fake local embedding failure')
-        return texts.map((text) => embedding(text, config))
+        return texts.map((text) => embedding(text, { ...config, dimensions: this.embeddingDimensions }))
       },
       getDefaultEmbeddingModel: () => 'fake-local-embedding'
     }
@@ -110,6 +111,29 @@ describe('KnowledgeService RAG regression', () => {
   afterEach(async () => {
     await cleanup(context)
     context = undefined
+  })
+
+
+  it('adds document context to FTS and embeddings without changing displayed chunks', async () => {
+    const { service, notebookId, providerManager, dbModule } = context!
+
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Privacy Policy',
+      type: 'text',
+      content: 'Retention window is 30 days.',
+      chunkOptions: { chunkSize: 120, chunkOverlap: 0, minChunkSize: 10 }
+    })
+
+    const docChunks = service.getDocumentChunks(documentId)
+    const ftsRows = dbModule
+      .getSqlite()!
+      .prepare('SELECT content FROM fts_chunks WHERE chunk_id = ?')
+      .all(docChunks[0].id) as Array<{ content: string }>
+
+    expect(docChunks[0].content).toBe('Retention window is 30 days.')
+    expect(providerManager.embeddingCalls[0]).toContain('Title: Privacy Policy')
+    expect(providerManager.embeddingCalls[0]).toContain('Retention window is 30 days.')
+    expect(ftsRows[0].content).toContain('Title: Privacy Policy')
   })
 
   it('indexes text documents into chunks and embedding metadata', async () => {
@@ -177,6 +201,77 @@ describe('KnowledgeService RAG regression', () => {
     expect(document?.status).toBe('indexed')
     expect(docChunks.length).toBeGreaterThan(1)
     expect(providerManager.remoteCalls).toBe(0)
+  })
+
+
+  it('indexes and searches with non-1024 embedding dimensions', async () => {
+    const { service, notebookId, db, schema, providerManager } = context!
+    providerManager.embeddingDimensions = 384
+
+    const documentId = await service.addDocument(notebookId, {
+      title: '384 dimension model',
+      type: 'text',
+      content: 'Local-first embedding dimension test keeps retrieval working.',
+      chunkOptions: { chunkSize: 80, chunkOverlap: 0, minChunkSize: 10 }
+    })
+
+    const results = await service.search(notebookId, 'local-first embedding retrieval', {
+      topK: 1,
+      threshold: 0
+    })
+    const embeddingRows = db.select().from(schema.embeddings).all()
+
+    expect(service.getDocument(documentId)?.status).toBe('indexed')
+    expect(embeddingRows.every((row) => row.dimensions === 384)).toBe(true)
+    expect(results[0]?.documentId).toBe(documentId)
+  })
+
+  it('builds safe Vietnamese FTS queries without raw phrase OR raw query syntax', async () => {
+    const { buildFtsMatchQuery } = await import('../../src/main/services/KnowledgeService')
+
+    expect(buildFtsMatchQuery('Query RAG citation local kh\u00f4ng r\u1eddi kh\u1ecfi m\u00e1y')).toBe(
+      'query* OR rag* OR citation* OR local* OR kh\u00f4ng* OR r\u1eddi* OR kh\u1ecfi* OR m\u00e1y*'
+    )
+    expect(buildFtsMatchQuery('"local-first" OR remote* (test)')).toBe(
+      'local* OR first* OR or* OR remote* OR test*'
+    )
+  })
+
+
+  it('measures real ingest search metrics for recall, mrr, citations, and latency', async () => {
+    const { service, notebookId } = context!
+    const fixtures = [
+      { title: 'Alpha', content: 'Alpha local-first RAG keeps citation evidence on device.', query: 'local-first citation evidence', term: 'citation evidence' },
+      { title: 'Beta', content: 'Beta embedding retrieval uses vectors and FTS together.', query: 'embedding vectors fts', term: 'vectors and FTS' }
+    ]
+
+    for (const fixture of fixtures) {
+      await service.addDocument(notebookId, {
+        title: fixture.title,
+        type: 'text',
+        content: fixture.content,
+        chunkOptions: { chunkSize: 120, chunkOverlap: 0, minChunkSize: 10 }
+      })
+    }
+
+    const startedAt = Date.now()
+    const ranks: number[] = []
+    for (const fixture of fixtures) {
+      const results = await service.search(notebookId, fixture.query, { topK: 3, threshold: 0 })
+      const rank = results.findIndex((result) => result.content.includes(fixture.term)) + 1
+      expect(rank).toBeGreaterThan(0)
+      expect(results[rank - 1].chunkId).toBeTruthy()
+      expect(results[rank - 1].documentTitle).toBeTruthy()
+      ranks.push(rank)
+    }
+
+    const recallAt3 = ranks.filter((rank) => rank > 0 && rank <= 3).length / fixtures.length
+    const mrr = ranks.reduce((sum, rank) => sum + (rank > 0 ? 1 / rank : 0), 0) / fixtures.length
+    const latencyMs = Date.now() - startedAt
+
+    expect(recallAt3).toBe(1)
+    expect(mrr).toBeGreaterThanOrEqual(0.5)
+    expect(latencyMs).toBeLessThan(2000)
   })
 
   it('indexes XLSX tables with citations retrievable in top 3', async () => {

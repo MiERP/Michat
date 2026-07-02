@@ -191,6 +191,39 @@ export function runMigrations() {
  * ÃƒÂ¥Ã‹â€ Ã¢â‚¬ÂºÃƒÂ¥Ã‚Â»Ã‚Âº sqlite-vec ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ vec0 ÃƒÂ¨Ã¢â€žÂ¢Ã…Â¡ÃƒÂ¦Ã¢â‚¬Â¹Ã…Â¸ÃƒÂ¨Ã‚Â¡Ã‚Â¨ÃƒÂ¥Ã¢â‚¬â„¢Ã…â€™ FTS5 ÃƒÂ¨Ã¢â€žÂ¢Ã…Â¡ÃƒÂ¦Ã¢â‚¬Â¹Ã…Â¸ÃƒÂ¨Ã‚Â¡Ã‚Â¨
  * ÃƒÂ¥Ã…â€œÃ‚Â¨ runMigrations ÃƒÂ¥Ã‚ÂÃ…Â½ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
  */
+
+export function getVectorTableDimensions(): number | null {
+  if (!sqlite) return null
+  const row = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vec_embeddings'")
+    .get() as { sql?: string } | undefined
+  const match = row?.sql?.match(/FLOAT\[(\d+)\]/i)
+  return match ? Number(match[1]) : null
+}
+
+export function ensureVectorTableDimensions(dimensions: number): void {
+  if (!sqlite) {
+    throw new Error('[Database] Database not initialized. Call initDatabase() first.')
+  }
+  if (!Number.isInteger(dimensions) || dimensions <= 0) {
+    throw new Error(`Invalid embedding dimensions: ${dimensions}`)
+  }
+
+  const currentDimensions = getVectorTableDimensions()
+  if (currentDimensions === dimensions) return
+
+  sqlite.exec('DROP TABLE IF EXISTS vec_embeddings')
+  sqlite.exec(`
+    CREATE VIRTUAL TABLE vec_embeddings USING vec0(
+      embedding_id TEXT PRIMARY KEY,
+      chunk_id TEXT,
+      notebook_id TEXT,
+      embedding FLOAT[${dimensions}] distance_metric=cosine
+    );
+  `)
+  sqlite.prepare('DELETE FROM embeddings WHERE dimensions != ?').run(dimensions)
+}
+
 export function initExtensions() {
   if (!sqlite) {
     throw new Error('[Database] Database not initialized. Call initDatabase() first.')
