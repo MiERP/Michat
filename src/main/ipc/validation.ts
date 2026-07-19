@@ -199,6 +199,18 @@ export const ProviderSchemas = {
 /**
  * 知识库相关的验证 schemas
  */
+export const NotebookOverviewSchemas = {
+  get: z.object({
+    notebookId: z.string().min(1, 'Notebook ID cannot be empty')
+  }),
+  generate: z.object({
+    notebookId: z.string().min(1, 'Notebook ID cannot be empty')
+  }),
+  cancel: z.object({
+    notebookId: z.string().min(1, 'Notebook ID cannot be empty')
+  })
+}
+
 export const KnowledgeSchemas = {
   addDocument: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
@@ -235,7 +247,6 @@ export const KnowledgeSchemas = {
         message: 'Invalid folder path: path traversal not allowed'
       })
   }),
-
 
   addNote: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),

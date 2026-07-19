@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useRef } from 'react'
+import { ReactElement, ReactNode, useEffect, useRef } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ChatMessage } from '../../../../../shared/types/chat'
@@ -8,9 +8,10 @@ import { ScrollArea } from '../../ui/scroll-area'
 
 interface MessageListProps {
   messages: ChatMessage[]
+  header?: ReactNode
 }
 
-export default function MessageList({ messages }: MessageListProps): ReactElement {
+export default function MessageList({ messages, header }: MessageListProps): ReactElement {
   const bottomRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
 
@@ -25,6 +26,7 @@ export default function MessageList({ messages }: MessageListProps): ReactElemen
   if (messages.length === 0) {
     return (
       <ScrollArea className="h-full">
+        {header && <div className="px-4 pt-4">{header}</div>}
         <div className="flex min-h-full flex-col items-center justify-center p-8">
           <div className="flex flex-col items-center gap-4 text-muted-foreground">
             <MessageSquare className="w-16 h-16 opacity-20" />
@@ -42,6 +44,7 @@ export default function MessageList({ messages }: MessageListProps): ReactElemen
   return (
     <ScrollArea className="h-full">
       <div className="px-4 py-6 pb-32">
+        {header}
         <div className="space-y-4">
           {messages.map((message) => (
             <MessageItem key={message.id} message={message} />

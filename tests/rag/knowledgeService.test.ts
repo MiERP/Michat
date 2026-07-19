@@ -278,4 +278,22 @@ describe('KnowledgeService RAG regression', () => {
     expect(dbModule.getSqlite()?.prepare('SELECT count(*) as count FROM fts_chunks').get()).toMatchObject({ count: 0 })
     expect(dbModule.getSqlite()?.prepare('SELECT count(*) as count FROM vec_embeddings').get()).toMatchObject({ count: 0 })
   })
+  it('marks the notebook overview stale after source add, reindex, and delete', async () => {
+    const { service, notebookId } = context!
+    const changedNotebooks: string[] = []
+    service.setNotebookSourcesChangedListener((changedNotebookId) =>
+      changedNotebooks.push(changedNotebookId)
+    )
+
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Overview lifecycle',
+      type: 'text',
+      content: 'Source changes must mark the notebook overview stale.'
+    })
+    await service.reindexDocument(documentId)
+    await service.deleteDocument(documentId)
+
+    expect(changedNotebooks).toEqual([notebookId, notebookId, notebookId])
+  })
+
 })

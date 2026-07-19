@@ -4,6 +4,7 @@ import { join, basename } from 'path'
 import fs from 'fs'
 import Logger from '../../shared/utils/logger'
 import { settingsManager } from '../config'
+import { getGemma4CpuTuning } from './llamaRuntimeTuning'
 
 type ServerKind = 'chat' | 'embedding'
 type Backend = string
@@ -410,20 +411,42 @@ export class LlamaService {
       return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
     }
 
+    const isGemma4Chat = kind === 'chat' && /gemma[-_. ]?4/i.test(basename(modelPath))
+    let modelSizeMB = 0
+    try {
+      modelSizeMB = Math.round(fs.statSync(modelPath).size / (1024 * 1024))
+    } catch {
+      modelSizeMB = 0
+    }
+    const gemma4Tuning = isGemma4Chat
+      ? getGemma4CpuTuning(this.detectMachineInfo(), modelSizeMB)
+      : null
+    const generationThreads = parsePositiveInt(
+      process.env.KN_LLAMA_THREADS,
+      gemma4Tuning?.generationThreads || runtime.threads
+    )
+    const batchThreads = parsePositiveInt(
+      process.env.KN_LLAMA_THREADS_BATCH,
+      gemma4Tuning?.batchThreads || generationThreads
+    )
     const defaultBatchSize =
-      kind === 'embedding' ? Math.max(runtime.batchSize, 256) : runtime.batchSize
+      kind === 'embedding'
+        ? Math.max(runtime.batchSize, 256)
+        : gemma4Tuning?.batchSize || runtime.batchSize
     const defaultUbatchSize =
-      kind === 'embedding' ? Math.max(runtime.ubatchSize, 256) : runtime.ubatchSize
+      kind === 'embedding'
+        ? Math.max(runtime.ubatchSize, 256)
+        : gemma4Tuning?.ubatchSize || runtime.ubatchSize
 
     const batchSize =
       kind === 'embedding'
         ? parsePositiveInt(process.env.KN_LLAMA_EMBED_BATCH_SIZE, defaultBatchSize)
-        : parsePositiveInt(process.env.KN_LLAMA_CHAT_BATCH_SIZE, runtime.batchSize)
+        : parsePositiveInt(process.env.KN_LLAMA_CHAT_BATCH_SIZE, defaultBatchSize)
 
     const ubatchSize =
       kind === 'embedding'
         ? parsePositiveInt(process.env.KN_LLAMA_EMBED_UBATCH_SIZE, defaultUbatchSize)
-        : parsePositiveInt(process.env.KN_LLAMA_CHAT_UBATCH_SIZE, runtime.ubatchSize)
+        : parsePositiveInt(process.env.KN_LLAMA_CHAT_UBATCH_SIZE, defaultUbatchSize)
 
     const ctxSize =
       kind === 'embedding'
@@ -445,7 +468,9 @@ export class LlamaService {
       '--ctx-size',
       ctxSize,
       '--threads',
-      String(runtime.threads),
+      String(generationThreads),
+      '--threads-batch',
+      String(batchThreads),
       '--batch-size',
       String(batchSize),
       '--ubatch-size',
@@ -462,6 +487,31 @@ export class LlamaService {
 
     if (runtime.nGpuLayers > 0) {
       args.push('--n-gpu-layers', String(runtime.nGpuLayers))
+    }
+
+    const lockMemory =
+      process.env.KN_LLAMA_MLOCK === '1' ||
+      (process.env.KN_LLAMA_MLOCK !== '0' && Boolean(gemma4Tuning?.lockMemory))
+    if (lockMemory) args.push('--mlock')
+
+    if (gemma4Tuning) {
+      Logger.info(
+        'LlamaService',
+        'GEMMA4 PROFILE model=' +
+          basename(modelPath) +
+          ' size=' +
+          modelSizeMB +
+          'MB threads=' +
+          generationThreads +
+          '/' +
+          batchThreads +
+          ' batch=' +
+          batchSize +
+          '/' +
+          ubatchSize +
+          ' mlock=' +
+          lockMemory
+      )
     }
 
     // Newer llama.cpp builds require an explicit mode value for --flash-attn.

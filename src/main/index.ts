@@ -13,6 +13,7 @@ import { registerAllHandlers } from './ipc'
 import { getStore } from './config/store'
 import Logger from '../shared/utils/logger'
 import { isAllowedExternalOpenUrl } from './security/guards'
+import { cancelAllNotebookOverviewGenerations } from './ipc/notebookOverviewHandlers'
 
 let providerManager: ProviderManager | null = null
 let sessionAutoSwitchService: SessionAutoSwitchService | null = null
@@ -176,6 +177,8 @@ app.on('window-all-closed', () => {
     // Other platforms: Quit app when window closes
     app.quit()
   }
+
+  cancelAllNotebookOverviewGenerations()
 
   if (llamaService) {
     llamaService.stop()

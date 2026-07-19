@@ -90,5 +90,14 @@
   "title": "Title",
   "mindMapTitlePlaceholder": "Enter mind map title",
   "confirm": "Confirm",
-  "creativeSpace": "Creative Space"
+  "creativeSpace": "Creative Space",
+  "notebookOverview": "Notebook overview",
+  "createOverview": "Create overview",
+  "updateOverview": "Update overview",
+  "overviewStale": "Sources changed. Update to reflect current content.",
+  "overviewEmpty": "Create a source-grounded overview from indexed notebook documents.",
+  "overviewGenerateFailed": "Failed to create notebook overview",
+  "overviewCancel": "Cancel",
+  "overviewPreparing": "Preparing",
+  "overviewSynthesizing": "Synthesizing overview"
 }

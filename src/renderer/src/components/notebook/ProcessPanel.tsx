@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { useChatStore } from '../../store/chatStore'
 import { useNotebookStore } from '../../store/notebookStore'
 import MessageList from './chat/MessageList'
+import NotebookOverviewCard from './NotebookOverviewCard'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
@@ -336,7 +337,12 @@ export default function ProcessPanel({
 
       {/* 对话消息区域 - 使用 absolute 定位占满剩余空间 */}
       <div className="absolute top-14 bottom-0 left-0 right-0 overflow-hidden">
-        <MessageList messages={messages} />
+        <MessageList
+          messages={messages}
+          header={
+            currentNotebookId ? <NotebookOverviewCard notebookId={currentNotebookId} /> : undefined
+          }
+        />
       </div>
 
       {/* 底部渐变遮罩 - 独立于消息区域，避免堆叠上下文问题 */}

@@ -6,6 +6,7 @@ import { MindMapService } from '../services/MindMapService'
 import { QuizService } from '../services/QuizService'
 import { ShortcutManager } from '../services/ShortcutManager'
 import { LlamaService } from '../services/LlamaService'
+import { NotebookOverviewService } from '../services/NotebookOverviewService'
 import type Store from 'electron-store'
 import type { StoreSchema } from '../config/types'
 import { registerChatHandlers } from './chatHandlers'
@@ -22,6 +23,7 @@ import { registerShortcutHandlers } from './shortcutHandlers'
 import { registerLlamaHandlers } from './llamaHandlers'
 import { registerLicenseHandlers } from './licenseHandlers'
 import { registerTemplateHandlers } from './templateHandlers'
+import { registerNotebookOverviewHandlers } from './notebookOverviewHandlers'
 
 /**
  * 注册所有 IPC Handlers
@@ -39,6 +41,10 @@ export function registerAllHandlers(
   const mindMapService = new MindMapService(providerManager)
   // 实例化 QuizService
   const quizService = new QuizService(providerManager)
+  const notebookOverviewService = new NotebookOverviewService(providerManager)
+  knowledgeService.setNotebookSourcesChangedListener((notebookId) =>
+    notebookOverviewService.markStale(notebookId)
+  )
 
   registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
   registerProviderHandlers(providerManager, llamaService)
@@ -46,6 +52,7 @@ export function registerAllHandlers(
   registerNotebookHandlers()
   registerNoteHandlers(providerManager)
   registerKnowledgeHandlers(knowledgeService, llamaService)
+  registerNotebookOverviewHandlers(notebookOverviewService)
   registerMindMapHandlers(mindMapService)
   registerQuizHandlers(quizService)
   registerUpdateHandlers(updateService)

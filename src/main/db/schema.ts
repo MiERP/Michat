@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 /**
  * 笔记本表
@@ -207,6 +207,35 @@ export const embeddings = sqliteTable(
 
 export type Embedding = typeof embeddings.$inferSelect
 export type NewEmbedding = typeof embeddings.$inferInsert
+
+/**
+ * Notebook Overview table
+ * Stores user-triggered cross-document synthesis.
+ */
+export const notebookOverviews = sqliteTable(
+  'notebook_overviews',
+  {
+    id: text('id').primaryKey(),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    content: text('content').notNull(),
+    citations: text('citations', { mode: 'json' }).notNull().$type<Record<string, unknown>[]>(),
+    sourceFingerprint: text('source_fingerprint').notNull(),
+    status: text('status', { enum: ['fresh', 'stale'] })
+      .notNull()
+      .default('fresh'),
+    model: text('model'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    notebookUnique: uniqueIndex('idx_notebook_overviews_notebook').on(table.notebookId)
+  })
+)
+
+export type NotebookOverviewRecord = typeof notebookOverviews.$inferSelect
+export type NewNotebookOverviewRecord = typeof notebookOverviews.$inferInsert
 
 /**
  * 思维导图表

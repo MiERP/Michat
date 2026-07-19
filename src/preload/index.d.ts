@@ -12,6 +12,7 @@ import type {
 } from '../shared/types/knowledge'
 import type { UpdateState, UpdateCheckResult, UpdateOperationResult } from '../shared/types/update'
 import type { LicenseStatus } from '../shared/types/license'
+import type { NotebookOverview } from '../shared/types/notebookOverview'
 import type { MindMap, Quiz, QuizSession } from '../main/db/schema'
 
 // 重新导出共享类型
@@ -114,6 +115,17 @@ declare global {
       }
 
       // Quiz 相关
+      notebookOverview: {
+        get: (notebookId: string) => Promise<NotebookOverview | null>
+        generate: (
+          notebookId: string
+        ) => Promise<{ success: boolean; overview?: NotebookOverview; error?: string }>
+        cancel: (notebookId: string) => Promise<{ success: boolean }>
+        onProgress: (
+          callback: (data: { notebookId: string; stage: string; progress: number }) => void
+        ) => () => void
+      }
+
       quiz: {
         getLatest: (notebookId: string) => Promise<Quiz | null>
         get: (quizId: string) => Promise<Quiz | null>

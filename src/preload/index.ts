@@ -259,6 +259,23 @@ const api = {
   },
 
   // Quiz 答题相关
+  notebookOverview: {
+    get: (notebookId: string) => ipcRenderer.invoke('notebook-overview:get', { notebookId }),
+    generate: (notebookId: string) =>
+      ipcRenderer.invoke('notebook-overview:generate', { notebookId }),
+    cancel: (notebookId: string) => ipcRenderer.invoke('notebook-overview:cancel', { notebookId }),
+    onProgress: (
+      callback: (data: { notebookId: string; stage: string; progress: number }) => void
+    ) => {
+      const listener = (
+        _event: unknown,
+        data: { notebookId: string; stage: string; progress: number }
+      ) => callback(data)
+      ipcRenderer.on('notebook-overview:progress', listener)
+      return () => ipcRenderer.removeListener('notebook-overview:progress', listener)
+    }
+  },
+
   quiz: {
     // 生成题目
     generate: (notebookId: string, options?: any) =>

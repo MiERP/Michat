@@ -54,5 +54,14 @@
   "noteTitlePlaceholder": "Vui lòng nhập tiêu đề ghi chú",
   "mindMapTitlePlaceholder": "Vui lòng nhập tiêu đề sơ đồ tư duy",
   "confirm": "Xác nhận",
-  "creativeSpace": "Không gian sáng tạo"
+  "creativeSpace": "Không gian sáng tạo",
+  "notebookOverview": "Tổng quan notebook",
+  "createOverview": "Tạo tổng quan",
+  "updateOverview": "Cập nhật tổng quan",
+  "overviewStale": "Nguồn đã thay đổi. Cập nhật để phản ánh nội dung mới.",
+  "overviewEmpty": "Tạo tổng quan từ các tài liệu đã lập chỉ mục trong notebook.",
+  "overviewGenerateFailed": "Không thể tạo tổng quan notebook",
+  "overviewCancel": "Hủy",
+  "overviewPreparing": "Đang chuẩn bị",
+  "overviewSynthesizing": "Đang tổng hợp"
 }

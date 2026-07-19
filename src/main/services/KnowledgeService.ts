@@ -90,6 +90,7 @@ export class KnowledgeService {
   private fileParserService: FileParserService
   private rerankService: RerankService
   private knowledgeFilesDir: string
+  private notebookSourcesChangedListener?: (notebookId: string) => void
 
   constructor(providerManager: ProviderManager) {
     this.embeddingService = new EmbeddingService(providerManager)
@@ -432,6 +433,18 @@ export class KnowledgeService {
     )
   }
 
+  setNotebookSourcesChangedListener(listener: (notebookId: string) => void): void {
+    this.notebookSourcesChangedListener = listener
+  }
+
+  private markNotebookOverviewStale(notebookId: string): void {
+    try {
+      this.notebookSourcesChangedListener?.(notebookId)
+    } catch (error) {
+      Logger.warn('KnowledgeService', 'Failed to mark notebook overview stale:', error)
+    }
+  }
+
   async addDocument(
     notebookId: string,
     options: AddDocumentOptions,
@@ -471,6 +484,7 @@ export class KnowledgeService {
         options.chunkOptions,
         onProgress
       )
+      this.markNotebookOverviewStale(notebookId)
       return documentId
     } catch (error) {
       await this.cleanupDocumentIndex(notebookId, documentId)
@@ -562,6 +576,7 @@ export class KnowledgeService {
         chunkOptions,
         onProgress
       )
+      this.markNotebookOverviewStale(notebookId)
       return documentId
     } catch (error) {
       if (localFilePath) await this.deleteLocalFile(localFilePath)
@@ -987,6 +1002,7 @@ export class KnowledgeService {
     if (doc.localFilePath) await this.deleteLocalFile(doc.localFilePath)
 
     db.delete(documents).where(eq(documents.id, documentId)).run()
+    this.markNotebookOverviewStale(doc.notebookId)
     executeCheckpoint('PASSIVE')
     Logger.info('KnowledgeService', `Document deleted: ${documentId}`)
   }
@@ -1034,6 +1050,7 @@ export class KnowledgeService {
 
     // 4. Re-index using existing documentId via shared _indexContent
     await this._indexContent(documentId, doc.notebookId, doc.content, undefined, onProgress)
+    this.markNotebookOverviewStale(doc.notebookId)
   }
 
   /**
