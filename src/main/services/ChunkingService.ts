@@ -265,6 +265,8 @@ export class ChunkingService {
         })
       }
 
+      if (currentEnd >= text.length) break
+
       currentStart = Math.max(currentEnd - chunkOverlap, currentStart + 1)
     }
 

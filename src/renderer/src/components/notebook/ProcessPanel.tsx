@@ -373,13 +373,13 @@ export default function ProcessPanel({
                 ? t('selectSession')
                 : !licenseChecked
                   ? 'Đang kiểm tra bản quyền...'
-                : !licenseStatus.valid
-                  ? licenseHint
-                : !hasProvider
-                  ? t('noProviderConfigured')
-                  : !defaultChatModel
-                    ? t('noDefaultModel')
-                    : t('inputMessage')
+                  : !licenseStatus.valid
+                    ? licenseHint
+                    : !hasProvider
+                      ? t('noProviderConfigured')
+                      : !defaultChatModel
+                        ? t('noDefaultModel')
+                        : t('inputMessage')
             }
             disabled={
               !currentSession ||
@@ -415,12 +415,12 @@ export default function ProcessPanel({
                 !licenseChecked
                   ? 'Đang kiểm tra bản quyền...'
                   : !licenseStatus.valid
-                  ? licenseHint
-                  : !hasProvider
-                    ? t('noProviderConfigured')
-                    : !currentSession
-                      ? t('selectSession')
-                      : ''
+                    ? licenseHint
+                    : !hasProvider
+                      ? t('noProviderConfigured')
+                      : !currentSession
+                        ? t('selectSession')
+                        : ''
               }
               size="icon"
               className="absolute right-2 bottom-3 w-8 h-8 rounded-full"

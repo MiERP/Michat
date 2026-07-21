@@ -1,9 +1,10 @@
-import { ReactElement, useRef, useEffect, useState } from 'react'
+import { KeyboardEvent, ReactElement, useRef, useEffect, useState } from 'react'
 import { FileText, Globe, FileUp, StickyNote, Trash2, Loader2, Database } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { KnowledgeDocument } from '../../../../../shared/types/knowledge'
 import { Button } from '../../ui/button'
 import ConfirmDialog from '../../common/ConfirmDialog'
+import { getDocumentNavigationAction } from './documentNavigation'
 import {
   Empty,
   EmptyHeader,
@@ -16,19 +17,59 @@ import {
 interface DocumentListProps {
   documents: KnowledgeDocument[]
   hasEmbeddingModel: boolean
+  selectedDocumentId: string | null
   onDeleteDocument: (documentId: string) => void
   onSelectDocument: (document: KnowledgeDocument) => void
+  onOpenDocument: (document: KnowledgeDocument) => void
   onOpenSettings: () => void
 }
 
 export default function DocumentList({
   documents,
   hasEmbeddingModel,
+  selectedDocumentId,
   onDeleteDocument,
   onSelectDocument,
+  onOpenDocument,
   onOpenSettings
 }: DocumentListProps): ReactElement {
   const { t } = useTranslation('ui')
+  const itemRefs = useRef(new Map<string, HTMLDivElement>())
+
+  useEffect(() => {
+    if (!selectedDocumentId) return
+    const item = itemRefs.current.get(selectedDocumentId)
+    item?.focus()
+    item?.scrollIntoView({ block: 'nearest' })
+  }, [selectedDocumentId])
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    if (
+      target.closest('button, input, textarea, select, [contenteditable="true"], [role="dialog"]')
+    ) {
+      return
+    }
+
+    const action = getDocumentNavigationAction(
+      documents.map((document) => document.id),
+      selectedDocumentId,
+      event.key
+    )
+    if (!action) return
+
+    event.preventDefault()
+    if (action.open && selectedDocumentId) {
+      const selectedDocument = documents.find((document) => document.id === selectedDocumentId)
+      if (selectedDocument) onOpenDocument(selectedDocument)
+      return
+    }
+
+    if (action.selectedDocumentId) {
+      const nextDocument = documents.find((document) => document.id === action.selectedDocumentId)
+      if (nextDocument) onSelectDocument(nextDocument)
+    }
+  }
 
   // 未配置嵌入模型的提示（优先级最高）
   if (!hasEmbeddingModel && documents.length === 0) {
@@ -64,13 +105,25 @@ export default function DocumentList({
   }
 
   return (
-    <div className="p-2 space-y-1">
-      {documents.map((doc) => (
+    <div
+      className="p-2 space-y-1"
+      role="listbox"
+      aria-label="Danh sách tài liệu"
+      onKeyDown={handleKeyDown}
+    >
+      {documents.map((doc, index) => (
         <DocumentItem
           key={doc.id}
           document={doc}
+          selected={doc.id === selectedDocumentId}
+          tabIndex={doc.id === selectedDocumentId || (!selectedDocumentId && index === 0) ? 0 : -1}
+          itemRef={(element) => {
+            if (element) itemRefs.current.set(doc.id, element)
+            else itemRefs.current.delete(doc.id)
+          }}
           onDelete={onDeleteDocument}
           onSelect={onSelectDocument}
+          onOpen={onOpenDocument}
         />
       ))}
     </div>
@@ -80,11 +133,23 @@ export default function DocumentList({
 // 文档项组件
 interface DocumentItemProps {
   document: KnowledgeDocument
+  selected: boolean
+  tabIndex: number
+  itemRef: (element: HTMLDivElement | null) => void
   onDelete: (id: string) => void
   onSelect: (document: KnowledgeDocument) => void
+  onOpen: (document: KnowledgeDocument) => void
 }
 
-function DocumentItem({ document, onDelete, onSelect }: DocumentItemProps): ReactElement {
+function DocumentItem({
+  document,
+  selected,
+  tabIndex,
+  itemRef,
+  onDelete,
+  onSelect,
+  onOpen
+}: DocumentItemProps): ReactElement {
   const { t } = useTranslation('ui')
   const hasShownErrorRef = useRef(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -117,8 +182,16 @@ function DocumentItem({ document, onDelete, onSelect }: DocumentItemProps): Reac
 
   return (
     <div
+      ref={itemRef}
+      role="option"
+      aria-selected={selected}
+      tabIndex={tabIndex}
       onClick={() => onSelect(document)}
-      className="group grid grid-cols-[auto_1fr_auto] gap-2 items-start p-3 rounded-lg transition-colors cursor-pointer select-none hover:bg-muted"
+      onDoubleClick={() => onOpen(document)}
+      onFocus={() => onSelect(document)}
+      className={`group grid grid-cols-[auto_1fr_auto] gap-2 items-start p-3 rounded-lg transition-colors cursor-pointer select-none outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${
+        selected ? 'brand-selection border ring-1 ring-primary/40' : ''
+      }`}
     >
       {/* 图标列 - 固定宽度 */}
       {getTypeIcon()}
@@ -126,7 +199,7 @@ function DocumentItem({ document, onDelete, onSelect }: DocumentItemProps): Reac
       {/* 内容列 - 可被压缩 */}
       <div className="min-w-0 flex flex-col gap-1">
         <h3 className="text-sm font-medium truncate">{document.title}</h3>
-        <p className="text-xs text-muted-foreground">{document.chunkCount} chunks</p>
+        <p className="text-xs text-muted-foreground">{document.chunkCount} phân đoạn</p>
         {document.status === 'processing' && (
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -135,19 +208,21 @@ function DocumentItem({ document, onDelete, onSelect }: DocumentItemProps): Reac
         )}
       </div>
 
-      {/* 删除按钮列 - 固定宽度 */}
-      <Button
-        onClick={(e) => {
-          e.stopPropagation()
-          setIsDeleteDialogOpen(true)
-        }}
-        variant="ghost"
-        size="icon"
-        className="opacity-0 group-hover:opacity-100 w-8 h-8 mt-0.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-        title={t('deleteDocument')}
-      >
-        <Trash2 className="w-4 h-4" />
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button
+          onClick={(e) => {
+            e.stopPropagation()
+            setIsDeleteDialogOpen(true)
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+          variant="ghost"
+          size="icon"
+          className="opacity-0 group-hover:opacity-100 w-8 h-8 mt-0.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          title={t('deleteDocument')}
+        >
+          <Trash2 className="w-4 h-4" />
+        </Button>
+      </div>
 
       {/* 删除文档确认对话框 */}
       <ConfirmDialog

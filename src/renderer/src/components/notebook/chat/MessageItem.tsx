@@ -8,6 +8,7 @@ import { BookPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ChatMessage } from '../../../types/notebook'
 import type { ChatCitation } from '../../../../../shared/types/chat'
+import type { LegalComparisonResult } from '../../../../../main/services/LegalComparisonService'
 import ReasoningContent from './ReasoningContent'
 import { useItemStore } from '../../../store/itemStore'
 import { useNotebookStore } from '../../../store/notebookStore'
@@ -194,6 +195,10 @@ export default function MessageItem({ message }: MessageItemProps): ReactElement
           />
         )}
 
+        {message.metadata?.legalComparison && (
+          <LegalComparisonCard result={message.metadata.legalComparison} />
+        )}
+
         {message.content ? (
           <div
             className="markdown-content text-foreground px-2"
@@ -320,6 +325,34 @@ export default function MessageItem({ message }: MessageItemProps): ReactElement
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function LegalComparisonCard({ result }: { result: LegalComparisonResult }): ReactElement {
+  const statusLabel = {
+    resolved: 'Đã xác định theo metadata',
+    needs_metadata: 'Cần metadata hiệu lực',
+    needs_user_facts: 'Cần thêm tình tiết',
+    insufficient_evidence: 'Chưa đủ chứng cứ'
+  }[result.resolution.status]
+
+  return (
+    <div className="mx-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-foreground">
+      <div className="font-medium">So sánh pháp lý · {statusLabel}</div>
+      <p className="mt-1 text-muted-foreground">{result.resolution.reason}</p>
+      {result.rows.length > 0 && (
+        <ul className="mt-2 space-y-1 text-muted-foreground">
+          {result.rows.slice(0, 3).map((row) => (
+            <li key={`${row.leftDocumentId}-${row.rightDocumentId}-${row.topic}`}>
+              {row.topic}: {row.relation} [{row.citationIds.join(', ')}]
+            </li>
+          ))}
+        </ul>
+      )}
+      {result.limitations.length > 0 && (
+        <p className="mt-2 text-amber-700 dark:text-amber-300">Lưu ý: {result.limitations.join(' ')}</p>
+      )}
     </div>
   )
 }

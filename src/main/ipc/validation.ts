@@ -211,6 +211,28 @@ export const NotebookOverviewSchemas = {
   })
 }
 
+const legalDocumentMetadataSchema = z.object({
+  documentNumber: z.string().max(100).optional(),
+  documentType: z.string().max(100).optional(),
+  issuer: z.string().max(200).optional(),
+  documentTitle: z.string().max(1000).optional(),
+  legalBases: z.string().max(10000).optional(),
+  jurisdiction: z.string().max(200).optional(),
+  issuedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  status: z.enum(['effective', 'partially_repealed', 'replaced', 'repealed', 'expired', 'draft', 'unknown']),
+  scope: z.string().max(1000).optional(),
+  sourceAuthority: z.string().max(200).optional(),
+  officialSourceUrl: z.string().url().max(2000).optional(),
+  sourceHash: z.string().max(200).optional(),
+  verifiedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  verifiedBy: z.string().max(200).optional(),
+  amendsDocumentIds: z.array(z.string().min(1).max(200)).max(100).default([]),
+  replacesDocumentIds: z.array(z.string().min(1).max(200)).max(100).default([]),
+  repealedByDocumentIds: z.array(z.string().min(1).max(200)).max(100).default([])
+})
+
 export const KnowledgeSchemas = {
   addDocument: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
@@ -259,6 +281,11 @@ export const KnowledgeSchemas = {
 
   getDocument: z.object({
     documentId: z.string().min(1, 'Document ID cannot be empty')
+  }),
+
+  updateLegalMetadata: z.object({
+    documentId: z.string().min(1, 'Document ID cannot be empty'),
+    metadata: legalDocumentMetadataSchema
   }),
 
   getDocumentChunks: z.object({

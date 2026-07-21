@@ -22,6 +22,19 @@ export function validateAndCleanMessages(messages: APIMessage[]): APIMessage[] {
   return cleaned
 }
 
+
+/**
+ * Gemma chat templates accept one system message, placed before all turns.
+ * Preserve instruction order while collapsing injected persona, memory, and RAG prompts.
+ */
+export function combineSystemMessages(messages: APIMessage[]): APIMessage[] {
+  const systemMessages = messages.filter((message) => message.role === 'system')
+  if (systemMessages.length <= 1) return messages
+
+  const content = systemMessages.map((message) => message.content.trim()).filter(Boolean).join('\n\n')
+  return [{ role: 'system', content }, ...messages.filter((message) => message.role !== 'system')]
+}
+
 /**
  * Remove consecutive same role messages
  * Strategy: Keep the last one (newest message)

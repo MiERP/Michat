@@ -29,7 +29,7 @@ export function createMindMapWindow(notebookId: string, mindMapId?: string): voi
 
   // 根据用户主题设置背景色
   const theme = settingsManager.getSettingSync('theme')
-  const backgroundColor = theme === 'dark' ? '#1a1b1e' : '#fafafa'
+  const backgroundColor = theme === 'dark' ? '#111820' : '#f0f3f0'
 
   // 创建思维导图窗口
   mindMapWindow = new BrowserWindow({
@@ -82,7 +82,7 @@ export function createMindMapWindow(notebookId: string, mindMapId?: string): voi
   // 监听主题变化
   settingsManager.onSettingsChangeSync((newSettings) => {
     if (mindMapWindow && !mindMapWindow.isDestroyed()) {
-      const newBackgroundColor = newSettings.theme === 'dark' ? '#1a1b1e' : '#fafafa'
+      const newBackgroundColor = newSettings.theme === 'dark' ? '#111820' : '#f0f3f0'
       mindMapWindow.setBackgroundColor(newBackgroundColor)
     }
   })

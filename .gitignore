@@ -1,45 +1,8 @@
-# Dependencies
-node_modules
-
-# Build output
-dist
-out
-
-# Local runtime assets and sample/private documents
-resources/models/*.gguf
-resources/**/*.exe
-resources/**/*.dll
-vanbantest/
-src/main/config/key-mi.lic
-
-# Environment variables
-.env
-.env.*
-!.env.example
-
-# Testing
+﻿node_modules/
+out/
+dist/
 coverage/
-.nyc_output/
-
-# IDE
-.idea/
-.vscode/settings.json
-*.swp
-*.swo
-*.swn
-
-# Operating System
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Logs
-*.log*
-.eslintcache
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.swp
-*~
+resources/models/*.gguf
+resources/llama-bin/
+*.log
+.codex-*.log

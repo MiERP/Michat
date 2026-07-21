@@ -75,7 +75,7 @@ export default function TopNavigationBar({
 
   return (
     <div
-      className="h-12 shrink-0 flex items-center justify-between px-2 gap-0.5"
+      className="brand-topbar h-12 shrink-0 flex items-center justify-between px-2 gap-0.5"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       {/* macOS 左侧空白区域（留给窗口控制按钮） */}
@@ -89,7 +89,7 @@ export default function TopNavigationBar({
             variant="ghost"
             size="icon"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            className="w-7 h-7"
+            className="w-7 h-7 text-white/80 hover:bg-white/10 hover:text-white"
             title={t('settings')}
           >
             <Settings className="w-4 h-4" />
@@ -107,7 +107,7 @@ export default function TopNavigationBar({
             {/* 首页标签 */}
             <TabsTrigger
               value="home"
-              className="h-7 gap-2 px-3 data-[state=active]:bg-muted/50 data-[state=active]:shadow-sm rounded-md border data-[state=active]:border-border/50 border-transparent hover:bg-accent/50 transition-all"
+              className="brand-navigation-tab h-7 gap-2 px-3 rounded-md border transition-all"
             >
               <Home className="w-4 h-4" />
               <span>{t('home')}</span>
@@ -118,7 +118,7 @@ export default function TopNavigationBar({
               <TabsTrigger
                 key={notebook.id}
                 value={notebook.id}
-                className="h-7 gap-1 pr-2 pl-3 data-[state=active]:bg-muted/50 data-[state=active]:shadow-sm rounded-md border data-[state=active]:border-border/50 border-transparent hover:bg-accent/50 transition-all max-w-[200px]"
+                className="brand-navigation-tab h-7 gap-1 pr-2 pl-3 rounded-md border transition-all max-w-[200px]"
               >
                 <span className="truncate">{notebook.title}</span>
                 <button
@@ -137,7 +137,7 @@ export default function TopNavigationBar({
               onClick={onCreateClick}
               variant="ghost"
               size="icon"
-              className="w-7 h-7"
+              className="w-7 h-7 text-white/80 hover:bg-white/10 hover:text-white"
               title={t('create', { ns: 'common' })}
             >
               <Plus className="w-4 h-4" />
@@ -153,7 +153,7 @@ export default function TopNavigationBar({
           variant="ghost"
           size="icon"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          className="w-7 h-7"
+          className="w-7 h-7 text-white/80 hover:bg-white/10 hover:text-white"
           title={t('settings')}
         >
           <Settings className="w-4 h-4" />

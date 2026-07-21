@@ -14,6 +14,7 @@ import type { UpdateState, UpdateCheckResult, UpdateOperationResult } from '../s
 import type { LicenseStatus } from '../shared/types/license'
 import type { NotebookOverview } from '../shared/types/notebookOverview'
 import type { MindMap, Quiz, QuizSession } from '../main/db/schema'
+import type { LegalDocumentMetadata } from '../main/services/LegalComparisonService'
 
 // 重新导出共享类型
 export type {
@@ -249,6 +250,10 @@ declare global {
         // 文档管理
         getDocuments: (notebookId: string) => Promise<KnowledgeDocument[]>
         getDocument: (documentId: string) => Promise<KnowledgeDocument | null>
+        updateLegalMetadata: (
+          documentId: string,
+          metadata: LegalDocumentMetadata
+        ) => Promise<{ success: boolean; document?: KnowledgeDocument; error?: string }>
         getDocumentChunks: (documentId: string) => Promise<KnowledgeChunk[]>
         getDocumentPage: (
           documentId: string,

@@ -11,6 +11,33 @@ import type { PDFDocumentProxy, TextItem } from 'pdfjs-dist/types/src/display/ap
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, PageInfo } from './types'
 
+export interface PdfTextItem {
+  str: string
+  hasEOL?: boolean
+  transform?: ArrayLike<number>
+}
+
+export function joinPdfTextItems(items: PdfTextItem[]): string {
+  let text = ''
+  let previousY: number | undefined
+  let previousHasEOL = false
+
+  for (const item of items) {
+    if (!item.str) continue
+
+    const currentY = item.transform?.[5]
+    const movedToNewLine =
+      previousY !== undefined && currentY !== undefined && Math.abs(previousY - currentY) > 2
+    if (text) text += previousHasEOL || movedToNewLine ? '\n' : ' '
+
+    text += item.str
+    previousY = currentY
+    previousHasEOL = item.hasEOL === true
+  }
+
+  return text
+}
+
 /**
  * Bộ nạp tài liệu PDF
  * Dựa trên PDF.js của Mozilla (thuần JavaScript)
@@ -84,10 +111,9 @@ export class PdfLoader implements IDocumentLoader {
         const viewport = page.getViewport({ scale: 1.0 })
 
         // Trích xuất nội dung văn bản của trang
-        const pageText = textContent.items
-          .filter((item): item is TextItem => 'str' in item)
-          .map((item) => item.str)
-          .join(' ')
+        const pageText = joinPdfTextItems(
+          textContent.items.filter((item): item is TextItem => 'str' in item)
+        )
 
         // Làm sạch văn bản
         const cleanedText = this.cleanPDFText(pageText)
@@ -153,7 +179,6 @@ export class PdfLoader implements IDocumentLoader {
         // Loại bỏ khoảng trắng dư thừa
         .replace(/[ \t]+/g, ' ')
         // Sửa lỗi xuống dòng (nhiều dòng thực ra có thể cùng một đoạn)
-        .replace(/([^\n])\n([^\n])/g, '$1 $2')
         // Chuẩn hóa nhiều dòng trống thành 2 dòng
         .replace(/\n{3,}/g, '\n\n')
         // Loại bỏ khoảng trắng đầu/cuối

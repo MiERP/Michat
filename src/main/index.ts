@@ -29,129 +29,129 @@ let llamaService: LlamaService | null = null
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   try {
-  const licenseStatus = LicenseService.ensureLicenseOnStartup()
-  Logger.info(
-    'Main',
-    `License startup check: ${licenseStatus.valid ? 'valid' : 'invalid'}${licenseStatus.expiresAt ? `, expiresAt=${licenseStatus.expiresAt}` : ''}`
-  )
+    const licenseStatus = LicenseService.ensureLicenseOnStartup()
+    Logger.info(
+      'Main',
+      `License startup check: ${licenseStatus.valid ? 'valid' : 'invalid'}${licenseStatus.expiresAt ? `, expiresAt=${licenseStatus.expiresAt}` : ''}`
+    )
 
-  // Auto-start llama.cpp servers (best effort)
-  llamaService = new LlamaService()
-  await llamaService.ensureStarted()
+    // Auto-start llama.cpp servers (best effort)
+    llamaService = new LlamaService()
+    await llamaService.ensureStarted()
 
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.michat.app')
+    // Set app user model id for windows
+    electronApp.setAppUserModelId('com.michat.app')
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
+    // Default open or close DevTools by F12 in development
+    // and ignore CommandOrControl + R in production.
+    // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
 
-  // Initialize database
-  Logger.info('Main', 'Initializing database...')
-  initDatabase()
-  runMigrations()
-  initExtensions()
-  Logger.info('Main', 'Database initialized')
+    // Initialize database
+    Logger.info('Main', 'Initializing database...')
+    initDatabase()
+    runMigrations()
+    initExtensions()
+    Logger.info('Main', 'Database initialized')
 
-  // Initialize Provider Manager
-  Logger.info('Main', 'Initializing Provider Manager...')
-  providerManager = new ProviderManager()
-  await providerManager.initialize()
-  Logger.info('Main', 'Provider Manager initialized')
+    // Initialize Provider Manager
+    Logger.info('Main', 'Initializing Provider Manager...')
+    providerManager = new ProviderManager()
+    await providerManager.initialize()
+    Logger.info('Main', 'Provider Manager initialized')
 
-  // Initialize Session Auto Switch Service
-  Logger.info('Main', 'Initializing Session Auto Switch Service...')
-  sessionAutoSwitchService = new SessionAutoSwitchService(providerManager)
-  Logger.info('Main', 'Session Auto Switch Service initialized')
+    // Initialize Session Auto Switch Service
+    Logger.info('Main', 'Initializing Session Auto Switch Service...')
+    sessionAutoSwitchService = new SessionAutoSwitchService(providerManager)
+    Logger.info('Main', 'Session Auto Switch Service initialized')
 
-  // Initialize Knowledge Service
-  Logger.info('Main', 'Initializing Knowledge Service...')
-  knowledgeService = new KnowledgeService(providerManager)
-  Logger.info('Main', 'Knowledge Service initialized')
+    // Initialize Knowledge Service
+    Logger.info('Main', 'Initializing Knowledge Service...')
+    knowledgeService = new KnowledgeService(providerManager)
+    Logger.info('Main', 'Knowledge Service initialized')
 
-  // Initialize Update Service
-  Logger.info('Main', 'Initializing Update Service...')
-  updateService = new UpdateService()
-  Logger.info('Main', 'Update Service initialized')
+    // Initialize Update Service
+    Logger.info('Main', 'Initializing Update Service...')
+    updateService = new UpdateService()
+    Logger.info('Main', 'Update Service initialized')
 
-  // Initialize electron-store
-  Logger.info('Main', 'Initializing electron-store...')
-  const store = await getStore()
-  Logger.info('Main', 'electron-store initialized')
+    // Initialize electron-store
+    Logger.info('Main', 'Initializing electron-store...')
+    const store = await getStore()
+    Logger.info('Main', 'electron-store initialized')
 
-  // Initialize Shortcut Manager
-  Logger.info('Main', 'Initializing Shortcut Manager...')
-  shortcutManager = new ShortcutManager(store)
-  Logger.info('Main', 'Shortcut Manager initialized')
+    // Initialize Shortcut Manager
+    Logger.info('Main', 'Initializing Shortcut Manager...')
+    shortcutManager = new ShortcutManager(store)
+    Logger.info('Main', 'Shortcut Manager initialized')
 
-  // Register all IPC Handlers
-  registerAllHandlers(
-    providerManager,
-    sessionAutoSwitchService,
-    knowledgeService,
-    updateService,
-    shortcutManager,
-    store,
-    llamaService
-  )
+    // Register all IPC Handlers
+    registerAllHandlers(
+      providerManager,
+      sessionAutoSwitchService,
+      knowledgeService,
+      updateService,
+      shortcutManager,
+      store,
+      llamaService
+    )
 
-  // IPC test (development only)
-  if (process.env.NODE_ENV === 'development') {
-    ipcMain.on('ping', () => console.log('pong'))
-  }
-
-  // Handle get platform request
-  ipcMain.handle('get-platform', () => {
-    return process.platform
-  })
-
-  // Handle get app version request
-  ipcMain.handle('get-app-version', () => {
-    return app.getVersion()
-  })
-
-  // Handle open external URL request
-  ipcMain.handle('open-external-url', async (_event, url: string) => {
-    try {
-      if (!isAllowedExternalOpenUrl(url)) {
-        throw new Error('Only public http/https URLs can be opened')
-      }
-
-      await shell.openExternal(url)
-      return { success: true }
-    } catch (error: any) {
-      Logger.error('Main', 'Failed to open external URL:', error)
-      return { success: false, error: error.message }
+    // IPC test (development only)
+    if (process.env.NODE_ENV === 'development') {
+      ipcMain.on('ping', () => console.log('pong'))
     }
-  })
 
-  // Create main window
-  const mainWindow = createMainWindow()
+    // Handle get platform request
+    ipcMain.handle('get-platform', () => {
+      return process.platform
+    })
 
-  // Set main window for update service
-  updateService.setMainWindow(mainWindow)
+    // Handle get app version request
+    ipcMain.handle('get-app-version', () => {
+      return app.getVersion()
+    })
 
-  // Set main window for shortcut manager and register shortcuts
-  shortcutManager.setMainWindow(mainWindow)
-  shortcutManager.registerShortcuts()
-  Logger.info('Main', 'Shortcuts registered')
+    // Handle open external URL request
+    ipcMain.handle('open-external-url', async (_event, url: string) => {
+      try {
+        if (!isAllowedExternalOpenUrl(url)) {
+          throw new Error('Only public http/https URLs can be opened')
+        }
 
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) {
-      const mainWindow = createMainWindow()
-      // Re-register shortcuts for the new window
-      if (shortcutManager) {
-        shortcutManager.setMainWindow(mainWindow)
-        shortcutManager.registerShortcuts()
-        Logger.info('Main', 'Shortcuts re-registered after window re-creation')
+        await shell.openExternal(url)
+        return { success: true }
+      } catch (error: any) {
+        Logger.error('Main', 'Failed to open external URL:', error)
+        return { success: false, error: error.message }
       }
-    }
-  })
+    })
+
+    // Create main window
+    const mainWindow = createMainWindow()
+
+    // Set main window for update service
+    updateService.setMainWindow(mainWindow)
+
+    // Set main window for shortcut manager and register shortcuts
+    shortcutManager.setMainWindow(mainWindow)
+    shortcutManager.registerShortcuts()
+    Logger.info('Main', 'Shortcuts registered')
+
+    app.on('activate', function () {
+      // On macOS it's common to re-create a window in the app when the
+      // dock icon is clicked and there are no other windows open.
+      if (BrowserWindow.getAllWindows().length === 0) {
+        const mainWindow = createMainWindow()
+        // Re-register shortcuts for the new window
+        if (shortcutManager) {
+          shortcutManager.setMainWindow(mainWindow)
+          shortcutManager.registerShortcuts()
+          Logger.info('Main', 'Shortcuts re-registered after window re-creation')
+        }
+      }
+    })
   } catch (error) {
     Logger.error('Main', 'Fatal error during app initialization:', error)
     dialog.showErrorBox(
@@ -178,8 +178,6 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 
-  cancelAllNotebookOverviewGenerations()
-
   if (llamaService) {
     llamaService.stop()
   }
@@ -198,6 +196,8 @@ app.on('before-quit', () => {
     shortcutManager.unregisterShortcuts()
     Logger.info('Main', 'Shortcuts unregistered')
   }
+
+  cancelAllNotebookOverviewGenerations()
 
   if (llamaService) {
     llamaService.stop()

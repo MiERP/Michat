@@ -53,7 +53,7 @@ export function createMainWindow(): BrowserWindow {
   applyCSP()
 
   const theme = settingsManager.getSettingSync('theme')
-  const backgroundColor = theme === 'dark' ? '#282c34' : '#fafafa'
+  const backgroundColor = theme === 'dark' ? '#111820' : '#f0f3f0'
 
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -99,7 +99,7 @@ export function createMainWindow(): BrowserWindow {
 
   settingsManager.onSettingsChangeSync((newSettings) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      const newBackgroundColor = newSettings.theme === 'dark' ? '#282c34' : '#fafafa'
+      const newBackgroundColor = newSettings.theme === 'dark' ? '#111820' : '#f0f3f0'
       mainWindow.setBackgroundColor(newBackgroundColor)
     }
   })

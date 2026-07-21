@@ -190,6 +190,8 @@ const api = {
       ipcRenderer.invoke('knowledge:get-documents', { notebookId }),
     getDocument: (documentId: string) =>
       ipcRenderer.invoke('knowledge:get-document', { documentId }),
+    updateLegalMetadata: (documentId: string, metadata: any) =>
+      ipcRenderer.invoke('knowledge:update-legal-metadata', { documentId, metadata }),
     getDocumentChunks: (documentId: string) =>
       ipcRenderer.invoke('knowledge:get-document-chunks', { documentId }),
     getDocumentPage: (documentId: string, pageNumber: number, highlightText?: string) =>

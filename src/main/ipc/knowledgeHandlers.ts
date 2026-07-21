@@ -275,6 +275,22 @@ export function registerKnowledgeHandlers(
     })
   )
 
+  ipcMain.handle(
+    'knowledge:update-legal-metadata',
+    validate(KnowledgeSchemas.updateLegalMetadata, async (params) => {
+      try {
+        const document = knowledgeService.updateLegalDocumentMetadata(
+          params.documentId,
+          params.metadata
+        )
+        return { success: true, document }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error updating legal metadata:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
   // 获取文档的 chunks
   ipcMain.handle(
     'knowledge:get-document-chunks',

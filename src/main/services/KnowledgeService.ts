@@ -19,6 +19,24 @@ import { EmbeddingService } from './EmbeddingService'
 import { ChunkingService, type ChunkOptions } from './ChunkingService'
 import { FileParserService } from './FileParserService'
 import { RerankService } from './RerankService'
+import {
+  buildLegalChunkPrefix,
+  buildLegalDocumentProfile,
+  getLegalContextAt,
+  parseLegalStructure,
+  type LegalDocumentStructure
+} from './LegalStructureService'
+import {
+  buildLegalDocumentMetadata,
+  getLegalDocumentMetadata,
+  type LegalDocumentMetadata
+} from './LegalComparisonService'
+import {
+  extractLegalMetadataFromDocument,
+  materializeLegalDocumentMetadata,
+  mergeLegalMetadataInspector,
+  type LegalMetadataInspector
+} from './LegalMetadataExtractionService'
 import { vectorStoreManager } from '../vectorstore'
 import { ProviderManager } from '../providers/ProviderManager'
 import Logger from '../../shared/utils/logger'
@@ -65,6 +83,7 @@ export interface SearchResult {
   score: number
   chunkIndex: number
   metadata?: Record<string, unknown>
+  documentMetadata?: Record<string, unknown>
 }
 
 export interface DocumentPageContent {
@@ -74,6 +93,11 @@ export interface DocumentPageContent {
   content: string
   sourceUri?: string
   highlightText?: string
+}
+
+export function buildFtsMatchQuery(query: string): string {
+  const terms = query.normalize('NFC').match(/[\p{L}\p{N}_]+/gu) || []
+  return terms.map((term) => '"' + term + '"').join(' OR ')
 }
 
 export type IndexProgressCallback = (stage: string, progress: number) => void
@@ -266,6 +290,108 @@ export class KnowledgeService {
       .map((c) => c.id)
   }
 
+  private findLegalProfileResults(
+    notebookId: string,
+    filteredChunkIds: string[] | null,
+    topK: number
+  ): SearchResult[] {
+    const db = getDatabase()
+    const profileChunks = db
+      .select()
+      .from(chunks)
+      .where(and(eq(chunks.notebookId, notebookId), eq(chunks.chunkIndex, -1)))
+      .all()
+      .filter((chunk) => {
+        if (filteredChunkIds && !filteredChunkIds.includes(chunk.id)) return false
+        return (chunk.metadata as Record<string, unknown> | null)?.kind === 'legal-profile'
+      })
+      .slice(0, topK)
+
+    if (profileChunks.length === 0) return []
+
+    const documentMap = new Map(
+      db
+        .select()
+        .from(documents)
+        .where(inArray(documents.id, profileChunks.map((chunk) => chunk.documentId)))
+        .all()
+        .map((document) => [document.id, document])
+    )
+
+    return profileChunks.map((chunk) => {
+      const document = documentMap.get(chunk.documentId)
+      return {
+        chunkId: chunk.id,
+        documentId: chunk.documentId,
+        documentTitle: document?.title || 'Unknown',
+        documentType: document?.type || 'unknown',
+        sourceUri: document?.sourceUri || undefined,
+        content: chunk.content,
+        matchedContent: chunk.content,
+        score: 1,
+        chunkIndex: chunk.chunkIndex,
+        metadata: (chunk.metadata as Record<string, unknown>) || undefined,
+        documentMetadata: (document?.metadata as Record<string, unknown>) || undefined
+      }
+    })
+  }
+
+  private findLegalArticleResults(
+    notebookId: string,
+    filteredChunkIds: string[] | null,
+    articleNumbers: string[],
+    topK: number
+  ): SearchResult[] {
+    const db = getDatabase()
+    const articleOrder = new Map(articleNumbers.map((number, index) => [number, index]))
+    const articleChunks = db
+      .select()
+      .from(chunks)
+      .where(eq(chunks.notebookId, notebookId))
+      .all()
+      .filter((chunk) => {
+        if (filteredChunkIds && !filteredChunkIds.includes(chunk.id)) return false
+        const metadata = chunk.metadata as Record<string, any> | null
+        const legalContext = metadata?.legalContext as Record<string, string> | undefined
+        const articleNumber = legalContext?.articleNumber
+        return metadata?.kind === 'legal-content' && !!articleNumber && articleOrder.has(articleNumber)
+      })
+      .sort((left, right) => {
+        const leftContext = (left.metadata as Record<string, any>).legalContext as Record<string, string>
+        const rightContext = (right.metadata as Record<string, any>).legalContext as Record<string, string>
+        return (articleOrder.get(leftContext.articleNumber) || 0) - (articleOrder.get(rightContext.articleNumber) || 0)
+      })
+      .slice(0, topK)
+
+    if (articleChunks.length === 0) return []
+
+    const documentMap = new Map(
+      db
+        .select()
+        .from(documents)
+        .where(inArray(documents.id, articleChunks.map((chunk) => chunk.documentId)))
+        .all()
+        .map((document) => [document.id, document])
+    )
+
+    return articleChunks.map((chunk) => {
+      const document = documentMap.get(chunk.documentId)
+      return {
+        chunkId: chunk.id,
+        documentId: chunk.documentId,
+        documentTitle: document?.title || 'Unknown',
+        documentType: document?.type || 'unknown',
+        sourceUri: document?.sourceUri || undefined,
+        content: chunk.content,
+        matchedContent: chunk.content,
+        score: 1,
+        chunkIndex: chunk.chunkIndex,
+        metadata: (chunk.metadata as Record<string, unknown>) || undefined,
+        documentMetadata: (document?.metadata as Record<string, unknown>) || undefined
+      }
+    })
+  }
+
   private buildChunkOptionsForMimeType(mimeType: string | undefined): ChunkOptions | undefined {
     if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
       // Spreadsheet rows can be token-dense; use tighter chunking for stable local embedding.
@@ -323,10 +449,61 @@ export class KnowledgeService {
   ): Promise<void> {
     const db = getDatabase()
     const now = new Date()
+    const document = db.select().from(documents).where(eq(documents.id, documentId)).get()
+    if (!document) throw new Error(`Document ${documentId} not found`)
+    const legalStructure = parseLegalStructure(content)
+    const documentMetadata = {
+      ...((document.metadata as Record<string, unknown>) || {})
+    }
+    delete documentMetadata.legalStructure
+
+    const extractedLegalMetadata = extractLegalMetadataFromDocument({
+      title: document.title,
+      content,
+      structure: legalStructure
+    })
+    const hasExtractedFields = Object.values(extractedLegalMetadata.inspector.fields).some(Boolean)
+    const shouldStoreLegalMetadata = legalStructure || hasExtractedFields || !!documentMetadata.legalMetadataInspector
+    if (shouldStoreLegalMetadata) {
+      const inspector = mergeLegalMetadataInspector(
+        extractedLegalMetadata.inspector,
+        documentMetadata.legalMetadataInspector as LegalMetadataInspector | undefined
+      )
+      documentMetadata.legalMetadataInspector = inspector
+      documentMetadata.legalDocument = materializeLegalDocumentMetadata(
+        inspector,
+        getLegalDocumentMetadata(documentMetadata)
+      )
+    }
+
+    if (
+      legalStructure ||
+      'legalStructure' in ((document.metadata as Record<string, unknown>) || {}) ||
+      shouldStoreLegalMetadata
+    ) {
+      db.update(documents)
+        .set({
+          metadata: {
+            ...documentMetadata,
+            ...(legalStructure ? { legalStructure } : {})
+          },
+          updatedAt: now
+        })
+        .where(eq(documents.id, documentId))
+        .run()
+      this.resolveDeclaredLegalRelations(notebookId)
+    }
 
     // 1. Chunk
     onProgress?.('chunking', 10)
-    const chunkResults = this.chunkingService.chunk(content, chunkOptions)
+    const rawChunkResults = legalStructure
+      ? this.chunkLegalContent(content, chunkOptions, legalStructure)
+      : this.chunkingService.chunk(content, chunkOptions)
+    const chunkResults = this.addLegalStructureToChunks(
+      rawChunkResults,
+      document.title,
+      legalStructure
+    )
     if (chunkResults.length === 0) throw new Error('No chunks generated from document')
     Logger.info('KnowledgeService', `Document ${documentId}: ${chunkResults.length} chunks`)
 
@@ -431,6 +608,77 @@ export class KnowledgeService {
       'KnowledgeService',
       `Document indexed: ${documentId}, ${chunkResults.length} chunks`
     )
+  }
+
+  private addLegalStructureToChunks(
+    chunkResults: ReturnType<ChunkingService['chunk']>,
+    documentTitle: string,
+    legalStructure: LegalDocumentStructure | undefined
+  ): ReturnType<ChunkingService['chunk']> {
+    if (!legalStructure) return chunkResults
+
+    const profileContent = buildLegalDocumentProfile(documentTitle, legalStructure)
+    const profileChunk = {
+      content: profileContent,
+      index: -1,
+      startOffset: 0,
+      endOffset: 0,
+      tokenCount: Math.ceil(profileContent.length / 4),
+      metadata: {
+        kind: 'legal-profile',
+        legalStructure
+      }
+    }
+
+    return [
+      profileChunk,
+      ...chunkResults.map((chunk) => {
+        const legalContext = getLegalContextAt(legalStructure, chunk.startOffset)
+        const prefix = buildLegalChunkPrefix(legalContext)
+        const content = prefix ? `${prefix}\n\n${chunk.content}` : chunk.content
+
+        return {
+          ...chunk,
+          content,
+          tokenCount: Math.ceil(content.length / 4),
+          metadata: {
+            ...(chunk.metadata || {}),
+            kind: 'legal-content',
+            legalContext
+          }
+        }
+      })
+    ]
+  }
+
+  private chunkLegalContent(
+    content: string,
+    chunkOptions: ChunkOptions | undefined,
+    legalStructure: LegalDocumentStructure
+  ): ReturnType<ChunkingService['chunk']> {
+    const legalChunks: ReturnType<ChunkingService['chunk']> = []
+
+    for (let articleIndex = 0; articleIndex < legalStructure.articles.length; articleIndex++) {
+      const article = legalStructure.articles[articleIndex]
+      const nextArticle = legalStructure.articles[articleIndex + 1]
+      const articleEndOffset = nextArticle?.startOffset ?? content.length
+      const articleContent = content.slice(article.startOffset, articleEndOffset)
+      const articleChunks = this.chunkingService.chunk(articleContent, {
+        ...chunkOptions,
+        minChunkSize: 1
+      })
+
+      for (const articleChunk of articleChunks) {
+        legalChunks.push({
+          ...articleChunk,
+          index: legalChunks.length,
+          startOffset: article.startOffset + articleChunk.startOffset,
+          endOffset: article.startOffset + articleChunk.endOffset
+        })
+      }
+    }
+
+    return legalChunks
   }
 
   setNotebookSourcesChangedListener(listener: (notebookId: string) => void): void {
@@ -554,17 +802,17 @@ export class KnowledgeService {
       onProgress?.('creating_document', 5)
       db.update(documents)
         .set({
-        title: parseResult.title || basename(filePath) || 'Untitled',
-        type: docType,
-        content: parseResult.content,
-        contentHash,
-        mimeType: parseResult.mimeType,
-        fileSize: (parseResult.metadata?.fileSize as number | undefined) ?? fileInfo?.size,
-        metadata: {
-          ...(parseResult.metadata || {}),
-          ...(structureMetadata || {})
-        },
-        updatedAt: now
+          title: parseResult.title || basename(filePath) || 'Untitled',
+          type: docType,
+          content: parseResult.content,
+          contentHash,
+          mimeType: parseResult.mimeType,
+          fileSize: (parseResult.metadata?.fileSize as number | undefined) ?? fileInfo?.size,
+          metadata: {
+            ...(parseResult.metadata || {}),
+            ...(structureMetadata || {})
+          },
+          updatedAt: now
         })
         .where(eq(documents.id, documentId))
         .run()
@@ -704,6 +952,29 @@ export class KnowledgeService {
       return []
     }
 
+    const articleNumbers = this.getLegalArticleNumbers(query)
+    const directResults: SearchResult[] = []
+
+    if (this.isLegalStructureQuery(query)) {
+      const profileLimit = articleNumbers.length > 0 ? 1 : topK
+      directResults.push(
+        ...this.findLegalProfileResults(notebookId, filteredChunkIds, profileLimit)
+      )
+    }
+
+    if (articleNumbers.length > 0) {
+      directResults.push(
+        ...this.findLegalArticleResults(
+          notebookId,
+          filteredChunkIds,
+          articleNumbers,
+          Math.max(1, topK - directResults.length)
+        )
+      )
+    }
+
+    if (directResults.length > 0) return directResults.slice(0, topK)
+
     // 1. Vector Search
     const queryEmbedding = await this.embeddingService.embed(query)
     if (queryEmbedding.dimensions !== 1024) {
@@ -723,15 +994,14 @@ export class KnowledgeService {
     let ftsResults: Array<{ chunk_id: string; rank: number }> = []
     if (sqlite) {
       try {
-        // Simple sanitization for FTS match query (remove special chars that break FTS syntax)
-        const safeQuery = query.replace(/["'*]/g, ' ').trim()
-        if (safeQuery) {
+        const ftsQuery = buildFtsMatchQuery(query)
+        if (ftsQuery) {
           let sqlText = `
             SELECT chunk_id, rank 
             FROM fts_chunks 
             WHERE notebook_id = ? AND fts_chunks MATCH ? 
           `
-          const ftsParams: any[] = [notebookId, `"${safeQuery}" OR ${safeQuery}`]
+          const ftsParams: any[] = [notebookId, ftsQuery]
 
           if (filteredChunkIds && filteredChunkIds.length > 0) {
             const placeholders = filteredChunkIds.map(() => '?').join(',')
@@ -891,6 +1161,7 @@ export class KnowledgeService {
         chunkIndex: currentChunk.chunkIndex
       }
       if (currentChunk.metadata) result.metadata = currentChunk.metadata as Record<string, unknown>
+      if (doc?.metadata) result.documentMetadata = doc.metadata as Record<string, unknown>
       results.push(result)
     }
 
@@ -913,6 +1184,26 @@ export class KnowledgeService {
     return results
   }
 
+  private isLegalStructureQuery(query: string): boolean {
+    const normalized = query.normalize('NFC').toLowerCase()
+    const legalUnit = /\b(chương|mục|điều)\b/u.test(normalized)
+    const countQuestion = /\b(bao\s+nhiêu|mấy|số\s+lượng|tổng\s+số)\b/u.test(normalized)
+    const outlineQuestion = /\b(mục\s*lục|cấu\s*trúc|bố\s*cục|danh\s*mục)\b/u.test(normalized)
+
+    return legalUnit && (countQuestion || outlineQuestion)
+  }
+
+  private getLegalArticleNumbers(query: string): string[] {
+    const articleNumbers = new Set<string>()
+    const pattern = /(?:^|[^\p{L}\p{N}_])điều\s+(\d+[a-z]?)(?=$|[^\p{L}\p{N}_])/giu
+
+    for (const match of query.normalize('NFC').matchAll(pattern)) {
+      articleNumbers.add(match[1].toUpperCase())
+    }
+
+    return Array.from(articleNumbers)
+  }
+
   getDocuments(notebookId: string): Document[] {
     const db = getDatabase()
     return db
@@ -927,6 +1218,132 @@ export class KnowledgeService {
   getDocument(documentId: string): Document | undefined {
     const db = getDatabase()
     return db.select().from(documents).where(eq(documents.id, documentId)).get()
+  }
+
+  updateLegalDocumentMetadata(documentId: string, metadata: LegalDocumentMetadata): Document {
+    const db = getDatabase()
+    const document = db.select().from(documents).where(eq(documents.id, documentId)).get()
+    if (!document) throw new Error(`Document ${documentId} not found`)
+
+    const currentMetadata = (document.metadata as Record<string, unknown>) || {}
+    const currentLegalDocument = getLegalDocumentMetadata(currentMetadata)
+    const legalDocument = buildLegalDocumentMetadata(metadata)
+    const currentInspector = currentMetadata.legalMetadataInspector as LegalMetadataInspector | undefined
+    const inspector: LegalMetadataInspector = currentInspector || {
+      version: 1,
+      extractedAt: new Date().toISOString(),
+      fields: {},
+      declaredRelations: []
+    }
+    const fields = { ...inspector.fields }
+    const editableFields: Array<[
+      keyof LegalMetadataInspector['fields'],
+      string | undefined,
+      string | undefined
+    ]> = [
+      ['documentNumber', currentLegalDocument.documentNumber, legalDocument.documentNumber],
+      ['documentType', currentLegalDocument.documentType, legalDocument.documentType],
+      ['issuer', currentLegalDocument.issuer, legalDocument.issuer],
+      ['documentTitle', currentLegalDocument.documentTitle, legalDocument.documentTitle],
+      ['legalBases', currentLegalDocument.legalBases, legalDocument.legalBases],
+      ['issuedAt', currentLegalDocument.issuedAt, legalDocument.issuedAt],
+      ['effectiveFrom', currentLegalDocument.effectiveFrom, legalDocument.effectiveFrom],
+      ['effectiveTo', currentLegalDocument.effectiveTo, legalDocument.effectiveTo],
+      ['status', currentLegalDocument.status, legalDocument.status],
+      ['scope', currentLegalDocument.scope, legalDocument.scope],
+      ['sourceAuthority', currentLegalDocument.sourceAuthority, legalDocument.sourceAuthority],
+      ['officialSourceUrl', currentLegalDocument.officialSourceUrl, legalDocument.officialSourceUrl],
+      ['verifiedAt', currentLegalDocument.verifiedAt, legalDocument.verifiedAt],
+      ['verifiedBy', currentLegalDocument.verifiedBy, legalDocument.verifiedBy]
+    ]
+    for (const [name, previousValue, nextValue] of editableFields) {
+      if (nextValue === previousValue || !nextValue) continue
+      Object.assign(fields, {
+        [name]: {
+          value: nextValue,
+          status: 'user_corrected',
+          confidence: 1
+        }
+      })
+    }
+    db.update(documents)
+      .set({
+        metadata: {
+          ...currentMetadata,
+          legalDocument,
+          legalMetadataInspector: { ...inspector, fields }
+        },
+        updatedAt: new Date()
+      })
+      .where(eq(documents.id, documentId))
+      .run()
+
+    this.resolveDeclaredLegalRelations(document.notebookId)
+
+    const updated = db.select().from(documents).where(eq(documents.id, documentId)).get()
+    if (!updated) throw new Error(`Document ${documentId} disappeared during metadata update`)
+    return updated
+  }
+
+  private resolveDeclaredLegalRelations(notebookId: string): void {
+    const db = getDatabase()
+    const notebookDocuments = db.select().from(documents).where(eq(documents.notebookId, notebookId)).all()
+    const documentIdsByNumber = new Map<string, string | null>()
+
+    for (const document of notebookDocuments) {
+      const number = getLegalDocumentMetadata(document.metadata).documentNumber?.toLocaleUpperCase('vi-VN')
+      if (!number) continue
+      documentIdsByNumber.set(number, documentIdsByNumber.has(number) ? null : document.id)
+    }
+
+    const metadataByDocumentId = new Map(
+      notebookDocuments.map((document) => [
+        document.id,
+        { ...((document.metadata as Record<string, unknown>) || {}) }
+      ])
+    )
+
+    for (const sourceDocument of notebookDocuments) {
+      const sourceMetadata = metadataByDocumentId.get(sourceDocument.id)!
+      const inspector = sourceMetadata.legalMetadataInspector as LegalMetadataInspector | undefined
+      if (!inspector?.declaredRelations.length) continue
+      const sourceLegalDocument = getLegalDocumentMetadata(sourceMetadata)
+
+      for (const relation of inspector.declaredRelations) {
+        const targetDocumentId = documentIdsByNumber.get(
+          relation.targetDocumentNumber.toLocaleUpperCase('vi-VN')
+        )
+        if (!targetDocumentId || targetDocumentId === sourceDocument.id) continue
+
+        if (relation.type === 'amends') {
+          sourceLegalDocument.amendsDocumentIds = [
+            ...new Set([...sourceLegalDocument.amendsDocumentIds, targetDocumentId])
+          ]
+        } else if (relation.type === 'replaces') {
+          sourceLegalDocument.replacesDocumentIds = [
+            ...new Set([...sourceLegalDocument.replacesDocumentIds, targetDocumentId])
+          ]
+        } else {
+          const targetMetadata = metadataByDocumentId.get(targetDocumentId)!
+          const targetLegalDocument = getLegalDocumentMetadata(targetMetadata)
+          targetLegalDocument.repealedByDocumentIds = [
+            ...new Set([...targetLegalDocument.repealedByDocumentIds, sourceDocument.id])
+          ]
+          targetMetadata.legalDocument = targetLegalDocument
+        }
+      }
+
+      sourceMetadata.legalDocument = sourceLegalDocument
+    }
+
+    for (const document of notebookDocuments) {
+      const metadata = metadataByDocumentId.get(document.id)!
+      if (JSON.stringify(metadata) === JSON.stringify(document.metadata || {})) continue
+      db.update(documents)
+        .set({ metadata, updatedAt: new Date() })
+        .where(eq(documents.id, document.id))
+        .run()
+    }
   }
 
   getDocumentPageContent(
@@ -1015,6 +1432,37 @@ export class KnowledgeService {
     const db = getDatabase()
     const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()
     if (!doc || !doc.content) throw new Error(`Document ${documentId} not found or has no content`)
+    let content = doc.content
+    let chunkOptions: ChunkOptions | undefined
+
+    if (doc.localFilePath) {
+      const parseResult = await this.fileParserService.parseFile(doc.localFilePath)
+      const structureMetadata = this.buildCompactStructureMetadata(
+        parseResult.structure as
+          | {
+              type: 'flat' | 'pages' | 'sections'
+              pages?: Array<{ pageNumber: number; startOffset: number; endOffset: number }>
+            }
+          | undefined
+      )
+      content = parseResult.content
+      chunkOptions = this.buildChunkOptionsForMimeType(parseResult.mimeType)
+      db.update(documents)
+        .set({
+          title: parseResult.title || doc.title,
+          content,
+          contentHash: createHash('md5').update(content).digest('hex'),
+          mimeType: parseResult.mimeType,
+          metadata: {
+            ...((doc.metadata as Record<string, unknown>) || {}),
+            ...(parseResult.metadata || {}),
+            ...(structureMetadata || {})
+          },
+          updatedAt: new Date()
+        })
+        .where(eq(documents.id, documentId))
+        .run()
+    }
 
     // 1. Delete old chunks from vector store
     const oldChunks = db
@@ -1049,7 +1497,7 @@ export class KnowledgeService {
       .run()
 
     // 4. Re-index using existing documentId via shared _indexContent
-    await this._indexContent(documentId, doc.notebookId, doc.content, undefined, onProgress)
+    await this._indexContent(documentId, doc.notebookId, content, chunkOptions, onProgress)
     this.markNotebookOverviewStale(doc.notebookId)
   }
 

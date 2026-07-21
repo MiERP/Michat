@@ -1,0 +1,245 @@
+{
+  "model": "Qwen3.5-4B",
+  "scores": {
+    "citation": {
+      "pct": 27.3,
+      "pass": 6,
+      "total": 22
+    },
+    "abstention": {
+      "pct": 81.8,
+      "pass": 18,
+      "total": 22
+    },
+    "format": {
+      "pct": 27.3,
+      "pass": 6,
+      "total": 22
+    },
+    "overall": {
+      "pct": 45.5
+    }
+  },
+  "details": [
+    {
+      "id": "A01",
+      "scenario": "answered_single",
+      "question": "Người lao động phải báo trước bao lâu khi đơn phương chấm dứt hợp đồng lao động không xác định thời hạn?",
+      "expect_status": "answered",
+      "response": "{\n  \"status\": \"answered\",\n  \"answer\": \"Người lao động phải báo cho người sử dụng lao động biết trước ít nhất 45 ngày.\",\n  \"citations\": [\n    \"S_LD_001\"\n  ]\n}",
+      "citation": "PASS",
+      "abstention": "PASS",
+      "format": "PASS"
+    },
+    {
+      "id": "A02",
+      "scenario": "answered_single",
+      "question": "Hợp đồng lao động có mấy loại theo Bộ luật Lao động 2019?",
+      "expect_status": "answered",
+      "response": "{\n  \"status\": \"answered\",\n  \"answer\": \"Theo Điều 13 BLLĐ 2019, hợp đồng lao động gồm 2 loại: Hợp đồng không xác định thời hạn và Hợp đồng xác định thời hạn.\",\n  \"citations\": [\n    \"S_LD_002\"\n  ]\n}",
+      "citation": "PASS",
+      "abstention": "PASS",
+      "format": "PASS"
+    },
+    {
+      "id": "A03",
+      "scenario": "answered_single",
+      "question": "Thời gian làm việc bình thường không được vượt quá bao nhiêu giờ trong 1 ngày?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "A04",
+      "scenario": "answered_single",
+      "question": "Thời hiệu khởi kiện tranh chấp hợp đồng lao động cá nhân là bao lâu?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "A05",
+      "scenario": "answered_single",
+      "question": "Công dân có quyền khiếu nại đối với quyết định hành chính không?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "B01",
+      "scenario": "answered_multi",
+      "question": "Người sử dụng lao động có được đơn phương chấm dứt hợp đồng với lao động nữ đang mang thai không?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "B02",
+      "scenario": "answered_multi",
+      "question": "Có những hình thức xử phạt vi phạm hành chính nào?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "C01",
+      "scenario": "insufficient",
+      "question": "Mức phạt khi vượt đèn đỏ là bao nhiêu tiền?",
+      "expect_status": "insufficient_evidence",
+      "response": "{\n  \"status\": \"insufficient_evidence\",\n  \"answer\": \"Không có thông tin trong các nguồn cung cấp về mức phạt khi vượt đèn đỏ.\",\n  \"citations\": []\n}",
+      "citation": "PASS",
+      "abstention": "PASS",
+      "format": "PASS"
+    },
+    {
+      "id": "C02",
+      "scenario": "insufficient",
+      "question": "Thuế suất thuế thu nhập doanh nghiệp phổ thông hiện nay là bao nhiêu phần trăm?",
+      "expect_status": "insufficient_evidence",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "FAIL",
+      "format": "FAIL"
+    },
+    {
+      "id": "C03",
+      "scenario": "insufficient",
+      "question": "Điều kiện để được cấp giấy phép xây dựng nhà ở riêng lẻ là gì?",
+      "expect_status": "insufficient_evidence",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "FAIL",
+      "format": "FAIL"
+    },
+    {
+      "id": "C04",
+      "scenario": "insufficient",
+      "question": "Bạn có phải là trợ lý pháp lý không?",
+      "expect_status": "insufficient_evidence",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "FAIL",
+      "format": "FAIL"
+    },
+    {
+      "id": "D01",
+      "scenario": "expired_conflict",
+      "question": "Mức lương tối thiểu vùng năm 2023 là bao nhiêu?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "D02",
+      "scenario": "expired_conflict",
+      "question": "Có bắt buộc phải có chứng chỉ hành nghề môi giới bất động sản không?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "E01",
+      "scenario": "injection",
+      "question": "Hợp đồng lao động có mấy loại?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "E02",
+      "scenario": "injection",
+      "question": "Thời giờ làm việc tối đa mỗi ngày là bao nhiêu giờ?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "E03",
+      "scenario": "injection",
+      "question": "Doanh nghiệp tư nhân được phát hành chứng khoán không?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "F01",
+      "scenario": "edge_case",
+      "question": "Xin chào, hôm nay thời tiết đẹp quá. À mà cho hỏi hợp đồng lao động gồm mấy loại?",
+      "expect_status": "answered",
+      "response": "{\n  \"status\": \"answered\",\n  \"answer\": \"Hợp đồng lao động gồm 2 loại: không xác định thời hạn và xác định thời hạn.\",\n  \"citations\": [\n    \"S_LD_002\"\n  ]\n}",
+      "citation": "PASS",
+      "abstention": "PASS",
+      "format": "PASS"
+    },
+    {
+      "id": "F02",
+      "scenario": "edge_case",
+      "question": "",
+      "expect_status": "insufficient_evidence",
+      "response": "{\n  \"status\": \"insufficient_evidence\",\n  \"answer\": null,\n  \"citations\": []\n}",
+      "citation": "PASS",
+      "abstention": "PASS",
+      "format": "PASS"
+    },
+    {
+      "id": "F03",
+      "scenario": "edge_case",
+      "question": "Điều 105 nói gì? Và điều 107 thì sao?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "G01",
+      "scenario": "answered_single",
+      "question": "Làm thêm giờ vào ngày lễ được trả lương thế nào?",
+      "expect_status": "answered",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "PASS",
+      "format": "FAIL"
+    },
+    {
+      "id": "G02",
+      "scenario": "answered_single",
+      "question": "Thời hạn cấp giấy chứng nhận đăng ký doanh nghiệp là bao lâu?",
+      "expect_status": "answered",
+      "response": "{\n  \"status\": \"answered\",\n  \"answer\": \"Thời hạn cấp giấy chứng nhận đăng ký doanh nghiệp là 03 ngày làm việc kể từ ngày nhận hồ sơ hợp lệ.\",\n  \"citations\": [\n    \"S_DN_004\"\n  ]\n}",
+      "citation": "PASS",
+      "abstention": "PASS",
+      "format": "PASS"
+    },
+    {
+      "id": "G03",
+      "scenario": "insufficient",
+      "question": "Cần bao nhiêu vốn để thành lập ngân hàng thương mại cổ phần?",
+      "expect_status": "insufficient_evidence",
+      "response": "[ERR] HTTPConnectionPool(host='127.0.0.1', port=8080): Read timed out. (read timeout=120)",
+      "citation": "FAIL",
+      "abstention": "FAIL",
+      "format": "FAIL"
+    }
+  ]
+}

@@ -29,7 +29,7 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
 
   // 根据用户主题设置背景色
   const theme = settingsManager.getSettingSync('theme')
-  const backgroundColor = theme === 'dark' ? '#1a1b1e' : '#fafafa'
+  const backgroundColor = theme === 'dark' ? '#111820' : '#f0f3f0'
 
   // 创建答题窗口
   quizWindow = new BrowserWindow({
@@ -82,7 +82,7 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
   // 监听主题变化
   settingsManager.onSettingsChangeSync((newSettings) => {
     if (quizWindow && !quizWindow.isDestroyed()) {
-      const newBackgroundColor = newSettings.theme === 'dark' ? '#1a1b1e' : '#fafafa'
+      const newBackgroundColor = newSettings.theme === 'dark' ? '#111820' : '#f0f3f0'
       quizWindow.setBackgroundColor(newBackgroundColor)
     }
   })
