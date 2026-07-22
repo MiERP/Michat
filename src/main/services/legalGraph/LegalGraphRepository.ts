@@ -206,43 +206,34 @@ export class LegalGraphRepository {
   ) {}
 
   enqueueDocument(documentId: string, notebookId: string): void {
-    this.assertDocumentNotebook(documentId, notebookId)
-    const now = Date.now()
-    this.database
+    this.enqueueDocumentWithVersions(documentId, notebookId, this.versions)
+  }
+
+  enqueueStaleDocuments(versions: LegalGraphProvenance): number {
+    const rows = this.database
       .prepare(
-        `INSERT INTO legal_extraction_jobs (
-          id, notebook_id, document_id, status, extractor_version, prompt_version,
-          ontology_version, attempts, max_attempts, source_unit_count,
-          processed_unit_count, created_at, updated_at
-        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, 0, 5, 0, 0, ?, ?)
-        ON CONFLICT(document_id) DO UPDATE SET
-          notebook_id = excluded.notebook_id,
-          status = 'pending',
-          extractor_version = excluded.extractor_version,
-          prompt_version = excluded.prompt_version,
-          ontology_version = excluded.ontology_version,
-          model = NULL,
-          attempts = 0,
-          source_unit_count = 0,
-          processed_unit_count = 0,
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          next_run_at = NULL,
-          started_at = NULL,
-          completed_at = NULL,
-          last_error = NULL,
-          updated_at = excluded.updated_at`
+        `SELECT d.id, d.notebook_id
+         FROM documents d
+         LEFT JOIN legal_extraction_jobs job ON job.document_id = d.id
+         WHERE d.status = 'indexed'
+           AND json_type(d.metadata, '$.legalStructure') IS NOT NULL
+           AND (
+             job.id IS NULL OR
+             job.extractor_version <> ? OR
+             job.prompt_version <> ? OR
+             job.ontology_version <> ?
+           )`
       )
-      .run(
-        randomUUID(),
-        notebookId,
-        documentId,
-        this.versions.extractorVersion,
-        this.versions.promptVersion,
-        this.versions.ontologyVersion,
-        now,
-        now
-      )
+      .all(
+        versions.extractorVersion,
+        versions.promptVersion,
+        versions.ontologyVersion
+      ) as DatabaseRow[]
+
+    for (const row of rows) {
+      this.enqueueDocumentWithVersions(String(row.id), String(row.notebook_id), versions)
+    }
+    return rows.length
   }
 
   claimNextJob(workerId: string, now: Date, leaseMs: number): LegalExtractionJob | undefined {
@@ -287,6 +278,56 @@ export class LegalGraphRepository {
       )
       .run(now.getTime() + leaseMs, now.getTime(), jobId, workerId)
     return result.changes === 1
+  }
+
+  updateJobProgress(
+    jobId: string,
+    workerId: string,
+    processedUnitCount: number,
+    sourceUnitCount: number,
+    now: Date,
+    leaseMs: number
+  ): boolean {
+    if (
+      leaseMs <= 0 ||
+      processedUnitCount < 0 ||
+      sourceUnitCount < 0 ||
+      processedUnitCount > sourceUnitCount
+    ) {
+      return false
+    }
+    const result = this.database
+      .prepare(
+        `UPDATE legal_extraction_jobs
+         SET processed_unit_count = ?, source_unit_count = ?, lease_expires_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'processing' AND lease_owner = ?`
+      )
+      .run(
+        processedUnitCount,
+        sourceUnitCount,
+        now.getTime() + leaseMs,
+        now.getTime(),
+        jobId,
+        workerId
+      )
+    return result.changes === 1
+  }
+
+  releaseWorkerLeases(workerId: string, now: Date): number {
+    const result = this.database
+      .prepare(
+        `UPDATE legal_extraction_jobs
+         SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry' END,
+             lease_owner = NULL,
+             lease_expires_at = NULL,
+             next_run_at = CASE WHEN attempts >= max_attempts THEN NULL ELSE ? END,
+             completed_at = CASE WHEN attempts >= max_attempts THEN ? ELSE completed_at END,
+             last_error = 'Worker stopped',
+             updated_at = ?
+         WHERE status = 'processing' AND lease_owner = ?`
+      )
+      .run(now.getTime(), now.getTime(), now.getTime(), workerId)
+    return result.changes
   }
 
   markJobRetry(jobId: string, error: Error, now: Date): void {
@@ -710,6 +751,50 @@ export class LegalGraphRepository {
         .run(documentId)
     })()
     if (notebookId) this.bumpNotebookRevision(notebookId)
+  }
+
+  private enqueueDocumentWithVersions(
+    documentId: string,
+    notebookId: string,
+    versions: LegalGraphProvenance
+  ): void {
+    this.assertDocumentNotebook(documentId, notebookId)
+    const now = Date.now()
+    this.database
+      .prepare(
+        `INSERT INTO legal_extraction_jobs (
+          id, notebook_id, document_id, status, extractor_version, prompt_version,
+          ontology_version, attempts, max_attempts, source_unit_count,
+          processed_unit_count, created_at, updated_at
+        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, 0, 5, 0, 0, ?, ?)
+        ON CONFLICT(document_id) DO UPDATE SET
+          notebook_id = excluded.notebook_id,
+          status = 'pending',
+          extractor_version = excluded.extractor_version,
+          prompt_version = excluded.prompt_version,
+          ontology_version = excluded.ontology_version,
+          model = NULL,
+          attempts = 0,
+          source_unit_count = 0,
+          processed_unit_count = 0,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          next_run_at = NULL,
+          started_at = NULL,
+          completed_at = NULL,
+          last_error = NULL,
+          updated_at = excluded.updated_at`
+      )
+      .run(
+        randomUUID(),
+        notebookId,
+        documentId,
+        versions.extractorVersion,
+        versions.promptVersion,
+        versions.ontologyVersion,
+        now,
+        now
+      )
   }
 
   private getJobById(jobId: string): LegalExtractionJob | undefined {

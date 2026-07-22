@@ -57,7 +57,9 @@ describe('LegalGraphRepository', () => {
       CREATE TABLE notebooks (id TEXT PRIMARY KEY);
       CREATE TABLE documents (
         id TEXT PRIMARY KEY,
-        notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE
+        notebook_id TEXT NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+        metadata TEXT,
+        status TEXT NOT NULL DEFAULT 'indexed'
       );
       CREATE TABLE chunks (
         id TEXT PRIMARY KEY,
@@ -252,5 +254,36 @@ describe('LegalGraphRepository', () => {
         minimumConfidence: 0.75
       })
     ).toEqual([])
+  })
+
+  it('backfills only missing or stale legal graph versions while preserving ready graph', () => {
+    database
+      .prepare('UPDATE documents SET metadata = ? WHERE id = ?')
+      .run(JSON.stringify({ legalStructure: { articleCount: 1 } }), documentA)
+
+    expect(repository.enqueueStaleDocuments(provenance)).toBe(1)
+    expect(repository.getJob(documentA)?.status).toBe('pending')
+    repository.replaceDocumentGraph(documentA, candidate(documentA, 1), provenance)
+    expect(repository.enqueueStaleDocuments(provenance)).toBe(0)
+
+    expect(repository.enqueueStaleDocuments({ ...provenance, extractorVersion: '2' })).toBe(1)
+    expect(repository.getJob(documentA)?.status).toBe('pending')
+    expect(repository.getDocumentGraph(documentA).relations).toHaveLength(1)
+  })
+
+  it('updates progress only for lease owner and releases worker leases', () => {
+    const now = new Date('2026-07-22T00:00:00.000Z')
+    repository.enqueueDocument(documentA, notebookId)
+    const job = repository.claimNextJob('worker-1', now, 30_000)!
+
+    expect(repository.updateJobProgress(job.id, 'worker-2', 1, 2, now, 30_000)).toBe(false)
+    expect(repository.updateJobProgress(job.id, 'worker-1', 1, 2, now, 30_000)).toBe(true)
+    expect(repository.getJob(documentA)).toMatchObject({
+      processedUnitCount: 1,
+      sourceUnitCount: 2
+    })
+
+    expect(repository.releaseWorkerLeases('worker-1', now)).toBe(1)
+    expect(repository.getJob(documentA)).toMatchObject({ status: 'retry', leaseOwner: null })
   })
 })

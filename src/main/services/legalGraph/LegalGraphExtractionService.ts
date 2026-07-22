@@ -112,7 +112,8 @@ export class LegalGraphExtractionService {
     document: Document,
     chunks: Chunk[],
     activeModel: ActiveLegalGraphModel,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    onSourceUnitProcessed?: (processedUnitCount: number, sourceUnitCount: number) => void
   ): Promise<LegalGraphCandidate> {
     for (const chunk of chunks) {
       if (chunk.documentId !== document.id || chunk.notebookId !== document.notebookId) {
@@ -145,7 +146,7 @@ export class LegalGraphExtractionService {
       )
     )
 
-    for (const chunk of chunks) {
+    for (const [chunkIndex, chunk] of chunks.entries()) {
       const promptSourceNodes = this.addSourceNodes(document, chunk, nodeByLocalId)
       const output = await this.extractSourceUnit(
         document.title,
@@ -162,6 +163,7 @@ export class LegalGraphExtractionService {
         relations,
         relationFingerprints
       )
+      onSourceUnitProcessed?.(chunkIndex + 1, chunks.length)
     }
 
     return {
