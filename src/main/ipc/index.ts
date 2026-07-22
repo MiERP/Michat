@@ -7,6 +7,8 @@ import { QuizService } from '../services/QuizService'
 import { ShortcutManager } from '../services/ShortcutManager'
 import { LlamaService } from '../services/LlamaService'
 import { NotebookOverviewService } from '../services/NotebookOverviewService'
+import type { LegalReasoningService } from '../services/legalGraph/LegalReasoningService'
+import type { LegalGraphWorker } from '../services/legalGraph/LegalGraphWorker'
 import type Store from 'electron-store'
 import type { StoreSchema } from '../config/types'
 import { registerChatHandlers } from './chatHandlers'
@@ -35,7 +37,9 @@ export function registerAllHandlers(
   updateService: UpdateService,
   shortcutManager: ShortcutManager,
   store: Store<StoreSchema>,
-  llamaService: LlamaService
+  llamaService: LlamaService,
+  legalReasoningService?: LegalReasoningService,
+  legalGraphWorker?: LegalGraphWorker
 ) {
   // 实例化 MindMapService
   const mindMapService = new MindMapService(providerManager)
@@ -46,7 +50,14 @@ export function registerAllHandlers(
     notebookOverviewService.markStale(notebookId)
   )
 
-  registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
+  registerChatHandlers(
+    providerManager,
+    sessionAutoSwitchService,
+    knowledgeService,
+    llamaService,
+    legalReasoningService,
+    legalGraphWorker
+  )
   registerProviderHandlers(providerManager, llamaService)
   registerSettingsHandlers()
   registerNotebookHandlers()

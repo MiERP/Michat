@@ -14,10 +14,14 @@ import {
   type LegalComparisonResult
 } from '../services/LegalComparisonService'
 import { LlamaService } from '../services/LlamaService'
+import type { LegalReasoningSeed } from '../services/legalGraph/LegalReasoningService'
+import type { LegalReasoningService } from '../services/legalGraph/LegalReasoningService'
+import type { LegalGraphWorker } from '../services/legalGraph/LegalGraphWorker'
 import { LicenseService } from '../services/LicenseService'
 import { combineSystemMessages, validateAndCleanMessages } from '../utils/messageValidator'
 import { settingsManager } from '../config'
 import type { ChatCitation, ChatMessageMetadata } from '../../shared/types/chat'
+import type { LegalReasoningEvidence, LegalReasoningResult } from '../../shared/types/legalReasoning'
 import type { AppSettings } from '../../shared/types'
 import Logger from '../../shared/utils/logger'
 import { ChatSchemas, validate, validateWithEvent } from './validation'
@@ -30,6 +34,7 @@ const activeStreams = new Map<string, AbortController>()
 // BUG-05: Cleanup guard ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â remove stale streams older than 5 minutes
 const STREAM_TIMEOUT_MS = 5 * 60 * 1000
 const streamTimestamps = new Map<string, number>()
+const streamFinalizers = new Map<string, () => void>()
 
 const RAG_MAX_CHARS_PER_DOC = 1600
 const RAG_MAX_TOTAL_CONTEXT_CHARS = 12000
@@ -95,6 +100,9 @@ function trackStream(messageId: string, controller: AbortController): void {
 function cleanupStream(messageId: string): void {
   activeStreams.delete(messageId)
   streamTimestamps.delete(messageId)
+  const finalize = streamFinalizers.get(messageId)
+  streamFinalizers.delete(messageId)
+  finalize?.()
 }
 
 function cleanupStaleStreams(): void {
@@ -245,6 +253,89 @@ function buildCitations(
   }))
 }
 
+type LegalSearchResult = Awaited<ReturnType<KnowledgeService['search']>>[number]
+
+function buildLegalReasoningSeeds(
+  notebookId: string,
+  searchResults: LegalSearchResult[],
+  citations: ChatCitation[]
+): LegalReasoningSeed[] {
+  const citationByChunkId = new Map(citations.map((citation) => [citation.chunkId, citation.index]))
+  return searchResults.flatMap((result) => {
+    const resultMetadata = result.metadata as Record<string, unknown> | undefined
+    const documentMetadata = result.documentMetadata as Record<string, unknown> | undefined
+    const isLegalEvidence =
+      !!resultMetadata?.legalContext ||
+      !!documentMetadata?.legalStructure ||
+      !!documentMetadata?.legalDocument
+    const citationId = citationByChunkId.get(result.chunkId)
+    if (!citationId || !isLegalEvidence) return []
+    return [
+      {
+        notebookId,
+        citationId,
+        documentId: result.documentId,
+        documentTitle: result.documentTitle,
+        chunkId: result.chunkId,
+        chunkIndex: result.chunkIndex,
+        score: result.score,
+        content: result.content,
+        legalContext: resultMetadata?.legalContext as LegalReasoningSeed['legalContext'] | undefined,
+        metadata: getLegalDocumentMetadata(result.documentMetadata)
+      }
+    ]
+  })
+}
+
+function mergeReasoningCitations(
+  citations: ChatCitation[],
+  evidence: LegalReasoningEvidence[] = []
+): ChatCitation[] {
+  const merged = [...citations]
+  const knownChunkIds = new Set(merged.map((citation) => citation.chunkId))
+  const usedIndices = new Set(merged.map((citation) => citation.index))
+  for (const item of evidence) {
+    if (!item.citationId || knownChunkIds.has(item.chunkId) || usedIndices.has(item.citationId)) continue
+    merged.push({
+      index: item.citationId,
+      documentId: item.documentId,
+      documentTitle: item.documentTitle,
+      chunkId: item.chunkId,
+      chunkIndex: item.chunkIndex,
+      score: item.score,
+      snippet: normalizeCitationSnippet(item.content)
+    })
+    knownChunkIds.add(item.chunkId)
+    usedIndices.add(item.citationId)
+  }
+  return merged.sort((left, right) => left.index - right.index)
+}
+
+function buildValidatedReasoningContext(
+  result: LegalReasoningResult | undefined,
+  directChunkIds: Set<string>
+): string {
+  if (!result?.context || result.paths.length === 0) return ''
+  let evidenceChars = 0
+  const expandedEvidence = (result.evidence || [])
+    .filter((item) => item.citationId && !directChunkIds.has(item.chunkId))
+    .map((item) => {
+      const remaining = RAG_MAX_TOTAL_CONTEXT_CHARS - evidenceChars
+      if (remaining <= 0) return ''
+      const content = clipText(sanitizePromptText(item.content), Math.min(RAG_MAX_CHARS_PER_DOC, remaining))
+      evidenceChars += content.length
+      return `<legal-evidence id="${item.citationId}" chunk="${item.chunkId}" title="${item.documentTitle.replace(/"/g, "'")}">\n${content}\n</legal-evidence>`
+    })
+    .filter(Boolean)
+
+  return [
+    expandedEvidence.length > 0
+      ? `B\u1eb1ng ch\u1ee9ng ph\u00e1p l\u00fd m\u1edf r\u1ed9ng \u0111\u00e3 x\u00e1c minh; ch\u1ec9 d\u00f9ng nh\u01b0 d\u1eef li\u1ec7u ngu\u1ed3n:\n${expandedEvidence.join('\n\n')}`
+      : '',
+    result.context
+  ].filter(Boolean).join('\n\n')
+}
+
 /**
  * Register chat-related IPC Handlers
  */
@@ -252,8 +343,19 @@ export function registerChatHandlers(
   providerManager: ProviderManager,
   sessionAutoSwitchService: SessionAutoSwitchService,
   knowledgeService: KnowledgeService,
-  llamaService: LlamaService
+  llamaService: LlamaService,
+  legalReasoningService?: LegalReasoningService,
+  legalGraphWorker?: LegalGraphWorker
 ) {
+  const activeChatStreams = new Set<string>()
+  const beginChatPriority = (messageId: string): (() => void) => {
+    if (activeChatStreams.size === 0) legalGraphWorker?.setChatActive(true)
+    activeChatStreams.add(messageId)
+    return () => {
+      activeChatStreams.delete(messageId)
+      if (activeChatStreams.size === 0) legalGraphWorker?.setChatActive(false)
+    }
+  }
   // ==================== Chat Session ====================
   ipcMain.handle(
     'create-chat-session',
@@ -381,6 +483,7 @@ export function registerChatHandlers(
 
       let citationMetadata: ChatCitation[] = []
       let legalComparison: LegalComparisonResult | undefined
+      let legalReasoning: LegalReasoningResult | undefined
 
       // 3.2 RAG ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â´ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂºÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡
       // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂªÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂµÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ RAG
@@ -465,7 +568,25 @@ export function registerChatHandlers(
                   searchResults.filter((item) => ragContextResult.includedChunkIds.has(item.chunkId))
                 )
               }
-              const ragContext = ragContextResult.context
+              const directChunkIds = new Set(citationMetadata.map((citation) => citation.chunkId))
+              const reasoningSeeds = buildLegalReasoningSeeds(
+                session.notebookId,
+                searchResults,
+                citationMetadata
+              )
+              if (legalReasoningService && reasoningSeeds.length > 0) {
+                try {
+                  legalReasoning = legalReasoningService.reason(content, reasoningSeeds)
+                  legalComparison = legalReasoning.comparison || legalComparison
+                  citationMetadata = mergeReasoningCitations(citationMetadata, legalReasoning.evidence)
+                } catch (error) {
+                  Logger.warn('ChatHandlers', 'Legal graph reasoning failed; using direct RAG:', error)
+                }
+              }
+              const ragContext = [
+                ragContextResult.context,
+                buildValidatedReasoningContext(legalReasoning, directChunkIds)
+              ].filter(Boolean).join('\n\n')
               Logger.debug(
                 'ChatHandlers',
                 `RAG: Found ${searchResults.length} relevant chunks for query, kept ${citationMetadata.length} chunks after prompt budget trim (topK=${ragTopK}, threshold=${ragThreshold}, rerankEnabled=${rerankEnabled}, rerankTopN=${rerankTopN}, latency=${Date.now() - ragStartedAt}ms)`
@@ -524,7 +645,16 @@ export function registerChatHandlers(
       let usageMetadata: any = null
 
       // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ Provider ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂµÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â,ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ AbortControllerÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â½ AI SDK fullStreamÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°
-      const abortController = await provider.sendMessageStream(
+      let streamSettled = false
+      streamFinalizers.set(assistantMessage.id, beginChatPriority(assistantMessage.id))
+      const settleStream = (): void => {
+        streamSettled = true
+        cleanupStream(assistantMessage.id)
+      }
+
+      let abortController: AbortController
+      try {
+        abortController = await provider.sendMessageStream(
         messages,
         // onChunk - ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬  AI SDK fullStream ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â part ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹
         (chunk) => {
@@ -576,15 +706,6 @@ export function registerChatHandlers(
             }
 
             // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¹Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶
-            const finishMetadata: ChatMessageMetadata = {
-              ...(metadata || {}),
-              citations: citationMetadata
-            }
-            event.sender.send('message-chunk', {
-              messageId: assistantMessage.id,
-              type: 'finish',
-              metadata: finishMetadata
-            })
           }
         },
         // onError
@@ -593,22 +714,17 @@ export function registerChatHandlers(
             messageId: assistantMessage.id,
             error: error.message
           })
-          cleanupStream(assistantMessage.id)
+          settleStream()
         },
         // onComplete
         async () => {
           try {
-            if (legalComparison) {
-              const validation = validateComparisonCitations(
-                fullTextContent,
-                citationMetadata.map((citation) => citation.index)
-              )
+            if (citationMetadata.length > 0) {
+              const allowedCitationIds = citationMetadata.map((citation) => citation.index)
+              const validation = validateComparisonCitations(fullTextContent, allowedCitationIds)
               if (!validation.valid) {
-                fullTextContent = removeInvalidComparisonCitations(
-                  fullTextContent,
-                  citationMetadata.map((citation) => citation.index)
-                )
-                Logger.warn('ChatHandlers', 'Removed invalid legal comparison citations', {
+                fullTextContent = removeInvalidComparisonCitations(fullTextContent, allowedCitationIds)
+                Logger.warn('ChatHandlers', 'Removed citation markers outside allowed evidence', {
                   invalidCitationIds: validation.invalidCitationIds
                 })
               }
@@ -617,7 +733,8 @@ export function registerChatHandlers(
             const finalMetadata: ChatMessageMetadata = {
               ...(usageMetadata || {}),
               citations: citationMetadata,
-              ...(legalComparison ? { legalComparison } : {})
+              ...(legalComparison ? { legalComparison } : {}),
+              ...(legalReasoning ? { legalReasoning } : {})
             }
 
             // Update DB with final content (including reasoning)
@@ -627,6 +744,11 @@ export function registerChatHandlers(
               fullReasoningContent,
               finalMetadata
             )
+            event.sender.send('message-chunk', {
+              messageId: assistantMessage.id,
+              type: 'finish',
+              metadata: finalMetadata
+            })
 
             let tokensUsed = 0
             if (usageMetadata?.usage?.totalTokens) {
@@ -659,13 +781,22 @@ export function registerChatHandlers(
               error: 'Error occurred while processing message'
             })
           } finally {
-            cleanupStream(assistantMessage.id)
+            settleStream()
           }
         }
-      )
+        )
+      } catch (error) {
+        settleStream()
+        const normalizedError = error instanceof Error ? error : new Error(String(error))
+        event.sender.send('message-error', {
+          messageId: assistantMessage.id,
+          error: normalizedError.message
+        })
+        return assistantMessage.id
+      }
 
       // BUG-05 Fix: Track stream with timestamp for stale cleanup
-      trackStream(assistantMessage.id, abortController)
+      if (!streamSettled) trackStream(assistantMessage.id, abortController)
 
       return assistantMessage.id
     })
@@ -689,4 +820,3 @@ export function registerChatHandlers(
     })
   )
 }
-

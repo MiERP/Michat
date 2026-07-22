@@ -10,6 +10,7 @@ import type {
   ChatMessage as DBChatMessage
 } from '../../main/db/schema'
 import type { LegalComparisonResult } from '../../main/services/LegalComparisonService'
+import type { LegalReasoningResult } from './legalReasoning'
 
 /**
  * 聊天会话接口（完整版）
@@ -39,6 +40,7 @@ export interface ChatMessageMetadata {
   finishReason?: string
   citations?: ChatCitation[]
   legalComparison?: LegalComparisonResult
+  legalReasoning?: LegalReasoningResult
 }
 
 /**
@@ -81,6 +83,7 @@ export interface StreamChunk {
     }
     citations?: ChatCitation[]
     legalComparison?: LegalComparisonResult
+    legalReasoning?: LegalReasoningResult
     // 推理相关元数据（AI SDK v5 推理流式传输）
     isReasoning?: boolean // 当前内容是否为推理过程
     reasoningStart?: boolean // 推理块开始标记
