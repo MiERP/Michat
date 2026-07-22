@@ -6,3 +6,4 @@ resources/models/*.gguf
 resources/llama-bin/
 *.log
 .codex-*.log
+.superpowers/
