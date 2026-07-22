@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LegalGraphRetryableError } from '../../src/main/services/legalGraph/LegalGraphExtractionService'
-import { LegalGraphWorker } from '../../src/main/services/legalGraph/LegalGraphWorker'
+import {
+  LegalGraphWorker,
+  prepareLegalGraphSource
+} from '../../src/main/services/legalGraph/LegalGraphWorker'
 
 function createJob() {
   return {
@@ -66,12 +69,44 @@ function createDependencies() {
   return { extractor, job, providerManager, repository, sourceLoader }
 }
 
+describe('prepareLegalGraphSource', () => {
+  it('drops legal profiles and restores exact source text from offsets', () => {
+    const document = { content: 'Mở Điều 1. Nghĩa vụ. Kết' }
+    const source = prepareLegalGraphSource(
+      document as never,
+      [
+        {
+          id: 'profile',
+          content: 'Hồ sơ pháp lý',
+          startOffset: 0,
+          endOffset: 3,
+          metadata: { kind: 'legal-profile' }
+        },
+        {
+          id: 'content',
+          content: '[Điều 1] prefixed',
+          startOffset: 3,
+          endOffset: 19,
+          metadata: { kind: 'legal-content' }
+        }
+      ] as never
+    )
+
+    expect(source.chunks).toHaveLength(1)
+    expect(source.chunks[0]).toEqual(
+      expect.objectContaining({ id: 'content', content: 'Điều 1. Nghĩa vụ' })
+    )
+  })
+})
+
 describe('LegalGraphWorker', () => {
   let dependencies: ReturnType<typeof createDependencies>
   let worker: LegalGraphWorker
+  let progressEvents: Array<Record<string, unknown>>
 
   beforeEach(() => {
     dependencies = createDependencies()
+    progressEvents = []
     worker = new LegalGraphWorker({
       repository: dependencies.repository as never,
       extractor: dependencies.extractor as never,
@@ -79,8 +114,40 @@ describe('LegalGraphWorker', () => {
       sourceLoader: dependencies.sourceLoader as never,
       workerId: 'worker-test',
       pollIntervalMs: 60_000,
-      now: () => new Date('2026-07-22T00:00:00.000Z')
+      now: () => new Date('2026-07-22T00:00:00.000Z'),
+      onProgress: (progress) => progressEvents.push(progress)
     })
+  })
+
+  it('exposes running state and stable worker id', async () => {
+    expect(worker.id).toBe('worker-test')
+    expect(worker.isRunning()).toBe(false)
+
+    await worker.start()
+    expect(worker.isRunning()).toBe(true)
+
+    await worker.stop()
+    expect(worker.isRunning()).toBe(false)
+  })
+
+  it('emits processing and ready progress without source text', async () => {
+    await worker.runOnce()
+
+    expect(progressEvents).toEqual([
+      expect.objectContaining({
+        documentId: 'document-1',
+        status: 'processing',
+        processedUnitCount: 1,
+        sourceUnitCount: 1
+      }),
+      expect.objectContaining({
+        documentId: 'document-1',
+        status: 'ready',
+        nodeCount: 0,
+        relationCount: 0
+      })
+    ])
+    expect(JSON.stringify(progressEvents)).not.toContain('chunk-1')
   })
 
   it('does not claim work while chat is active', async () => {

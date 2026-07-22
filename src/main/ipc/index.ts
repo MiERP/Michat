@@ -38,8 +38,8 @@ export function registerAllHandlers(
   shortcutManager: ShortcutManager,
   store: Store<StoreSchema>,
   llamaService: LlamaService,
-  legalReasoningService?: LegalReasoningService,
-  legalGraphWorker?: LegalGraphWorker
+  legalReasoningService: LegalReasoningService,
+  legalGraphWorker: LegalGraphWorker
 ) {
   // 实例化 MindMapService
   const mindMapService = new MindMapService(providerManager)
@@ -62,7 +62,7 @@ export function registerAllHandlers(
   registerSettingsHandlers()
   registerNotebookHandlers()
   registerNoteHandlers(providerManager)
-  registerKnowledgeHandlers(knowledgeService, llamaService)
+  registerKnowledgeHandlers(knowledgeService, llamaService, legalGraphWorker)
   registerNotebookOverviewHandlers(notebookOverviewService)
   registerMindMapHandlers(mindMapService)
   registerQuizHandlers(quizService)

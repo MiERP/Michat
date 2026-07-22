@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { Chunk, Document, LegalExtractionJob } from '../../db/schema'
+import type { LegalGraphProgress } from '../../../shared/types/legalReasoning'
 import type { ProviderManager } from '../../providers/ProviderManager'
 import {
   LegalGraphExtractionService,
@@ -48,6 +49,33 @@ export interface LegalGraphSource {
   chunks: Chunk[]
 }
 
+export function prepareLegalGraphSource(
+  document: Document,
+  sourceChunks: Chunk[]
+): LegalGraphSource {
+  const originalContent = document.content || ''
+  const chunks = sourceChunks
+    .filter((chunk) => {
+      const metadata = chunk.metadata as Record<string, unknown> | null
+      return metadata?.kind !== 'legal-profile'
+    })
+    .map((chunk) => {
+      const startOffset = chunk.startOffset
+      const endOffset = chunk.endOffset
+      const content =
+        originalContent &&
+        startOffset != null &&
+        endOffset != null &&
+        startOffset >= 0 &&
+        endOffset > startOffset &&
+        endOffset <= originalContent.length
+          ? originalContent.slice(startOffset, endOffset)
+          : chunk.content
+      return { ...chunk, content }
+    })
+  return { document, chunks }
+}
+
 export type LegalGraphSourceLoader = (
   documentId: string
 ) => Promise<LegalGraphSource | undefined> | LegalGraphSource | undefined
@@ -61,6 +89,7 @@ export interface LegalGraphWorkerOptions {
   pollIntervalMs?: number
   leaseMs?: number
   now?: () => Date
+  onProgress?: (progress: LegalGraphProgress) => void
 }
 
 export class LegalGraphWorker {
@@ -72,6 +101,7 @@ export class LegalGraphWorker {
   private readonly pollIntervalMs: number
   private readonly leaseMs: number
   private readonly now: () => Date
+  private readonly onProgress?: (progress: LegalGraphProgress) => void
   private pollTimer?: ReturnType<typeof setTimeout>
   private activeRun?: Promise<boolean>
   private activeAbortController?: AbortController
@@ -88,6 +118,15 @@ export class LegalGraphWorker {
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
     this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS
     this.now = options.now ?? (() => new Date())
+    this.onProgress = options.onProgress
+  }
+
+  get id(): string {
+    return this.workerId
+  }
+
+  isRunning(): boolean {
+    return this.started && !this.stopping
   }
 
   // ponytail: one extraction worker protects local model latency; raise concurrency only after model-level scheduling exists.
@@ -100,7 +139,7 @@ export class LegalGraphWorker {
     this.schedulePoll(0)
   }
 
-  async stop(timeoutMs = DEFAULT_STOP_TIMEOUT_MS): Promise<void> {
+  requestStop(): void {
     this.started = false
     this.stopping = true
     if (this.pollTimer) {
@@ -108,6 +147,10 @@ export class LegalGraphWorker {
       this.pollTimer = undefined
     }
     this.activeAbortController?.abort()
+  }
+
+  async stop(timeoutMs = DEFAULT_STOP_TIMEOUT_MS): Promise<void> {
+    this.requestStop()
 
     if (this.activeRun) {
       await Promise.race([
@@ -168,6 +211,19 @@ export class LegalGraphWorker {
             this.leaseMs
           )
           if (!renewed) throw new LegalGraphRetryableError('Legal graph worker lease was lost')
+          this.emitProgress({
+            documentId: job.documentId,
+            status: 'processing',
+            attempts: job.attempts,
+            sourceUnitCount,
+            processedUnitCount,
+            nodeCount: 0,
+            relationCount: 0,
+            model: activeModel.provenance,
+            extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
+            promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
+            ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
+          })
         }
       )
 
@@ -178,18 +234,58 @@ export class LegalGraphWorker {
         promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
         ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
       })
+      this.emitProgress({
+        documentId: job.documentId,
+        status: 'ready',
+        attempts: job.attempts,
+        sourceUnitCount: candidate.sourceUnitCount ?? 0,
+        processedUnitCount: candidate.processedUnitCount ?? candidate.sourceUnitCount ?? 0,
+        nodeCount: candidate.nodes.length,
+        relationCount: candidate.relations.length,
+        model: activeModel.provenance,
+        extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
+        promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
+        ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
+      })
     } catch (error) {
       if (this.stopping) return true
       const normalizedError = error instanceof Error ? error : new Error(String(error))
       if (normalizedError instanceof LegalGraphRetryableError) {
         this.repository.markJobRetry(job.id, normalizedError, this.now())
+        this.emitProgress(
+          this.failedProgress(job, job.attempts >= job.maxAttempts ? 'failed' : 'retry')
+        )
       } else {
         this.repository.markJobFailed(job.id, normalizedError, this.now())
+        this.emitProgress(this.failedProgress(job, 'failed'))
       }
     } finally {
       this.activeAbortController = undefined
     }
     return true
+  }
+
+  private emitProgress(progress: LegalGraphProgress): void {
+    try {
+      this.onProgress?.(progress)
+    } catch {
+      return
+    }
+  }
+
+  private failedProgress(job: LegalExtractionJob, status: 'retry' | 'failed'): LegalGraphProgress {
+    return {
+      documentId: job.documentId,
+      status,
+      attempts: job.attempts,
+      sourceUnitCount: job.sourceUnitCount,
+      processedUnitCount: job.processedUnitCount,
+      nodeCount: 0,
+      relationCount: 0,
+      extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
+      promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
+      ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
+    }
   }
 
   private currentVersions(): LegalGraphProvenance {

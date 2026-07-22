@@ -7,6 +7,7 @@ import { ipcMain, IpcMainInvokeEvent, dialog, shell } from 'electron'
 import { stat } from 'fs/promises'
 import { KnowledgeService } from '../services/KnowledgeService'
 import { LlamaService } from '../services/LlamaService'
+import type { LegalGraphWorker } from '../services/legalGraph/LegalGraphWorker'
 import Logger from '../../shared/utils/logger'
 import { KnowledgeSchemas, validate } from './validation'
 import { normalizeFsPath } from '../security/guards'
@@ -16,7 +17,8 @@ import { normalizeFsPath } from '../security/guards'
  */
 export function registerKnowledgeHandlers(
   knowledgeService: KnowledgeService,
-  llamaService: LlamaService
+  llamaService: LlamaService,
+  legalGraphWorker?: LegalGraphWorker
 ) {
   const approvedFilePaths = new Set<string>()
   const approvedFolderPaths = new Set<string>()
@@ -346,6 +348,7 @@ export function registerKnowledgeHandlers(
       return validate(KnowledgeSchemas.retryLegalGraph, async (params) => {
         try {
           knowledgeService.retryLegalGraph(params.documentId)
+          void legalGraphWorker?.runOnce()
           const status = knowledgeService.getLegalGraphStatus(params.documentId)
           event.sender.send('knowledge:graph-progress', {
             documentId: params.documentId,

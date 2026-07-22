@@ -1,7 +1,14 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { LlamaService } from './services/LlamaService'
-import { initDatabase, runMigrations, initExtensions, closeDatabase, executeCheckpoint } from './db'
+import {
+  initDatabase,
+  runMigrations,
+  initExtensions,
+  closeDatabase,
+  executeCheckpoint,
+  getSqlite
+} from './db'
 import { ProviderManager } from './providers/ProviderManager'
 import { SessionAutoSwitchService } from './services/SessionAutoSwitchService'
 import { KnowledgeService } from './services/KnowledgeService'
@@ -14,6 +21,16 @@ import { getStore } from './config/store'
 import Logger from '../shared/utils/logger'
 import { isAllowedExternalOpenUrl } from './security/guards'
 import { cancelAllNotebookOverviewGenerations } from './ipc/notebookOverviewHandlers'
+import { LegalGraphRepository } from './services/legalGraph/LegalGraphRepository'
+import { LegalGraphExtractionService } from './services/legalGraph/LegalGraphExtractionService'
+import { LegalGraphWorker, prepareLegalGraphSource } from './services/legalGraph/LegalGraphWorker'
+import { LegalReasoningService } from './services/legalGraph/LegalReasoningService'
+import {
+  LEGAL_GRAPH_EXTRACTOR_VERSION,
+  LEGAL_GRAPH_ONTOLOGY_VERSION,
+  LEGAL_GRAPH_PROMPT_VERSION
+} from './services/legalGraph/legalGraphPrompt'
+import type { LegalGraphProgress, LegalReasoningEvidence } from '../shared/types/legalReasoning'
 
 let providerManager: ProviderManager | null = null
 let sessionAutoSwitchService: SessionAutoSwitchService | null = null
@@ -21,8 +38,61 @@ let knowledgeService: KnowledgeService | null = null
 let updateService: UpdateService | null = null
 let shortcutManager: ShortcutManager | null = null
 let isQuitting = false // Flag to indicate if app is quitting
+let shutdownComplete = false
 
 let llamaService: LlamaService | null = null
+let legalGraphWorker: LegalGraphWorker | null = null
+let legalReasoningService: LegalReasoningService | null = null
+
+const legalGraphVersions = {
+  model: '',
+  extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
+  promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
+  ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
+}
+
+interface LegalReasoningEvidenceRow {
+  id: string
+  document_id: string
+  chunk_index: number
+  content: string
+  title: string
+}
+
+function broadcastLegalGraphProgress(progress: LegalGraphProgress): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send('knowledge:graph-progress', progress)
+    }
+  }
+}
+
+function loadLegalReasoningEvidence(
+  notebookId: string,
+  chunkIds: string[]
+): LegalReasoningEvidence[] {
+  const database = getSqlite()
+  const uniqueChunkIds = [...new Set(chunkIds)]
+  if (!database || uniqueChunkIds.length === 0) return []
+  const placeholders = uniqueChunkIds.map(() => '?').join(', ')
+  const rows = database
+    .prepare(
+      `SELECT c.id, c.document_id, c.chunk_index, c.content, d.title
+       FROM chunks c
+       JOIN documents d ON d.id = c.document_id
+       WHERE c.notebook_id = ? AND c.id IN (${placeholders})`
+    )
+    .all(notebookId, ...uniqueChunkIds) as LegalReasoningEvidenceRow[]
+  return rows.map((row) => ({
+    notebookId,
+    documentId: row.document_id,
+    documentTitle: row.title,
+    chunkId: row.id,
+    chunkIndex: row.chunk_index,
+    content: row.content,
+    score: 0
+  }))
+}
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
@@ -69,7 +139,29 @@ app.whenReady().then(async () => {
 
     // Initialize Knowledge Service
     Logger.info('Main', 'Initializing Knowledge Service...')
-    knowledgeService = new KnowledgeService(providerManager)
+    const sqlite = getSqlite()
+    if (!sqlite) throw new Error('SQLite is unavailable after database initialization')
+    const legalGraphRepository = new LegalGraphRepository(sqlite, legalGraphVersions)
+    knowledgeService = new KnowledgeService(providerManager, legalGraphRepository)
+    const legalGraphExtractor = new LegalGraphExtractionService()
+    legalGraphWorker = new LegalGraphWorker({
+      repository: legalGraphRepository,
+      extractor: legalGraphExtractor,
+      providerManager,
+      sourceLoader: (documentId) => {
+        const document = knowledgeService?.getDocument(documentId)
+        if (!document) return undefined
+        return prepareLegalGraphSource(
+          document,
+          knowledgeService?.getDocumentChunks(documentId) || []
+        )
+      },
+      onProgress: broadcastLegalGraphProgress
+    })
+    legalReasoningService = new LegalReasoningService(
+      legalGraphRepository,
+      loadLegalReasoningEvidence
+    )
     Logger.info('Main', 'Knowledge Service initialized')
 
     // Initialize Update Service
@@ -95,7 +187,9 @@ app.whenReady().then(async () => {
       updateService,
       shortcutManager,
       store,
-      llamaService
+      llamaService,
+      legalReasoningService,
+      legalGraphWorker
     )
 
     // IPC test (development only)
@@ -130,6 +224,7 @@ app.whenReady().then(async () => {
 
     // Create main window
     const mainWindow = createMainWindow()
+    void legalGraphWorker.start()
 
     // Set main window for update service
     updateService.setMainWindow(mainWindow)
@@ -177,40 +272,42 @@ app.on('window-all-closed', () => {
     // Other platforms: Quit app when window closes
     app.quit()
   }
-
-  if (llamaService) {
-    llamaService.stop()
-  }
 })
 
-// First line of defense: before-quit event (user initiated quit)
-app.on('before-quit', () => {
-  if (isQuitting) return
-
-  Logger.info('Main', 'before-quit event triggered')
-
-  isQuitting = true
-
-  // Unregister shortcuts
+async function shutdownApplication(): Promise<void> {
+  await legalGraphWorker?.stop(5_000)
   if (shortcutManager) {
     shortcutManager.unregisterShortcuts()
     Logger.info('Main', 'Shortcuts unregistered')
   }
-
   cancelAllNotebookOverviewGenerations()
-
-  if (llamaService) {
-    llamaService.stop()
-  }
-
+  await llamaService?.stop()
   Logger.info('Main', 'Closing database connection...')
+  executeCheckpoint('TRUNCATE')
   closeDatabase()
+}
+
+// First line of defense: before-quit event (user initiated quit)
+app.on('before-quit', (event) => {
+  if (shutdownComplete) return
+  event.preventDefault()
+  if (isQuitting) return
+
+  Logger.info('Main', 'before-quit event triggered')
+  isQuitting = true
+  void shutdownApplication()
+    .catch((error) => Logger.error('Main', 'Graceful shutdown failed:', error))
+    .finally(() => {
+      shutdownComplete = true
+      app.quit()
+    })
 })
 
 // Second line of defense: will-quit event (backup)
 app.on('will-quit', () => {
-  if (!isQuitting) {
+  if (!shutdownComplete) {
     Logger.warn('Main', 'will-quit event triggered (backup)')
+    legalGraphWorker?.requestStop()
     closeDatabase()
   }
 })
@@ -221,6 +318,7 @@ const handleShutdown = (signal: string) => {
 
   if (!isQuitting) {
     isQuitting = true
+    legalGraphWorker?.requestStop()
     closeDatabase()
   }
 
@@ -237,6 +335,7 @@ process.on('SIGHUP', () => handleShutdown('SIGHUP'))
 // Uncaught exception handling
 process.on('uncaughtException', (error) => {
   Logger.error('Main', 'Uncaught exception:', error)
+  legalGraphWorker?.requestStop()
   closeDatabase()
   process.exit(1)
 })
