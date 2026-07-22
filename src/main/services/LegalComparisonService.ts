@@ -148,7 +148,7 @@ function normalizeRuleText(value: string): string {
   return value
     .normalize('NFC')
     .toLocaleLowerCase('vi-VN')
-    .replace(/\bđiều\s+\d+[a-z]?\s*[.:\-]?/giu, ' ')
+    .replace(/\bđiều\s+\d+[a-z]?\s*[.:-]?/giu, ' ')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -271,6 +271,10 @@ export function getLegalDocumentMetadata(metadata: unknown): LegalDocumentMetada
   }
 
   return buildLegalDocumentMetadata(legalDocument as LegalDocumentMetadataInput)
+}
+
+export function isLegalApplicabilityQuery(query: string): boolean {
+  return applicabilityPattern.test(query.normalize('NFC').trim())
 }
 
 export function isLegalComparisonQuery(query: string): boolean {

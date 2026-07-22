@@ -1,3 +1,5 @@
+import type { LegalComparisonResult } from '../../main/services/LegalComparisonService'
+
 export const LEGAL_NODE_TYPES = [
   'document',
   'article',
@@ -41,6 +43,17 @@ export interface LegalModalityTag {
   endOffset: number
 }
 
+export interface LegalReasoningEvidence {
+  citationId?: number
+  notebookId: string
+  documentId: string
+  documentTitle: string
+  chunkId: string
+  chunkIndex: number
+  content: string
+  score: number
+}
+
 export interface LegalReasoningStep {
   relationId: string
   relationType: LegalRelationType
@@ -76,6 +89,9 @@ export interface LegalReasoningResult {
   graphStatus: 'ready' | 'pending' | 'failed' | 'unavailable'
   paths: LegalReasoningPath[]
   limitations: string[]
+  evidence?: LegalReasoningEvidence[]
+  context?: string
+  comparison?: LegalComparisonResult
 }
 
 export interface LegalGraphDocumentStatus {

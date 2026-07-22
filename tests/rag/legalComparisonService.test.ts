@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LegalComparisonService,
   buildLegalDocumentMetadata,
+  isLegalApplicabilityQuery,
   isLegalComparisonQuery,
   validateComparisonCitations,
   type LegalComparisonEvidence
@@ -56,6 +57,9 @@ describe('LegalComparisonService', () => {
     expect(isLegalComparisonQuery('So sánh quy định của hai luật này')).toBe(true)
     expect(isLegalComparisonQuery('Văn bản nào được áp dụng khi có khác nhau?')).toBe(true)
     expect(isLegalComparisonQuery('Điều 15 quy định gì?')).toBe(false)
+    expect(
+      isLegalApplicabilityQuery('V\u0103n b\u1ea3n n\u00e0o \u01b0u ti\u00ean \u00e1p d\u1ee5ng?')
+    ).toBe(true)
   })
 
   it('builds evidence rows per document and resolves verified replacement by time', () => {
