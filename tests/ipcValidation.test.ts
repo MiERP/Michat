@@ -1,10 +1,13 @@
 ﻿import { describe, expect, it } from 'vitest'
-import { ProviderSchemas, SettingsSchemas } from '../src/main/ipc/validation'
+import { KnowledgeSchemas, ProviderSchemas, SettingsSchemas } from '../src/main/ipc/validation'
 
 describe('ipc validation schemas', () => {
   it('accepts known settings keys with correctly typed values', () => {
     expect(SettingsSchemas.set.parse({ key: 'language', value: 'vi-VN' }).key).toBe('language')
-    expect(SettingsSchemas.update.parse({ updates: { allowRemoteProviders: false, ragTopK: 5 } }).updates.ragTopK).toBe(5)
+    expect(
+      SettingsSchemas.update.parse({ updates: { allowRemoteProviders: false, ragTopK: 5 } }).updates
+        .ragTopK
+    ).toBe(5)
   })
 
   it('rejects unknown settings keys and invalid values', () => {
@@ -29,5 +32,16 @@ describe('ipc validation schemas', () => {
         config: { baseUrl: 'not-a-url' }
       })
     ).toThrow()
+  })
+
+  it('validates legal graph status and retry document IDs', () => {
+    expect(KnowledgeSchemas.getLegalGraphStatus.parse({ documentId: 'doc-1' })).toEqual({
+      documentId: 'doc-1'
+    })
+    expect(KnowledgeSchemas.retryLegalGraph.parse({ documentId: 'doc-1' })).toEqual({
+      documentId: 'doc-1'
+    })
+    expect(() => KnowledgeSchemas.getLegalGraphStatus.parse({ documentId: '' })).toThrow()
+    expect(() => KnowledgeSchemas.retryLegalGraph.parse({ documentId: '../doc' })).toThrow()
   })
 })

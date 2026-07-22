@@ -218,20 +218,46 @@ const legalDocumentMetadataSchema = z.object({
   documentTitle: z.string().max(1000).optional(),
   legalBases: z.string().max(10000).optional(),
   jurisdiction: z.string().max(200).optional(),
-  issuedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  status: z.enum(['effective', 'partially_repealed', 'replaced', 'repealed', 'expired', 'draft', 'unknown']),
+  issuedAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  effectiveFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  effectiveTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  status: z.enum([
+    'effective',
+    'partially_repealed',
+    'replaced',
+    'repealed',
+    'expired',
+    'draft',
+    'unknown'
+  ]),
   scope: z.string().max(1000).optional(),
   sourceAuthority: z.string().max(200).optional(),
   officialSourceUrl: z.string().url().max(2000).optional(),
   sourceHash: z.string().max(200).optional(),
-  verifiedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  verifiedAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   verifiedBy: z.string().max(200).optional(),
   amendsDocumentIds: z.array(z.string().min(1).max(200)).max(100).default([]),
   replacesDocumentIds: z.array(z.string().min(1).max(200)).max(100).default([]),
   repealedByDocumentIds: z.array(z.string().min(1).max(200)).max(100).default([])
 })
+
+const legalGraphDocumentIdSchema = z
+  .string()
+  .min(1, 'Document ID cannot be empty')
+  .max(200, 'Document ID is too long')
+  .regex(/^[A-Za-z0-9:_-]+$/u, 'Document ID contains invalid characters')
 
 export const KnowledgeSchemas = {
   addDocument: z.object({
@@ -304,6 +330,14 @@ export const KnowledgeSchemas = {
 
   reindexDocument: z.object({
     documentId: z.string().min(1, 'Document ID cannot be empty')
+  }),
+
+  getLegalGraphStatus: z.object({
+    documentId: legalGraphDocumentIdSchema
+  }),
+
+  retryLegalGraph: z.object({
+    documentId: legalGraphDocumentIdSchema
   }),
 
   getStats: z.object({

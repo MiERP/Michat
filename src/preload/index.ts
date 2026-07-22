@@ -200,6 +200,10 @@ const api = {
       ipcRenderer.invoke('knowledge:delete-document', { documentId }),
     reindexDocument: (documentId: string) =>
       ipcRenderer.invoke('knowledge:reindex-document', { documentId }),
+    getLegalGraphStatus: (documentId: string) =>
+      ipcRenderer.invoke('knowledge:get-legal-graph-status', { documentId }),
+    retryLegalGraph: (documentId: string) =>
+      ipcRenderer.invoke('knowledge:retry-legal-graph', { documentId }),
 
     // 统计
     getStats: (notebookId: string) => ipcRenderer.invoke('knowledge:get-stats', { notebookId }),
@@ -216,6 +220,11 @@ const api = {
       const listener = (_event: any, data: any) => callback(data)
       ipcRenderer.on('knowledge:index-progress', listener)
       return () => ipcRenderer.removeListener('knowledge:index-progress', listener)
+    },
+    onLegalGraphProgress: (callback: (data: any) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('knowledge:graph-progress', listener)
+      return () => ipcRenderer.removeListener('knowledge:graph-progress', listener)
     }
   },
 

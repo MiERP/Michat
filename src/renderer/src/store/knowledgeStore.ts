@@ -12,6 +12,10 @@ import type {
   AddDocumentOptions,
   SearchOptions
 } from '../../../shared/types/knowledge'
+import type {
+  LegalGraphDocumentStatus,
+  LegalGraphProgress
+} from '../../../shared/types/legalReasoning'
 import { useCitationStore } from './citationStore'
 
 interface KnowledgeStore {
@@ -23,6 +27,7 @@ interface KnowledgeStore {
   isSearching: boolean
   isIndexing: boolean
   indexProgress: IndexProgress | null
+  legalGraphStatuses: Record<string, LegalGraphDocumentStatus>
   error: string | null
 
   // Actions
@@ -33,12 +38,15 @@ interface KnowledgeStore {
   setIsSearching: (value: boolean) => void
   setIsIndexing: (value: boolean) => void
   setIndexProgress: (progress: IndexProgress | null) => void
+  setLegalGraphStatus: (documentId: string, status: LegalGraphDocumentStatus) => void
   setError: (error: string | null) => void
   clearSearchResults: () => void
 
   // 异步操作
   loadDocuments: (notebookId: string) => Promise<void>
   loadStats: (notebookId: string) => Promise<void>
+  loadLegalGraphStatus: (documentId: string) => Promise<LegalGraphDocumentStatus | undefined>
+  retryLegalGraph: (documentId: string) => Promise<{ success: boolean; error?: string }>
   addDocument: (
     notebookId: string,
     options: AddDocumentOptions
@@ -81,6 +89,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   isSearching: false,
   isIndexing: false,
   indexProgress: null,
+  legalGraphStatuses: {},
   error: null,
 
   // Setters
@@ -91,6 +100,10 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   setIsSearching: (isSearching) => set({ isSearching }),
   setIsIndexing: (isIndexing) => set({ isIndexing }),
   setIndexProgress: (indexProgress) => set({ indexProgress }),
+  setLegalGraphStatus: (documentId, status) =>
+    set((state) => ({
+      legalGraphStatuses: { ...state.legalGraphStatuses, [documentId]: status }
+    })),
   setError: (error) => set({ error }),
   clearSearchResults: () => set({ searchResults: [] }),
 
@@ -113,6 +126,19 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     } catch (error) {
       console.error('Failed to load stats:', error)
     }
+  },
+
+  loadLegalGraphStatus: async (documentId) => {
+    const result = await window.api.knowledge.getLegalGraphStatus(documentId)
+    if (!result.success || !result.status) return undefined
+    get().setLegalGraphStatus(documentId, result.status)
+    return result.status
+  },
+
+  retryLegalGraph: async (documentId) => {
+    const result = await window.api.knowledge.retryLegalGraph(documentId)
+    if (result.success && result.status) get().setLegalGraphStatus(documentId, result.status)
+    return { success: result.success, error: result.error }
   },
 
   // 添加文档
@@ -213,9 +239,14 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
           useCitationStore.getState().clearCitation()
         }
 
-        set((state) => ({
-          documents: state.documents.filter((d) => d.id !== documentId)
-        }))
+        set((state) => {
+          const legalGraphStatuses = { ...state.legalGraphStatuses }
+          delete legalGraphStatuses[documentId]
+          return {
+            documents: state.documents.filter((document) => document.id !== documentId),
+            legalGraphStatuses
+          }
+        })
         await get().loadStats(notebookId)
       }
       return result
@@ -252,8 +283,15 @@ export function setupKnowledgeListeners(): () => void {
   const cleanupProgress = window.api.knowledge.onIndexProgress((data: IndexProgress) => {
     useKnowledgeStore.getState().setIndexProgress(data)
   })
+  const cleanupGraphProgress = window.api.knowledge.onLegalGraphProgress(
+    (data: LegalGraphProgress) => {
+      const { documentId, ...status } = data
+      useKnowledgeStore.getState().setLegalGraphStatus(documentId, status)
+    }
+  )
 
   return () => {
     cleanupProgress()
+    cleanupGraphProgress()
   }
 }

@@ -15,6 +15,7 @@ import type { LicenseStatus } from '../shared/types/license'
 import type { NotebookOverview } from '../shared/types/notebookOverview'
 import type { MindMap, Quiz, QuizSession } from '../main/db/schema'
 import type { LegalDocumentMetadata } from '../main/services/LegalComparisonService'
+import type { LegalGraphDocumentStatus, LegalGraphProgress } from '../shared/types/legalReasoning'
 
 // 重新导出共享类型
 export type {
@@ -269,6 +270,16 @@ declare global {
         } | null>
         deleteDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
         reindexDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
+        getLegalGraphStatus: (documentId: string) => Promise<{
+          success: boolean
+          status?: LegalGraphDocumentStatus
+          error?: string
+        }>
+        retryLegalGraph: (documentId: string) => Promise<{
+          success: boolean
+          status?: LegalGraphDocumentStatus
+          error?: string
+        }>
 
         // 统计
         getStats: (notebookId: string) => Promise<KnowledgeStats>
@@ -282,6 +293,7 @@ declare global {
 
         // 索引进度监听
         onIndexProgress: (callback: (progress: IndexProgress) => void) => () => void
+        onLegalGraphProgress: (callback: (progress: LegalGraphProgress) => void) => () => void
       }
 
       templates: {

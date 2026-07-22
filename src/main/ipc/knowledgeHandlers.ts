@@ -329,6 +329,38 @@ export function registerKnowledgeHandlers(
 
   // 删除文档
   ipcMain.handle(
+    'knowledge:get-legal-graph-status',
+    validate(KnowledgeSchemas.getLegalGraphStatus, async (params) => {
+      try {
+        return { success: true, status: knowledgeService.getLegalGraphStatus(params.documentId) }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error getting legal graph status:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
+  ipcMain.handle(
+    'knowledge:retry-legal-graph',
+    async (event: IpcMainInvokeEvent, args: unknown) => {
+      return validate(KnowledgeSchemas.retryLegalGraph, async (params) => {
+        try {
+          knowledgeService.retryLegalGraph(params.documentId)
+          const status = knowledgeService.getLegalGraphStatus(params.documentId)
+          event.sender.send('knowledge:graph-progress', {
+            documentId: params.documentId,
+            ...status
+          })
+          return { success: true, status }
+        } catch (error) {
+          Logger.error('KnowledgeHandlers', 'Error retrying legal graph:', error)
+          return { success: false, error: (error as Error).message }
+        }
+      })(event, args)
+    }
+  )
+
+  ipcMain.handle(
     'knowledge:delete-document',
     validate(KnowledgeSchemas.deleteDocument, async (params) => {
       Logger.debug('KnowledgeHandlers', 'delete-document:', params.documentId)

@@ -41,6 +41,9 @@ import { vectorStoreManager } from '../vectorstore'
 import { ProviderManager } from '../providers/ProviderManager'
 import Logger from '../../shared/utils/logger'
 import { isPathInsideDirectory } from '../security/guards'
+import type { LegalGraphDocumentStatus } from '../../shared/types/legalReasoning'
+import type { LegalGraphRepository } from './legalGraph/LegalGraphRepository'
+import { findLegalModalityHints } from './legalGraph/LegalModalityService'
 
 export interface AddDocumentOptions {
   title: string
@@ -115,12 +118,14 @@ export class KnowledgeService {
   private rerankService: RerankService
   private knowledgeFilesDir: string
   private notebookSourcesChangedListener?: (notebookId: string) => void
+  private legalGraphRepository?: LegalGraphRepository
 
-  constructor(providerManager: ProviderManager) {
+  constructor(providerManager: ProviderManager, legalGraphRepository?: LegalGraphRepository) {
     this.embeddingService = new EmbeddingService(providerManager)
     this.chunkingService = new ChunkingService()
     this.fileParserService = new FileParserService()
     this.rerankService = new RerankService(providerManager)
+    this.legalGraphRepository = legalGraphRepository
     this.knowledgeFilesDir = join(app.getPath('userData'), 'knowledge-files')
     this.ensureKnowledgeFilesDir()
   }
@@ -313,7 +318,12 @@ export class KnowledgeService {
       db
         .select()
         .from(documents)
-        .where(inArray(documents.id, profileChunks.map((chunk) => chunk.documentId)))
+        .where(
+          inArray(
+            documents.id,
+            profileChunks.map((chunk) => chunk.documentId)
+          )
+        )
         .all()
         .map((document) => [document.id, document])
     )
@@ -354,12 +364,23 @@ export class KnowledgeService {
         const metadata = chunk.metadata as Record<string, any> | null
         const legalContext = metadata?.legalContext as Record<string, string> | undefined
         const articleNumber = legalContext?.articleNumber
-        return metadata?.kind === 'legal-content' && !!articleNumber && articleOrder.has(articleNumber)
+        return (
+          metadata?.kind === 'legal-content' && !!articleNumber && articleOrder.has(articleNumber)
+        )
       })
       .sort((left, right) => {
-        const leftContext = (left.metadata as Record<string, any>).legalContext as Record<string, string>
-        const rightContext = (right.metadata as Record<string, any>).legalContext as Record<string, string>
-        return (articleOrder.get(leftContext.articleNumber) || 0) - (articleOrder.get(rightContext.articleNumber) || 0)
+        const leftContext = (left.metadata as Record<string, any>).legalContext as Record<
+          string,
+          string
+        >
+        const rightContext = (right.metadata as Record<string, any>).legalContext as Record<
+          string,
+          string
+        >
+        return (
+          (articleOrder.get(leftContext.articleNumber) || 0) -
+          (articleOrder.get(rightContext.articleNumber) || 0)
+        )
       })
       .slice(0, topK)
 
@@ -369,7 +390,12 @@ export class KnowledgeService {
       db
         .select()
         .from(documents)
-        .where(inArray(documents.id, articleChunks.map((chunk) => chunk.documentId)))
+        .where(
+          inArray(
+            documents.id,
+            articleChunks.map((chunk) => chunk.documentId)
+          )
+        )
         .all()
         .map((document) => [document.id, document])
     )
@@ -463,7 +489,8 @@ export class KnowledgeService {
       structure: legalStructure
     })
     const hasExtractedFields = Object.values(extractedLegalMetadata.inspector.fields).some(Boolean)
-    const shouldStoreLegalMetadata = legalStructure || hasExtractedFields || !!documentMetadata.legalMetadataInspector
+    const shouldStoreLegalMetadata =
+      legalStructure || hasExtractedFields || !!documentMetadata.legalMetadataInspector
     if (shouldStoreLegalMetadata) {
       const inspector = mergeLegalMetadataInspector(
         extractedLegalMetadata.inspector,
@@ -602,6 +629,14 @@ export class KnowledgeService {
       .where(eq(documents.id, documentId))
       .run()
 
+    if (legalStructure && this.legalGraphRepository) {
+      try {
+        this.legalGraphRepository.enqueueDocument(documentId, notebookId)
+      } catch (error) {
+        Logger.warn('KnowledgeService', 'Failed to enqueue legal graph extraction:', error)
+      }
+    }
+
     executeCheckpoint('PASSIVE')
     onProgress?.('completed', 100)
     Logger.info(
@@ -634,6 +669,7 @@ export class KnowledgeService {
       profileChunk,
       ...chunkResults.map((chunk) => {
         const legalContext = getLegalContextAt(legalStructure, chunk.startOffset)
+        legalContext.modalities = findLegalModalityHints(chunk.content, chunk.startOffset)
         const prefix = buildLegalChunkPrefix(legalContext)
         const content = prefix ? `${prefix}\n\n${chunk.content}` : chunk.content
 
@@ -1204,6 +1240,35 @@ export class KnowledgeService {
     return Array.from(articleNumbers)
   }
 
+  getLegalGraphStatus(documentId: string): LegalGraphDocumentStatus {
+    const document = this.getDocument(documentId)
+    if (!document) throw new Error(`Document ${documentId} not found`)
+    return (
+      this.legalGraphRepository?.getDocumentGraphStatus(documentId) ?? {
+        status: 'unavailable',
+        attempts: 0,
+        sourceUnitCount: 0,
+        processedUnitCount: 0,
+        nodeCount: 0,
+        relationCount: 0
+      }
+    )
+  }
+
+  retryLegalGraph(documentId: string): void {
+    const document = this.getDocument(documentId)
+    if (!document) throw new Error(`Document ${documentId} not found`)
+    if (!this.legalGraphRepository) throw new Error('Legal graph service is unavailable')
+    const metadata = document.metadata as Record<string, unknown> | null
+    if (!metadata?.legalStructure) throw new Error('Document has no legal structure')
+
+    if (this.legalGraphRepository.getDocumentGraphStatus(documentId).status === 'unavailable') {
+      this.legalGraphRepository.enqueueDocument(documentId, document.notebookId)
+      return
+    }
+    this.legalGraphRepository.retryDocument(documentId)
+  }
+
   getDocuments(notebookId: string): Document[] {
     const db = getDatabase()
     return db
@@ -1228,7 +1293,9 @@ export class KnowledgeService {
     const currentMetadata = (document.metadata as Record<string, unknown>) || {}
     const currentLegalDocument = getLegalDocumentMetadata(currentMetadata)
     const legalDocument = buildLegalDocumentMetadata(metadata)
-    const currentInspector = currentMetadata.legalMetadataInspector as LegalMetadataInspector | undefined
+    const currentInspector = currentMetadata.legalMetadataInspector as
+      | LegalMetadataInspector
+      | undefined
     const inspector: LegalMetadataInspector = currentInspector || {
       version: 1,
       extractedAt: new Date().toISOString(),
@@ -1236,11 +1303,9 @@ export class KnowledgeService {
       declaredRelations: []
     }
     const fields = { ...inspector.fields }
-    const editableFields: Array<[
-      keyof LegalMetadataInspector['fields'],
-      string | undefined,
-      string | undefined
-    ]> = [
+    const editableFields: Array<
+      [keyof LegalMetadataInspector['fields'], string | undefined, string | undefined]
+    > = [
       ['documentNumber', currentLegalDocument.documentNumber, legalDocument.documentNumber],
       ['documentType', currentLegalDocument.documentType, legalDocument.documentType],
       ['issuer', currentLegalDocument.issuer, legalDocument.issuer],
@@ -1252,7 +1317,11 @@ export class KnowledgeService {
       ['status', currentLegalDocument.status, legalDocument.status],
       ['scope', currentLegalDocument.scope, legalDocument.scope],
       ['sourceAuthority', currentLegalDocument.sourceAuthority, legalDocument.sourceAuthority],
-      ['officialSourceUrl', currentLegalDocument.officialSourceUrl, legalDocument.officialSourceUrl],
+      [
+        'officialSourceUrl',
+        currentLegalDocument.officialSourceUrl,
+        legalDocument.officialSourceUrl
+      ],
       ['verifiedAt', currentLegalDocument.verifiedAt, legalDocument.verifiedAt],
       ['verifiedBy', currentLegalDocument.verifiedBy, legalDocument.verifiedBy]
     ]
@@ -1287,11 +1356,17 @@ export class KnowledgeService {
 
   private resolveDeclaredLegalRelations(notebookId: string): void {
     const db = getDatabase()
-    const notebookDocuments = db.select().from(documents).where(eq(documents.notebookId, notebookId)).all()
+    const notebookDocuments = db
+      .select()
+      .from(documents)
+      .where(eq(documents.notebookId, notebookId))
+      .all()
     const documentIdsByNumber = new Map<string, string | null>()
 
     for (const document of notebookDocuments) {
-      const number = getLegalDocumentMetadata(document.metadata).documentNumber?.toLocaleUpperCase('vi-VN')
+      const number = getLegalDocumentMetadata(document.metadata).documentNumber?.toLocaleUpperCase(
+        'vi-VN'
+      )
       if (!number) continue
       documentIdsByNumber.set(number, documentIdsByNumber.has(number) ? null : document.id)
     }
@@ -1395,6 +1470,8 @@ export class KnowledgeService {
     const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()
     if (!doc) return
 
+    this.legalGraphRepository?.deleteDocumentGraph(documentId)
+
     const docChunks = db
       .select({ id: chunks.id })
       .from(chunks)
@@ -1434,6 +1511,9 @@ export class KnowledgeService {
     if (!doc || !doc.content) throw new Error(`Document ${documentId} not found or has no content`)
     let content = doc.content
     let chunkOptions: ChunkOptions | undefined
+
+    // ponytail: content reindex invalidates graph because citations change; add staged chunk versions only if zero-gap graph availability becomes required.
+    this.legalGraphRepository?.deleteDocumentGraph(documentId)
 
     if (doc.localFilePath) {
       const parseResult = await this.fileParserService.parseFile(doc.localFilePath)

@@ -92,3 +92,7 @@ export interface LegalGraphDocumentStatus {
   nextRunAt?: string
   lastError?: string
 }
+
+export interface LegalGraphProgress extends LegalGraphDocumentStatus {
+  documentId: string
+}
