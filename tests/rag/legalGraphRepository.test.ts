@@ -150,4 +150,107 @@ describe('LegalGraphRepository', () => {
       repository.replaceDocumentGraph(documentA, crossNotebookCandidate, provenance)
     ).toThrow('Legal graph candidate crosses notebook boundary')
   })
+
+  it('traverses inbound and outbound paths without cycles', () => {
+    const graphCandidate = candidate(documentA, 3)
+    graphCandidate.relations[2].relationType = 'sanction_for'
+    repository.replaceDocumentGraph(documentA, graphCandidate, provenance)
+    const graph = repository.getDocumentGraph(documentA)
+    const articleNodeId = graph.nodes.find((node) => node.canonicalKey.endsWith(':node:0'))!.id
+    const sanctionNodeId = graph.nodes.find((node) => node.canonicalKey.endsWith(':node:3'))!.id
+
+    const outbound = repository.traverse({
+      notebookId,
+      seedNodeIds: [articleNodeId],
+      relationTypes: ['requires', 'references', 'sanction_for'],
+      maxDepth: 4,
+      maxPaths: 20,
+      minimumConfidence: 0.75
+    })
+    expect(outbound[0].steps.map((step) => step.relationType)).toEqual([
+      'requires',
+      'references',
+      'sanction_for'
+    ])
+    expect(outbound[0].steps.every((step) => step.direction === 'outbound')).toBe(true)
+    expect(outbound.every((path) => new Set(path.nodeIds).size === path.nodeIds.length)).toBe(true)
+
+    const inbound = repository.traverse({
+      notebookId,
+      seedNodeIds: [sanctionNodeId],
+      relationTypes: ['requires', 'references', 'sanction_for'],
+      maxDepth: 4,
+      maxPaths: 20,
+      minimumConfidence: 0.75
+    })
+    expect(inbound[0].steps.map((step) => step.relationType)).toEqual([
+      'sanction_for',
+      'references',
+      'requires'
+    ])
+    expect(inbound[0].steps.every((step) => step.direction === 'inbound')).toBe(true)
+  })
+
+  it('invalidates notebook adjacency cache after replacement and deletion', () => {
+    const graphCandidate = candidate(documentA, 3)
+    graphCandidate.relations[2].relationType = 'sanction_for'
+    repository.replaceDocumentGraph(documentA, graphCandidate, provenance)
+    const seedNodeId = repository
+      .getDocumentGraph(documentA)
+      .nodes.find((node) => node.canonicalKey.endsWith(':node:0'))!.id
+    const firstRevision = repository.getNotebookRevision(notebookId)
+
+    expect(
+      repository.traverse({
+        notebookId,
+        seedNodeIds: [seedNodeId],
+        relationTypes: ['requires', 'references', 'sanction_for'],
+        maxDepth: 4,
+        maxPaths: 20,
+        minimumConfidence: 0.75
+      })[0].steps
+    ).toHaveLength(3)
+
+    repository.replaceDocumentGraph(documentA, candidate(documentA, 1), provenance)
+    expect(repository.getNotebookRevision(notebookId)).toBe(firstRevision + 1)
+    expect(
+      repository.traverse({
+        notebookId,
+        seedNodeIds: [seedNodeId],
+        relationTypes: ['requires', 'references', 'sanction_for'],
+        maxDepth: 4,
+        maxPaths: 20,
+        minimumConfidence: 0.75
+      })[0].steps
+    ).toHaveLength(1)
+
+    repository.deleteDocumentGraph(documentA)
+    expect(repository.getNotebookRevision(notebookId)).toBe(firstRevision + 2)
+    expect(
+      repository.traverse({
+        notebookId,
+        seedNodeIds: [seedNodeId],
+        relationTypes: ['requires', 'references', 'sanction_for'],
+        maxDepth: 4,
+        maxPaths: 20,
+        minimumConfidence: 0.75
+      })
+    ).toEqual([])
+  })
+
+  it('keeps traversal inside the requested notebook', () => {
+    repository.replaceDocumentGraph(otherDocument, candidate(otherDocument, 1), provenance)
+    const otherNodeId = repository.getDocumentGraph(otherDocument).nodes[0].id
+
+    expect(
+      repository.traverse({
+        notebookId,
+        seedNodeIds: [otherNodeId],
+        relationTypes: ['requires'],
+        maxDepth: 4,
+        maxPaths: 20,
+        minimumConfidence: 0.75
+      })
+    ).toEqual([])
+  })
 })

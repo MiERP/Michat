@@ -12,6 +12,11 @@ import {
 const MAX_ERROR_LENGTH = 500
 const MAX_RETRY_DELAY_MS = 30 * 60 * 1000
 const BASE_RETRY_DELAY_MS = 5_000
+const MAX_TRAVERSAL_DEPTH = 4
+const MAX_TRAVERSAL_PATHS = 100
+const MAX_TRAVERSAL_SEEDS = 50
+const MAX_CACHED_EDGES = 10_000
+const MAX_CACHED_NOTEBOOKS = 8
 
 export interface LegalGraphCandidateNode {
   localId: string
@@ -57,6 +62,42 @@ export interface LegalGraphProvenance {
 export interface LegalDocumentGraph {
   nodes: LegalNode[]
   relations: LegalRelation[]
+}
+
+export interface LegalGraphTraversalOptions {
+  notebookId: string
+  seedNodeIds: string[]
+  relationTypes: LegalRelationType[]
+  maxDepth: number
+  maxPaths: number
+  minimumConfidence: number
+}
+
+export interface LegalGraphTraversalStep {
+  relationId: string
+  relationType: LegalRelationType
+  sourceNodeId: string
+  sourceLabel: string
+  targetNodeId: string
+  targetLabel: string
+  confidence: number
+  evidenceChunkId: string
+  evidenceText: string
+  evidenceStartOffset: number
+  evidenceEndOffset: number
+  direction: 'inbound' | 'outbound'
+}
+
+export interface LegalGraphTraversalPath {
+  score: number
+  nodeIds: string[]
+  steps: LegalGraphTraversalStep[]
+}
+
+interface AdjacencyCacheEntry {
+  relationById: Map<string, LegalRelation>
+  labelByNodeId: Map<string, string>
+  adjacency: Map<string, string[]>
 }
 
 type DatabaseRow = Record<string, unknown>
@@ -156,6 +197,9 @@ function mapRelation(row: DatabaseRow): LegalRelation {
 }
 
 export class LegalGraphRepository {
+  private readonly notebookRevisions = new Map<string, number>()
+  private readonly adjacencyCache = new Map<string, AdjacencyCacheEntry>()
+
   constructor(
     private readonly database: Database.Database,
     private readonly versions: LegalGraphProvenance
@@ -432,6 +476,134 @@ export class LegalGraphRepository {
           documentId
         )
     })()
+    this.bumpNotebookRevision(notebookId)
+  }
+
+  // ponytail: desktop traversal caps paths at four hops; introduce a graph adapter only when notebook graphs exceed SQLite limits.
+  traverse(options: LegalGraphTraversalOptions): LegalGraphTraversalPath[] {
+    const relationTypes = [
+      ...new Set(
+        options.relationTypes.filter((relationType) => LEGAL_RELATION_TYPES.includes(relationType))
+      )
+    ]
+    if (relationTypes.length === 0) return []
+
+    const seedNodeIds = [...new Set(options.seedNodeIds)].slice(0, MAX_TRAVERSAL_SEEDS)
+    if (seedNodeIds.length === 0) return []
+
+    const seedPlaceholders = seedNodeIds.map(() => '?').join(', ')
+    const validSeedNodeIds = this.database
+      .prepare(
+        `SELECT id FROM legal_nodes
+         WHERE notebook_id = ? AND id IN (${seedPlaceholders})`
+      )
+      .all(options.notebookId, ...seedNodeIds)
+      .map((row) => String((row as DatabaseRow).id))
+    if (validSeedNodeIds.length === 0) return []
+
+    const maxDepth = Math.max(1, Math.min(MAX_TRAVERSAL_DEPTH, Math.floor(options.maxDepth)))
+    const maxPaths = Math.max(1, Math.min(MAX_TRAVERSAL_PATHS, Math.floor(options.maxPaths)))
+    const minimumConfidence = Math.max(0, Math.min(1, options.minimumConfidence))
+    const rows = this.database
+      .prepare(
+        `WITH RECURSIVE
+          seeds(node_id) AS (
+            SELECT value FROM json_each(?)
+          ),
+          edges(relation_id, from_node_id, to_node_id, direction, confidence) AS (
+            SELECT id, source_node_id, target_node_id, 'outbound', confidence
+            FROM legal_relations
+            WHERE notebook_id = ?
+              AND confidence >= ?
+              AND relation_type IN (SELECT value FROM json_each(?))
+            UNION ALL
+            SELECT id, target_node_id, source_node_id, 'inbound', confidence
+            FROM legal_relations
+            WHERE notebook_id = ?
+              AND confidence >= ?
+              AND relation_type IN (SELECT value FROM json_each(?))
+          ),
+          paths(current_node_id, node_ids, relation_ids, directions, depth, score) AS (
+            SELECT node_id, '|' || node_id || '|', '', '', 0, 1.0
+            FROM seeds
+            UNION ALL
+            SELECT
+              edges.to_node_id,
+              paths.node_ids || edges.to_node_id || '|',
+              CASE
+                WHEN paths.relation_ids = '' THEN edges.relation_id
+                ELSE paths.relation_ids || '|' || edges.relation_id
+              END,
+              CASE
+                WHEN paths.directions = '' THEN edges.direction
+                ELSE paths.directions || '|' || edges.direction
+              END,
+              paths.depth + 1,
+              paths.score * edges.confidence
+            FROM paths
+            JOIN edges ON edges.from_node_id = paths.current_node_id
+            WHERE paths.depth < ?
+              AND instr(paths.node_ids, '|' || edges.to_node_id || '|') = 0
+          )
+        SELECT node_ids, relation_ids, directions, depth, score
+        FROM paths
+        WHERE depth > 0
+        ORDER BY depth DESC, score DESC, relation_ids
+        LIMIT ?`
+      )
+      .all(
+        JSON.stringify(validSeedNodeIds),
+        options.notebookId,
+        minimumConfidence,
+        JSON.stringify(relationTypes),
+        options.notebookId,
+        minimumConfidence,
+        JSON.stringify(relationTypes),
+        maxDepth,
+        maxPaths
+      ) as DatabaseRow[]
+
+    const relationIds = [
+      ...new Set(rows.flatMap((row) => String(row.relation_ids).split('|').filter(Boolean)))
+    ]
+    const material = this.getTraversalMaterial(options.notebookId, relationIds)
+
+    return rows.flatMap((row) => {
+      const pathRelationIds = String(row.relation_ids).split('|').filter(Boolean)
+      const directions = String(row.directions).split('|') as Array<'inbound' | 'outbound'>
+      const steps = pathRelationIds.flatMap((relationId, index) => {
+        const relation = material.relationById.get(relationId)
+        if (!relation) return []
+        return [
+          {
+            relationId,
+            relationType: relation.relationType,
+            sourceNodeId: relation.sourceNodeId,
+            sourceLabel: material.labelByNodeId.get(relation.sourceNodeId) ?? relation.sourceNodeId,
+            targetNodeId: relation.targetNodeId,
+            targetLabel: material.labelByNodeId.get(relation.targetNodeId) ?? relation.targetNodeId,
+            confidence: relation.confidence,
+            evidenceChunkId: relation.evidenceChunkId,
+            evidenceText: relation.evidenceText,
+            evidenceStartOffset: relation.evidenceStartOffset,
+            evidenceEndOffset: relation.evidenceEndOffset,
+            direction: directions[index]
+          }
+        ]
+      })
+      if (steps.length !== pathRelationIds.length) return []
+      return [
+        {
+          score: Number(row.score),
+          nodeIds: String(row.node_ids).split('|').filter(Boolean),
+          steps
+        }
+      ]
+    })
+  }
+
+  getNotebookRevision(notebookId: string): number {
+    return this.notebookRevisions.get(notebookId) ?? 0
   }
 
   getDocumentGraph(documentId: string): LegalDocumentGraph {
@@ -513,6 +685,7 @@ export class LegalGraphRepository {
   }
 
   deleteDocumentGraph(documentId: string): void {
+    const notebookId = this.findDocumentNotebook(documentId)
     this.database.transaction(() => {
       const nodeIds = this.database
         .prepare('SELECT id FROM legal_nodes WHERE document_id = ?')
@@ -536,6 +709,7 @@ export class LegalGraphRepository {
         .prepare('DELETE FROM legal_extraction_jobs WHERE document_id = ?')
         .run(documentId)
     })()
+    if (notebookId) this.bumpNotebookRevision(notebookId)
   }
 
   private getJobById(jobId: string): LegalExtractionJob | undefined {
@@ -546,11 +720,116 @@ export class LegalGraphRepository {
   }
 
   private getDocumentNotebook(documentId: string): string {
+    const notebookId = this.findDocumentNotebook(documentId)
+    if (!notebookId) throw new Error('Legal graph document does not exist')
+    return notebookId
+  }
+
+  private findDocumentNotebook(documentId: string): string | undefined {
     const row = this.database
-      .prepare('SELECT notebook_id FROM documents WHERE id = ?')
-      .get(documentId) as DatabaseRow | undefined
-    if (!row) throw new Error('Legal graph document does not exist')
-    return String(row.notebook_id)
+      .prepare(
+        `SELECT notebook_id FROM documents WHERE id = ?
+         UNION ALL
+         SELECT notebook_id FROM legal_extraction_jobs WHERE document_id = ?
+         UNION ALL
+         SELECT notebook_id FROM legal_nodes WHERE document_id = ?
+         LIMIT 1`
+      )
+      .get(documentId, documentId, documentId) as DatabaseRow | undefined
+    return row ? String(row.notebook_id) : undefined
+  }
+
+  private bumpNotebookRevision(notebookId: string): void {
+    this.notebookRevisions.set(notebookId, this.getNotebookRevision(notebookId) + 1)
+    const prefix = `${notebookId}:`
+    for (const key of this.adjacencyCache.keys()) {
+      if (key.startsWith(prefix)) this.adjacencyCache.delete(key)
+    }
+  }
+
+  private getTraversalMaterial(
+    notebookId: string,
+    relationIds: string[]
+  ): Pick<AdjacencyCacheEntry, 'relationById' | 'labelByNodeId'> {
+    const cache = this.getAdjacencyCache(notebookId)
+    if (cache) return cache
+    if (relationIds.length === 0) {
+      return { relationById: new Map(), labelByNodeId: new Map() }
+    }
+
+    const placeholders = relationIds.map(() => '?').join(', ')
+    const rows = this.database
+      .prepare(
+        `SELECT r.*, source.label AS source_label, target.label AS target_label
+         FROM legal_relations r
+         JOIN legal_nodes source ON source.id = r.source_node_id
+         JOIN legal_nodes target ON target.id = r.target_node_id
+         WHERE r.notebook_id = ? AND r.id IN (${placeholders})`
+      )
+      .all(notebookId, ...relationIds) as DatabaseRow[]
+    const relationById = new Map<string, LegalRelation>()
+    const labelByNodeId = new Map<string, string>()
+    for (const row of rows) {
+      const relation = mapRelation(row)
+      relationById.set(relation.id, relation)
+      labelByNodeId.set(relation.sourceNodeId, String(row.source_label))
+      labelByNodeId.set(relation.targetNodeId, String(row.target_label))
+    }
+    return { relationById, labelByNodeId }
+  }
+
+  private getAdjacencyCache(notebookId: string): AdjacencyCacheEntry | undefined {
+    const revision = this.getNotebookRevision(notebookId)
+    const cacheKey = `${notebookId}:${revision}`
+    const cached = this.adjacencyCache.get(cacheKey)
+    if (cached) {
+      this.adjacencyCache.delete(cacheKey)
+      this.adjacencyCache.set(cacheKey, cached)
+      return cached
+    }
+
+    const edgeCount = Number(
+      (
+        this.database
+          .prepare('SELECT COUNT(*) AS count FROM legal_relations WHERE notebook_id = ?')
+          .get(notebookId) as DatabaseRow
+      ).count
+    )
+    if (edgeCount > MAX_CACHED_EDGES) return undefined
+
+    const rows = this.database
+      .prepare(
+        `SELECT r.*, source.label AS source_label, target.label AS target_label
+         FROM legal_relations r
+         JOIN legal_nodes source ON source.id = r.source_node_id
+         JOIN legal_nodes target ON target.id = r.target_node_id
+         WHERE r.notebook_id = ?`
+      )
+      .all(notebookId) as DatabaseRow[]
+    const entry: AdjacencyCacheEntry = {
+      relationById: new Map(),
+      labelByNodeId: new Map(),
+      adjacency: new Map()
+    }
+    for (const row of rows) {
+      const relation = mapRelation(row)
+      entry.relationById.set(relation.id, relation)
+      entry.labelByNodeId.set(relation.sourceNodeId, String(row.source_label))
+      entry.labelByNodeId.set(relation.targetNodeId, String(row.target_label))
+      for (const nodeId of [relation.sourceNodeId, relation.targetNodeId]) {
+        const adjacent = entry.adjacency.get(nodeId) ?? []
+        adjacent.push(relation.id)
+        entry.adjacency.set(nodeId, adjacent)
+      }
+    }
+
+    this.adjacencyCache.set(cacheKey, entry)
+    while (this.adjacencyCache.size > MAX_CACHED_NOTEBOOKS) {
+      const oldestKey = this.adjacencyCache.keys().next().value as string | undefined
+      if (!oldestKey) break
+      this.adjacencyCache.delete(oldestKey)
+    }
+    return entry
   }
 
   private assertDocumentNotebook(documentId: string, notebookId: string): void {
