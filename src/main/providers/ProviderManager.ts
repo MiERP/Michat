@@ -1,3 +1,4 @@
+import type { LanguageModel } from 'ai'
 import type { BaseProvider } from './capabilities/BaseProvider'
 import type { ChatProvider } from './types'
 import type { EmbeddingProvider } from './types'
@@ -9,6 +10,11 @@ import { AISDKProvider } from './base/AISDKProvider'
 import { settingsManager, providerConfigManager } from '../config'
 import Logger from '../../shared/utils/logger'
 import { canUseProviderForLocalFirst } from './providerPolicy'
+
+export interface ActiveChatLanguageModel {
+  model: LanguageModel
+  provenance: string
+}
 
 /**
  * ProviderManager
@@ -63,7 +69,10 @@ export class ProviderManager {
     // 配置 provider
     const settings = await settingsManager.getAllSettings()
     const descriptor = this.registry.getDescriptor(name)
-    if (!descriptor || !canUseProviderForLocalFirst(descriptor, config, !!settings.allowRemoteProviders)) {
+    if (
+      !descriptor ||
+      !canUseProviderForLocalFirst(descriptor, config, !!settings.allowRemoteProviders)
+    ) {
       Logger.error(
         'ProviderManager',
         `Provider ${name} is blocked by local-first policy. Enable remote providers explicitly to use non-local endpoints.`
@@ -139,6 +148,16 @@ export class ProviderManager {
    * 获取活跃的嵌入 provider
    * 如果用户设置了默认嵌入模型但不可用，会直接返回 null，不会自动 fallback
    */
+  async getActiveChatLanguageModel(): Promise<ActiveChatLanguageModel | null> {
+    const provider = await this.getActiveChatProvider()
+    if (!provider || !(provider instanceof AISDKProvider)) return null
+    const settings = await settingsManager.getAllSettings()
+    return {
+      model: provider.getAIModel() as LanguageModel,
+      provenance: settings.defaultChatModel || `${provider.name}:${provider.getDefaultChatModel()}`
+    }
+  }
+
   async getActiveEmbeddingProvider(): Promise<EmbeddingProvider | null> {
     try {
       const settings = await settingsManager.getAllSettings()
