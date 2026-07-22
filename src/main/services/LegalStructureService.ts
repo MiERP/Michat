@@ -1,3 +1,5 @@
+import type { LegalModalityTag } from '../../shared/types/legalReasoning'
+
 export interface LegalHeading {
   number: string
   title: string
@@ -28,6 +30,7 @@ export interface LegalChunkContext {
   clauseTitle?: string
   pointNumber?: string
   pointTitle?: string
+  modalities?: LegalModalityTag[]
 }
 
 const CHAPTER_PATTERN = /^\s*chương\s+([ivxlcdm]+|\d+[a-z]?)\s*[.:\-]?\s*(.*)$/iu
@@ -46,7 +49,13 @@ function headingFromMatch(
   const followingTitle = lines
     .slice(nextLineIndex)
     .map((line) => line.trim())
-    .find((line) => line.length > 0 && !CHAPTER_PATTERN.test(line) && !SECTION_PATTERN.test(line) && !ARTICLE_PATTERN.test(line))
+    .find(
+      (line) =>
+        line.length > 0 &&
+        !CHAPTER_PATTERN.test(line) &&
+        !SECTION_PATTERN.test(line) &&
+        !ARTICLE_PATTERN.test(line)
+    )
 
   return {
     number: match[1].toUpperCase(),
@@ -159,18 +168,25 @@ export function buildLegalDocumentProfile(
     `Số mục: ${structure.sectionCount}`,
     `Số điều: ${structure.articleCount}`,
     'Danh mục chương:',
-    ...(chapterLines.length > 0 ? chapterLines : ['- Tài liệu không có tiêu đề Chương được nhận diện.']),
+    ...(chapterLines.length > 0
+      ? chapterLines
+      : ['- Tài liệu không có tiêu đề Chương được nhận diện.']),
     'Các số liệu trên được trích từ tiêu đề văn bản gốc.'
   ].join('\n')
 }
 
 export function buildLegalChunkPrefix(context: LegalChunkContext): string {
   const labels = [
-    context.chapterNumber && `Chương ${context.chapterNumber}${context.chapterTitle ? `: ${context.chapterTitle}` : ''}`,
-    context.sectionNumber && `Mục ${context.sectionNumber}${context.sectionTitle ? `: ${context.sectionTitle}` : ''}`,
-    context.articleNumber && `Điều ${context.articleNumber}${context.articleTitle ? `: ${context.articleTitle}` : ''}`,
-    context.clauseNumber && `Khoản ${context.clauseNumber}${context.clauseTitle ? `: ${context.clauseTitle}` : ''}`,
-    context.pointNumber && `Điểm ${context.pointNumber}${context.pointTitle ? `: ${context.pointTitle}` : ''}`
+    context.chapterNumber &&
+      `Chương ${context.chapterNumber}${context.chapterTitle ? `: ${context.chapterTitle}` : ''}`,
+    context.sectionNumber &&
+      `Mục ${context.sectionNumber}${context.sectionTitle ? `: ${context.sectionTitle}` : ''}`,
+    context.articleNumber &&
+      `Điều ${context.articleNumber}${context.articleTitle ? `: ${context.articleTitle}` : ''}`,
+    context.clauseNumber &&
+      `Khoản ${context.clauseNumber}${context.clauseTitle ? `: ${context.clauseTitle}` : ''}`,
+    context.pointNumber &&
+      `Điểm ${context.pointNumber}${context.pointTitle ? `: ${context.pointTitle}` : ''}`
   ].filter(Boolean)
 
   return labels.join('\n')

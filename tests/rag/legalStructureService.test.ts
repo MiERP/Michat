@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { LegalModalityTag } from '../../src/shared/types/legalReasoning'
 import {
   buildLegalDocumentProfile,
   getLegalContextAt,
@@ -31,6 +32,24 @@ a) Hồ sơ nộp trực tuyến được tiếp nhận ngay.
 b) Hồ sơ thiếu thành phần phải được bổ sung.`
 
 describe('LegalStructureService', () => {
+  it('accepts modality evidence on chunk context', () => {
+    const modalities: LegalModalityTag[] = [
+      {
+        type: 'obligation',
+        confidence: 0.55,
+        evidenceText: 'ph\u1ea3i',
+        startOffset: 10,
+        endOffset: 14
+      }
+    ]
+    const context: import('../../src/main/services/LegalStructureService').LegalChunkContext = {
+      articleNumber: '1',
+      modalities
+    }
+
+    expect(context.modalities).toEqual(modalities)
+  })
+
   it('parses Vietnamese legal headings and creates an exact profile', () => {
     const structure = parseLegalStructure(LAW_TEXT)
 
