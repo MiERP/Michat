@@ -1,4 +1,6 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
+import { sqliteTable, text, integer, real, index, uniqueIndex, check } from 'drizzle-orm/sqlite-core'
+import { LEGAL_JOB_STATUSES, LEGAL_NODE_TYPES, LEGAL_RELATION_TYPES } from '../../shared/types/legalReasoning'
 
 /**
  * 笔记本表
@@ -207,6 +209,145 @@ export const embeddings = sqliteTable(
 
 export type Embedding = typeof embeddings.$inferSelect
 export type NewEmbedding = typeof embeddings.$inferInsert
+export const legalNodes = sqliteTable(
+  'legal_nodes',
+  {
+    id: text('id').primaryKey(),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    documentId: text('document_id').references(() => documents.id, { onDelete: 'cascade' }),
+    chunkId: text('chunk_id').references(() => chunks.id, { onDelete: 'cascade' }),
+    nodeType: text('node_type', { enum: LEGAL_NODE_TYPES }).notNull(),
+    canonicalKey: text('canonical_key').notNull(),
+    label: text('label').notNull(),
+    aliases: text('aliases', { mode: 'json' }).$type<string[]>().notNull(),
+    articleNumber: text('article_number'),
+    clauseNumber: text('clause_number'),
+    pointNumber: text('point_number'),
+    startOffset: integer('start_offset'),
+    endOffset: integer('end_offset'),
+    metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    identityIdx: uniqueIndex('idx_legal_nodes_identity').on(
+      table.notebookId,
+      table.nodeType,
+      table.canonicalKey
+    ),
+    documentTypeIdx: index('idx_legal_nodes_document_type').on(table.documentId, table.nodeType),
+    chunkIdx: index('idx_legal_nodes_chunk').on(table.chunkId),
+    labelIdx: index('idx_legal_nodes_notebook_label').on(table.notebookId, table.label)
+  })
+)
+
+export type LegalNode = typeof legalNodes.$inferSelect
+export type NewLegalNode = typeof legalNodes.$inferInsert
+
+export const legalRelations = sqliteTable(
+  'legal_relations',
+  {
+    id: text('id').primaryKey(),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    sourceNodeId: text('source_node_id')
+      .notNull()
+      .references(() => legalNodes.id, { onDelete: 'cascade' }),
+    targetNodeId: text('target_node_id')
+      .notNull()
+      .references(() => legalNodes.id, { onDelete: 'cascade' }),
+    relationType: text('relation_type', { enum: LEGAL_RELATION_TYPES }).notNull(),
+    documentId: text('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    evidenceChunkId: text('evidence_chunk_id')
+      .notNull()
+      .references(() => chunks.id, { onDelete: 'cascade' }),
+    evidenceText: text('evidence_text').notNull(),
+    evidenceStartOffset: integer('evidence_start_offset').notNull(),
+    evidenceEndOffset: integer('evidence_end_offset').notNull(),
+    confidence: real('confidence').notNull(),
+    qualifiers: text('qualifiers', { mode: 'json' }).$type<Record<string, unknown>>(),
+    model: text('model').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    extractorVersion: text('extractor_version').notNull(),
+    ontologyVersion: text('ontology_version').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    fingerprintIdx: uniqueIndex('idx_legal_relations_fingerprint').on(
+      table.notebookId,
+      table.fingerprint
+    ),
+    sourceTypeIdx: index('idx_legal_relations_source_type').on(
+      table.sourceNodeId,
+      table.relationType
+    ),
+    targetTypeIdx: index('idx_legal_relations_target_type').on(
+      table.targetNodeId,
+      table.relationType
+    ),
+    documentIdx: index('idx_legal_relations_document').on(table.documentId),
+    evidenceChunkIdx: index('idx_legal_relations_evidence_chunk').on(table.evidenceChunkId),
+    confidenceCheck: check(
+      'legal_relations_confidence_check',
+      sql`${table.confidence} >= 0 AND ${table.confidence} <= 1`
+    )
+  })
+)
+
+export type LegalRelation = typeof legalRelations.$inferSelect
+export type NewLegalRelation = typeof legalRelations.$inferInsert
+
+export const legalExtractionJobs = sqliteTable(
+  'legal_extraction_jobs',
+  {
+    id: text('id').primaryKey(),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    documentId: text('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: LEGAL_JOB_STATUSES }).notNull().default('pending'),
+    extractorVersion: text('extractor_version').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    ontologyVersion: text('ontology_version').notNull(),
+    model: text('model'),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(5),
+    sourceUnitCount: integer('source_unit_count').notNull().default(0),
+    processedUnitCount: integer('processed_unit_count').notNull().default(0),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at', { mode: 'timestamp' }),
+    nextRunAt: integer('next_run_at', { mode: 'timestamp' }),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    documentIdx: uniqueIndex('idx_legal_extraction_jobs_document').on(table.documentId),
+    statusNextRunIdx: index('idx_legal_extraction_jobs_status_next_run').on(
+      table.status,
+      table.nextRunAt
+    ),
+    notebookStatusIdx: index('idx_legal_extraction_jobs_notebook_status').on(
+      table.notebookId,
+      table.status
+    )
+  })
+)
+
+export type LegalExtractionJob = typeof legalExtractionJobs.$inferSelect
+export type NewLegalExtractionJob = typeof legalExtractionJobs.$inferInsert
+
 
 /**
  * Notebook Overview table

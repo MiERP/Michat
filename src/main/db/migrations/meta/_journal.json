@@ -92,6 +92,13 @@
       "when": 1784458827226,
       "tag": "0012_notebook_overview",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1784680376506,
+      "tag": "0013_legal_knowledge_graph",
+      "breakpoints": true
     }
   ]
 }
