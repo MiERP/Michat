@@ -10,6 +10,7 @@ import type { ChatMessage } from '../../../types/notebook'
 import type { ChatCitation } from '../../../../../shared/types/chat'
 import type { LegalComparisonResult } from '../../../../../main/services/LegalComparisonService'
 import ReasoningContent from './ReasoningContent'
+import { LegalReasoningPathCard } from './LegalReasoningPathCard'
 import { useItemStore } from '../../../store/itemStore'
 import { useNotebookStore } from '../../../store/notebookStore'
 import { useCitationStore } from '../../../store/citationStore'
@@ -192,6 +193,13 @@ export default function MessageItem({ message }: MessageItemProps): ReactElement
           <ReasoningContent
             content={message.reasoningContent}
             isStreaming={message.isReasoningStreaming || false}
+          />
+        )}
+
+        {message.metadata?.legalReasoning && (
+          <LegalReasoningPathCard
+            result={message.metadata.legalReasoning}
+            onCitationClick={(index) => void handleCitationClick(index)}
           />
         )}
 
