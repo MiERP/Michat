@@ -263,7 +263,8 @@ Reject candidate when:
 - Extraction builds complete in-memory candidate for one document.
 - Repository writes nodes, relations, modality updates, and job success in one transaction.
 - Failure before commit leaves previous successful subgraph unchanged.
-- Reindex does not delete old graph until replacement candidate passes validation.
+- Version-only extractor refresh keeps old graph until replacement candidate passes validation.
+- Content reindex invalidates document graph before chunk replacement because citation IDs and offsets change; async worker rebuilds it from new chunks.
 
 ## Queue and Backfill
 
@@ -477,3 +478,4 @@ Document legal metadata UI adds graph status:
 - Reasoning paths survive restart and render inline from persisted message metadata.
 - Delete/reindex leave no stale graph, job, modality, or cache state.
 - All tests and release verification commands pass without unrelated changes.
+
