@@ -26,7 +26,6 @@ import { PanelHeader } from '../ui/panel-header'
 import DocumentList from './source/DocumentList'
 import type { KnowledgeDocument } from '../../../../shared/types/knowledge'
 import type { LegalDocumentMetadata } from '../../../../main/services/LegalComparisonService'
-import type { LegalGraphDocumentStatus } from '../../../../shared/types/legalReasoning'
 import type {
   LegalMetadataField,
   LegalMetadataInspector
@@ -223,95 +222,14 @@ function LegalMetadataSummaryField({
   )
 }
 
-const legalGraphStatusLabels: Record<LegalGraphDocumentStatus['status'], string> = {
-  pending: '\u0110ang ch\u1edd ph\u00e2n t\u00edch',
-  processing: '\u0110ang ph\u00e2n t\u00edch',
-  retry: '\u0110ang ch\u1edd th\u1eed l\u1ea1i',
-  ready: '\u0110\u00e3 s\u1eb5n s\u00e0ng',
-  failed: 'Ph\u00e2n t\u00edch th\u1ea5t b\u1ea1i',
-  unavailable: 'Ch\u01b0a c\u00f3 d\u1eef li\u1ec7u \u0111\u1ed3 th\u1ecb'
-}
-
-function LegalGraphStatusPanel({
-  status,
-  onRetry
-}: {
-  status?: LegalGraphDocumentStatus
-  onRetry: () => Promise<void>
-}): ReactElement {
-  const [isRetrying, setIsRetrying] = useState(false)
-  const [retryError, setRetryError] = useState('')
-
-  const handleRetry = async () => {
-    try {
-      setIsRetrying(true)
-      setRetryError('')
-      await onRetry()
-    } catch (error) {
-      setRetryError(
-        (error as Error).message ||
-          'Kh\u00f4ng th\u1ec3 th\u1eed l\u1ea1i ph\u00e2n t\u00edch \u0111\u1ed3 th\u1ecb.'
-      )
-    } finally {
-      setIsRetrying(false)
-    }
-  }
-
-  const progress =
-    status && status.sourceUnitCount > 0
-      ? Math.round((status.processedUnitCount / status.sourceUnitCount) * 100)
-      : undefined
-
-  return (
-    <div className="rounded-md border border-sky-500/25 bg-sky-500/5 p-2.5 text-xs">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="font-medium">{'\u0110\u1ed3 th\u1ecb tri th\u1ee9c ph\u00e1p l\u00fd'}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {status
-              ? legalGraphStatusLabels[status.status]
-              : '\u0110ang t\u1ea3i tr\u1ea1ng th\u00e1i'}
-            {progress != null && status?.status === 'processing' ? ' \u00b7 ' + progress + '%' : ''}
-          </p>
-        </div>
-        {status?.status === 'failed' && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => void handleRetry()}
-            disabled={isRetrying}
-          >
-            <RefreshCw className={'h-3.5 w-3.5 ' + (isRetrying ? 'animate-spin' : '')} />
-            {'Th\u1eed l\u1ea1i'}
-          </Button>
-        )}
-      </div>
-      {status?.status === 'ready' && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
-          {status.nodeCount + ' n\u00fat \u00b7 ' + status.relationCount + ' quan h\u1ec7'}
-        </p>
-      )}
-      {status?.status === 'failed' && status.lastError && (
-        <p className="mt-1.5 line-clamp-2 text-[11px] text-destructive">{status.lastError}</p>
-      )}
-      {retryError && <p className="mt-1.5 text-[11px] text-destructive">{retryError}</p>}
-    </div>
-  )
-}
-
 function LegalMetadataSummaryPanel({
   document,
   onEdit,
-  onReextract,
-  graphStatus,
-  onRetryGraph
+  onReextract
 }: {
   document: KnowledgeDocument | null
   onEdit: (document: KnowledgeDocument) => void
   onReextract: (document: KnowledgeDocument) => Promise<void>
-  graphStatus?: LegalGraphDocumentStatus
-  onRetryGraph: () => Promise<void>
 }): ReactElement {
   const [isReextracting, setIsReextracting] = useState(false)
   const [error, setError] = useState('')
@@ -334,8 +252,6 @@ function LegalMetadataSummaryPanel({
   const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
   const existing = (rootMetadata.legalDocument as Partial<LegalDocumentMetadata> | undefined) || {}
   const inspector = rootMetadata.legalMetadataInspector as LegalMetadataInspector | undefined
-  const isLegalDocument = !!rootMetadata.legalStructure || !!rootMetadata.legalDocument
-
   const handleReextract = async () => {
     try {
       setIsReextracting(true)
@@ -384,7 +300,6 @@ function LegalMetadataSummaryPanel({
         </div>
       </div>
       <div className="space-y-2 p-3">
-        {isLegalDocument && <LegalGraphStatusPanel status={graphStatus} onRetry={onRetryGraph} />}
         <div className="grid grid-cols-2 gap-2">
           <LegalMetadataSummaryField
             label="Số, ký hiệu"
@@ -672,10 +587,7 @@ export default function SourcePanel(): ReactElement {
     addNoteToKnowledge,
     deleteDocument,
     selectFiles,
-    selectFolder,
-    legalGraphStatuses,
-    loadLegalGraphStatus,
-    retryLegalGraph
+    selectFolder
   } = useKnowledgeStore()
 
   const { notes, loadNotes } = useItemStore()
@@ -728,10 +640,6 @@ export default function SourcePanel(): ReactElement {
       setInspectedDocumentId(null)
     }
   }, [documents, inspectedDocumentId])
-
-  useEffect(() => {
-    if (inspectedDocumentId) void loadLegalGraphStatus(inspectedDocumentId)
-  }, [inspectedDocumentId, loadLegalGraphStatus])
 
   // 处理文件上传
   const handleFileUpload = useCallback(async () => {
@@ -887,13 +795,6 @@ export default function SourcePanel(): ReactElement {
     setOpenedDocument(null)
   }, [])
 
-  const handleRetryLegalGraph = useCallback(async () => {
-    if (!inspectedDocumentId) return
-    const result = await retryLegalGraph(inspectedDocumentId)
-    if (!result.success) throw new Error(result.error || 'Không thể thử lại phân tích đồ thị.')
-    await loadLegalGraphStatus(inspectedDocumentId)
-  }, [inspectedDocumentId, retryLegalGraph, loadLegalGraphStatus])
-
   const handleReextractLegalMetadata = useCallback(
     async (document: KnowledgeDocument) => {
       const result = await window.api.knowledge.reindexDocument(document.id)
@@ -1020,10 +921,6 @@ export default function SourcePanel(): ReactElement {
                 document={inspectedDocument}
                 onEdit={setLegalMetadataDocument}
                 onReextract={handleReextractLegalMetadata}
-                graphStatus={
-                  inspectedDocument ? legalGraphStatuses[inspectedDocument.id] : undefined
-                }
-                onRetryGraph={handleRetryLegalGraph}
               />
             </div>
           )}

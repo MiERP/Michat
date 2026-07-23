@@ -14,11 +14,27 @@ import Logger from '../../shared/utils/logger'
 export class SQLiteVectorStore implements VectorStore {
   private notebookId: string = ''
   private dimensions: number = 1024
+  private tableName: string = 'vec_embeddings'
   private initialized: boolean = false
 
   async initialize(config: VectorStoreConfig): Promise<void> {
     this.notebookId = config.notebookId
     this.dimensions = config.dimensions || 1024
+    if (!Number.isInteger(this.dimensions) || this.dimensions < 1 || this.dimensions > 8192) {
+      throw new Error(`Invalid vector dimensions: ${this.dimensions}`)
+    }
+    this.tableName =
+      this.dimensions === 1024 ? 'vec_embeddings' : `vec_embeddings_${this.dimensions}`
+    const sqlite = getSqlite()
+    if (!sqlite) throw new Error('SQLite instance not available')
+    sqlite.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS ${this.tableName} USING vec0(
+        embedding_id TEXT PRIMARY KEY,
+        chunk_id TEXT,
+        notebook_id TEXT,
+        embedding FLOAT[${this.dimensions}] distance_metric=cosine
+      );
+    `)
     this.initialized = true
     Logger.info('SQLiteVectorStore', `Initialized for notebook: ${this.notebookId}`)
   }
@@ -34,7 +50,7 @@ export class SQLiteVectorStore implements VectorStore {
     }
 
     const insertStmt = sqlite.prepare(`
-      INSERT OR REPLACE INTO vec_embeddings (embedding_id, chunk_id, notebook_id, embedding)
+      INSERT OR REPLACE INTO ${this.tableName} (embedding_id, chunk_id, notebook_id, embedding)
       VALUES (?, ?, ?, ?)
     `)
 
@@ -42,8 +58,7 @@ export class SQLiteVectorStore implements VectorStore {
       for (const item of items) {
         // 验证向量维度
         if (item.vector.length !== this.dimensions) {
-          Logger.warn(
-            'SQLiteVectorStore',
+          throw new Error(
             `Vector dimension mismatch: expected ${this.dimensions}, got ${item.vector.length}`
           )
         }
@@ -76,7 +91,7 @@ export class SQLiteVectorStore implements VectorStore {
 
     const placeholders = ids.map(() => '?').join(',')
     const deleteStmt = sqlite.prepare(`
-      DELETE FROM vec_embeddings WHERE embedding_id IN (${placeholders})
+      DELETE FROM ${this.tableName} WHERE embedding_id IN (${placeholders})
     `)
 
     try {
@@ -102,7 +117,7 @@ export class SQLiteVectorStore implements VectorStore {
 
     const placeholders = chunkIds.map(() => '?').join(',')
     const deleteStmt = sqlite.prepare(`
-      DELETE FROM vec_embeddings WHERE chunk_id IN (${placeholders})
+      DELETE FROM ${this.tableName} WHERE chunk_id IN (${placeholders})
     `)
 
     try {
@@ -146,7 +161,7 @@ export class SQLiteVectorStore implements VectorStore {
           embedding_id,
           chunk_id,
           distance
-        FROM vec_embeddings
+        FROM ${this.tableName}
         WHERE embedding MATCH ?
           AND k = ?
           AND notebook_id = ?
@@ -211,7 +226,7 @@ export class SQLiteVectorStore implements VectorStore {
 
     try {
       const deleteStmt = sqlite.prepare(`
-        DELETE FROM vec_embeddings WHERE notebook_id = ?
+        DELETE FROM ${this.tableName} WHERE notebook_id = ?
       `)
       deleteStmt.run(this.notebookId)
 
@@ -234,7 +249,7 @@ export class SQLiteVectorStore implements VectorStore {
 
     try {
       const countStmt = sqlite.prepare(`
-        SELECT COUNT(*) as count FROM vec_embeddings WHERE notebook_id = ?
+        SELECT COUNT(*) as count FROM ${this.tableName} WHERE notebook_id = ?
       `)
       const result = countStmt.get(this.notebookId) as { count: number }
 

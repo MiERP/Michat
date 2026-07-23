@@ -5,6 +5,10 @@
 
 import type { APIMessage, StreamChunk } from '../../../shared/types/chat'
 
+export interface ChatStreamOptions {
+  maxOutputTokens?: number
+}
+
 /**
  * ChatCapability 对话能力接口
  * 实现此接口的 Provider 支持对话功能
@@ -22,7 +26,8 @@ export interface ChatCapability {
     messages: APIMessage[],
     onChunk: (chunk: StreamChunk) => void,
     onError: (error: Error) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    options?: ChatStreamOptions
   ): Promise<AbortController>
 
   /**

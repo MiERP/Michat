@@ -249,6 +249,18 @@ export function setupChatListeners() {
 
     // 处理不同类型的流式部分
     switch (type) {
+      case 'phase':
+        if (metadata) {
+          useChatStore.setState((state) => ({
+            messages: state.messages.map((msg) =>
+              msg.id === messageId
+                ? { ...msg, metadata: { ...(msg.metadata || {}), ...metadata } }
+                : msg
+            )
+          }))
+        }
+        break
+
       case 'reasoning-start':
         // 推理块开始，标记推理状态
         useChatStore.setState((state) => ({
@@ -310,7 +322,13 @@ export function setupChatListeners() {
       case 'finish': {
         useChatStore.setState((state) => ({
           messages: state.messages.map((msg) =>
-            msg.id === messageId ? { ...msg, metadata: metadata || msg.metadata } : msg
+            msg.id === messageId
+              ? {
+                  ...msg,
+                  ...(typeof content === 'string' ? { content } : {}),
+                  metadata: metadata || msg.metadata
+                }
+              : msg
           )
         }))
 

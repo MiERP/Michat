@@ -28,6 +28,7 @@ import {
 } from './LegalStructureService'
 import {
   buildLegalDocumentMetadata,
+  getCanonicalLegalWorkKey,
   getLegalDocumentMetadata,
   type LegalDocumentMetadata
 } from './LegalComparisonService'
@@ -44,6 +45,7 @@ import { isPathInsideDirectory } from '../security/guards'
 import type { LegalGraphDocumentStatus } from '../../shared/types/legalReasoning'
 import type { LegalGraphRepository } from './legalGraph/LegalGraphRepository'
 import { findLegalModalityHints } from './legalGraph/LegalModalityService'
+import { expandVietnameseLegalQuery } from './VietnameseLegalQueryService'
 
 export interface AddDocumentOptions {
   title: string
@@ -103,7 +105,41 @@ export function buildFtsMatchQuery(query: string): string {
   return terms.map((term) => '"' + term + '"').join(' OR ')
 }
 
+export function collapseCanonicalSearchResults(
+  results: SearchResult[],
+  topK: number
+): SearchResult[] {
+  const ownerByCoordinate = new Map<string, string>()
+  const collapsed: SearchResult[] = []
+
+  for (const result of results.slice().sort((left, right) => right.score - left.score)) {
+    const canonicalKey =
+      typeof result.documentMetadata?.canonicalLegalWorkKey === 'string'
+        ? result.documentMetadata.canonicalLegalWorkKey
+        : getCanonicalLegalWorkKey(getLegalDocumentMetadata(result.documentMetadata))
+    if (canonicalKey) {
+      const legalContext = result.metadata?.legalContext as Record<string, string> | undefined
+      const coordinateKey = [
+        canonicalKey,
+        legalContext?.articleNumber || '',
+        legalContext?.clauseNumber || '',
+        legalContext?.pointNumber || ''
+      ].join(':')
+      const ownerDocumentId = ownerByCoordinate.get(coordinateKey)
+      if (ownerDocumentId && ownerDocumentId !== result.documentId) continue
+      ownerByCoordinate.set(coordinateKey, result.documentId)
+    }
+    collapsed.push(result)
+    if (collapsed.length >= topK) break
+  }
+
+  return collapsed
+}
+
 export type IndexProgressCallback = (stage: string, progress: number) => void
+
+const MIN_PROVIDER_RERANK_SCORE = 0.2
+const MIN_HEURISTIC_RERANK_SCORE = 0.15
 
 export interface BatchIndexResult {
   totalFiles: number
@@ -128,6 +164,70 @@ export class KnowledgeService {
     this.legalGraphRepository = legalGraphRepository
     this.knowledgeFilesDir = join(app.getPath('userData'), 'knowledge-files')
     this.ensureKnowledgeFilesDir()
+    this.backfillCanonicalLegalIdentity()
+  }
+
+  private backfillCanonicalLegalIdentity(): void {
+    const db = getDatabase()
+    const indexedDocuments = db
+      .select()
+      .from(documents)
+      .all()
+      .filter((document) => document.status === 'indexed')
+      .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+    const canonicalGroups = new Map<string, Array<{ document: Document; metadata: Record<string, unknown> }>>()
+
+    for (const document of indexedDocuments) {
+      const metadata = { ...((document.metadata as Record<string, unknown> | null) || {}) }
+      if (!metadata.legalStructure && !metadata.legalDocument && !metadata.legalMetadataInspector) {
+        continue
+      }
+      const chunkContent = db
+        .select({ content: chunks.content })
+        .from(chunks)
+        .where(eq(chunks.documentId, document.id))
+        .all()
+        .map((chunk) => chunk.content)
+        .join('\n')
+      const extracted = extractLegalMetadataFromDocument({
+        title: document.title,
+        content: document.content || chunkContent,
+        structure: metadata.legalStructure as LegalDocumentStructure | undefined
+      })
+      const inspector = mergeLegalMetadataInspector(
+        extracted.inspector,
+        metadata.legalMetadataInspector as LegalMetadataInspector | undefined
+      )
+      const legalDocument = materializeLegalDocumentMetadata(
+        inspector,
+        getLegalDocumentMetadata(metadata)
+      )
+      const canonicalLegalWorkKey = getCanonicalLegalWorkKey(legalDocument)
+      if (!canonicalLegalWorkKey) continue
+
+      metadata.legalMetadataInspector = inspector
+      metadata.legalDocument = legalDocument
+      metadata.canonicalLegalWorkKey = canonicalLegalWorkKey
+      metadata.duplicateGroup = canonicalLegalWorkKey
+      const groupKey = `${document.notebookId}:${canonicalLegalWorkKey}`
+      const group = canonicalGroups.get(groupKey) || []
+      group.push({ document, metadata })
+      canonicalGroups.set(groupKey, group)
+    }
+
+    for (const group of canonicalGroups.values()) {
+      const canonicalDocumentId = group[0].document.id
+      for (const entry of group) {
+        entry.metadata.canonicalGraphDocumentId = canonicalDocumentId
+        db.update(documents)
+          .set({ metadata: entry.metadata })
+          .where(eq(documents.id, entry.document.id))
+          .run()
+        if (entry.document.id !== canonicalDocumentId && this.legalGraphRepository) {
+          this.legalGraphRepository.deleteDocumentGraph(entry.document.id)
+        }
+      }
+    }
   }
 
   private async ensureKnowledgeFilesDir(): Promise<void> {
@@ -349,8 +449,7 @@ export class KnowledgeService {
   private findLegalArticleResults(
     notebookId: string,
     filteredChunkIds: string[] | null,
-    articleNumbers: string[],
-    topK: number
+    articleNumbers: string[]
   ): SearchResult[] {
     const db = getDatabase()
     const articleOrder = new Map(articleNumbers.map((number, index) => [number, index]))
@@ -377,12 +476,11 @@ export class KnowledgeService {
           string,
           string
         >
-        return (
+        const articleDifference =
           (articleOrder.get(leftContext.articleNumber) || 0) -
           (articleOrder.get(rightContext.articleNumber) || 0)
-        )
+        return articleDifference || left.chunkIndex - right.chunkIndex
       })
-      .slice(0, topK)
 
     if (articleChunks.length === 0) return []
 
@@ -453,8 +551,15 @@ export class KnowledgeService {
     if (docChunks.length === 0) return
 
     const chunkIds = docChunks.map((chunk) => chunk.id)
-    const vectorStore = await vectorStoreManager.getStore(notebookId)
-    await vectorStore.deleteByChunkIds(chunkIds)
+    const vectorDimensions = db
+      .select({ dimensions: embeddings.dimensions })
+      .from(embeddings)
+      .where(inArray(embeddings.chunkId, chunkIds))
+      .all()
+    for (const dimensions of new Set(vectorDimensions.map((row) => row.dimensions))) {
+      const vectorStore = await vectorStoreManager.getStore(notebookId, undefined, dimensions)
+      await vectorStore.deleteByChunkIds(chunkIds)
+    }
     this.deleteFtsChunkIds(chunkIds)
     db.delete(embeddings).where(inArray(embeddings.chunkId, chunkIds)).run()
     db.delete(chunks).where(eq(chunks.documentId, documentId)).run()
@@ -497,10 +602,35 @@ export class KnowledgeService {
         documentMetadata.legalMetadataInspector as LegalMetadataInspector | undefined
       )
       documentMetadata.legalMetadataInspector = inspector
-      documentMetadata.legalDocument = materializeLegalDocumentMetadata(
+      const legalDocument = materializeLegalDocumentMetadata(
         inspector,
         getLegalDocumentMetadata(documentMetadata)
       )
+      documentMetadata.legalDocument = legalDocument
+      const canonicalLegalWorkKey = getCanonicalLegalWorkKey(legalDocument)
+      if (canonicalLegalWorkKey) {
+        const canonicalDocument = db
+          .select()
+          .from(documents)
+          .where(eq(documents.notebookId, notebookId))
+          .all()
+          .find((candidate) => {
+            if (candidate.id === documentId) return false
+            const metadata = (candidate.metadata as Record<string, unknown>) || {}
+            return (
+              metadata.canonicalLegalWorkKey === canonicalLegalWorkKey ||
+              getCanonicalLegalWorkKey(getLegalDocumentMetadata(metadata)) === canonicalLegalWorkKey
+            )
+          })
+        const canonicalMetadata =
+          (canonicalDocument?.metadata as Record<string, unknown> | undefined) || {}
+        documentMetadata.canonicalLegalWorkKey = canonicalLegalWorkKey
+        documentMetadata.duplicateGroup = canonicalLegalWorkKey
+        documentMetadata.canonicalGraphDocumentId =
+          (canonicalMetadata.canonicalGraphDocumentId as string | undefined) ||
+          canonicalDocument?.id ||
+          documentId
+      }
     }
 
     if (
@@ -571,20 +701,14 @@ export class KnowledgeService {
     onProgress?.('generating_embeddings', 30)
     const embeddingResults = await this.embeddingService.embedBatch(
       chunkContents,
-      { dimensions: 1024 },
+      undefined,
       (completed, total) => {
         onProgress?.('generating_embeddings', Math.round(30 + (completed / total) * 50))
       }
     )
 
     const detectedDimensions = embeddingResults.length > 0 ? embeddingResults[0].dimensions : 1024
-    if (embeddingResults.length > 0 && detectedDimensions !== 1024) {
-      throw new Error(
-        `Unsupported embedding dimensions: ${detectedDimensions}. Current sqlite-vec schema requires 1024 dimensions.`
-      )
-    }
     if (embeddingResults.length > 0) {
-      vectorStoreManager.setDefaultDimensions(1024)
       Logger.debug('KnowledgeService', `Detected embedding dimensions: ${detectedDimensions}`)
     }
 
@@ -629,7 +753,14 @@ export class KnowledgeService {
       .where(eq(documents.id, documentId))
       .run()
 
-    if (legalStructure && this.legalGraphRepository) {
+    const canonicalGraphDocumentId = documentMetadata.canonicalGraphDocumentId as
+      | string
+      | undefined
+    if (
+      legalStructure &&
+      this.legalGraphRepository &&
+      (!canonicalGraphDocumentId || canonicalGraphDocumentId === documentId)
+    ) {
       try {
         this.legalGraphRepository.enqueueDocument(documentId, notebookId)
       } catch (error) {
@@ -1003,23 +1134,25 @@ export class KnowledgeService {
         ...this.findLegalArticleResults(
           notebookId,
           filteredChunkIds,
-          articleNumbers,
-          Math.max(1, topK - directResults.length)
+          articleNumbers
         )
       )
     }
 
-    if (directResults.length > 0) return directResults.slice(0, topK)
-
-    // 1. Vector Search
-    const queryEmbedding = await this.embeddingService.embed(query)
-    if (queryEmbedding.dimensions !== 1024) {
-      throw new Error(
-        `Unsupported query embedding dimensions: ${queryEmbedding.dimensions}. Current sqlite-vec schema requires 1024 dimensions.`
+    if (directResults.length > 0) {
+      return collapseCanonicalSearchResults(
+        directResults,
+        Math.max(topK, directResults.length)
       )
     }
 
-    const vectorStore = await vectorStoreManager.getStore(notebookId, undefined, 1024)
+    // 1. Vector Search
+    const queryEmbedding = await this.embeddingService.embed(query)
+    const vectorStore = await vectorStoreManager.getStore(
+      notebookId,
+      undefined,
+      queryEmbedding.dimensions
+    )
     const vectorResults = await vectorStore.query(queryEmbedding.embedding, {
       topK: retrievalCandidateLimit,
       threshold,
@@ -1030,7 +1163,10 @@ export class KnowledgeService {
     let ftsResults: Array<{ chunk_id: string; rank: number }> = []
     if (sqlite) {
       try {
-        const ftsQuery = buildFtsMatchQuery(query)
+        const ftsQuery = expandVietnameseLegalQuery(query)
+          .map(buildFtsMatchQuery)
+          .filter(Boolean)
+          .join(' OR ')
         if (ftsQuery) {
           let sqlText = `
             SELECT chunk_id, rank 
@@ -1087,7 +1223,7 @@ export class KnowledgeService {
     let rerankScores = new Map<string, number>()
     let finalRankedChunkIds = fusedRankedChunkIds
 
-    if (rerankEnabled && rerankCandidateIds.length > 1) {
+    if (rerankCandidateIds.length > 0) {
       const rerankRows = db
         .select({ id: chunks.id, content: chunks.content })
         .from(chunks)
@@ -1103,9 +1239,10 @@ export class KnowledgeService {
 
       const rerankOutcome = await this.rerankService.rerank(query, rerankCandidates, {
         enabled: true,
+        localOnly: !rerankEnabled,
         topN: rerankTopN,
         model: rerankModel,
-        heuristicFallback: rerankHeuristicFallback
+        heuristicFallback: rerankEnabled ? rerankHeuristicFallback : true
       })
       rerankMethod = rerankOutcome.method
       rerankScores = rerankOutcome.scores
@@ -1129,7 +1266,21 @@ export class KnowledgeService {
       finalRankedChunkIds = uniqueOrderedIds
     }
 
-    const fusedChunkIds = finalRankedChunkIds.slice(0, topK)
+    const minimumRerankScore =
+      rerankMethod === 'provider'
+        ? MIN_PROVIDER_RERANK_SCORE
+        : rerankMethod === 'heuristic'
+          ? MIN_HEURISTIC_RERANK_SCORE
+          : undefined
+    const relevantRankedChunkIds =
+      minimumRerankScore == null
+        ? finalRankedChunkIds
+        : finalRankedChunkIds.filter(
+            (chunkId) =>
+              (rerankScores.get(chunkId) ?? Number.NEGATIVE_INFINITY) >= minimumRerankScore
+          )
+    const fusedChunkIds = relevantRankedChunkIds.slice(0, Math.max(topK, topK * 3))
+    if (fusedChunkIds.length === 0) return []
 
     // 4. Fetch Expanded Context (Parent-Child Strategy)
     const chunkDetails = db.select().from(chunks).where(inArray(chunks.id, fusedChunkIds)).all()
@@ -1212,12 +1363,13 @@ export class KnowledgeService {
       rerankEnabled,
       rerankMethod,
       rerankCandidates: rerankCandidateIds.length,
+      retainedCandidates: fusedChunkIds.length,
       returned: results.length,
       latencyMs: Date.now() - startedAt,
       filtered: !!filteredChunkIds
     })
 
-    return results
+    return collapseCanonicalSearchResults(results, topK)
   }
 
   private isLegalStructureQuery(query: string): boolean {
@@ -1243,8 +1395,11 @@ export class KnowledgeService {
   getLegalGraphStatus(documentId: string): LegalGraphDocumentStatus {
     const document = this.getDocument(documentId)
     if (!document) throw new Error(`Document ${documentId} not found`)
+    const metadata = document.metadata as Record<string, unknown> | null
+    const graphDocumentId =
+      (metadata?.canonicalGraphDocumentId as string | undefined) || documentId
     return (
-      this.legalGraphRepository?.getDocumentGraphStatus(documentId) ?? {
+      this.legalGraphRepository?.getDocumentGraphStatus(graphDocumentId) ?? {
         status: 'unavailable',
         attempts: 0,
         sourceUnitCount: 0,
@@ -1261,12 +1416,14 @@ export class KnowledgeService {
     if (!this.legalGraphRepository) throw new Error('Legal graph service is unavailable')
     const metadata = document.metadata as Record<string, unknown> | null
     if (!metadata?.legalStructure) throw new Error('Document has no legal structure')
+    const graphDocumentId =
+      (metadata.canonicalGraphDocumentId as string | undefined) || documentId
 
-    if (this.legalGraphRepository.getDocumentGraphStatus(documentId).status === 'unavailable') {
-      this.legalGraphRepository.enqueueDocument(documentId, document.notebookId)
+    if (this.legalGraphRepository.getDocumentGraphStatus(graphDocumentId).status === 'unavailable') {
+      this.legalGraphRepository.enqueueDocument(graphDocumentId, document.notebookId)
       return
     }
-    this.legalGraphRepository.retryDocument(documentId)
+    this.legalGraphRepository.retryDocument(graphDocumentId)
   }
 
   getDocuments(notebookId: string): Document[] {
@@ -1377,6 +1534,17 @@ export class KnowledgeService {
         { ...((document.metadata as Record<string, unknown>) || {}) }
       ])
     )
+
+    for (const [documentId, metadata] of metadataByDocumentId) {
+      const legalDocument = getLegalDocumentMetadata(metadata)
+      metadata.legalDocument = {
+        ...legalDocument,
+        amendsDocumentIds: [],
+        replacesDocumentIds: [],
+        repealedByDocumentIds: []
+      }
+      metadataByDocumentId.set(documentId, metadata)
+    }
 
     for (const sourceDocument of notebookDocuments) {
       const sourceMetadata = metadataByDocumentId.get(sourceDocument.id)!

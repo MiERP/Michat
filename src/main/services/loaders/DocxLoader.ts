@@ -11,6 +11,42 @@ import * as cheerio from 'cheerio'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
 
+export function extractVietnameseLegalSections(content: string): SectionInfo[] {
+  const headings: Array<{ level: number; title: string; startOffset: number }> = []
+
+  for (const match of content.matchAll(/^.*$/gmu)) {
+    const title = match[0].trim()
+    if (!title) continue
+
+    let level: number | undefined
+    if (/^(?:PHẦN|CHƯƠNG)\s+[IVXLCDM\d]+(?:\b|\.)/iu.test(title)) level = 1
+    else if (/^(?:MỤC|TIỂU\s+MỤC)\s+[IVXLCDM\d]+(?:\b|\.)/iu.test(title)) level = 2
+    else if (/^Điều\s+\d+[a-zđ]?(?:\b|\.)/iu.test(title)) level = 2
+    if (level) headings.push({ level, title, startOffset: match.index ?? 0 })
+  }
+
+  const root: SectionInfo[] = []
+  const stack: SectionInfo[] = []
+  for (let index = 0; index < headings.length; index++) {
+    const heading = headings[index]
+    const endOffset = headings[index + 1]?.startOffset ?? content.length
+    const section: SectionInfo = {
+      level: heading.level,
+      title: heading.title,
+      content: content.slice(heading.startOffset, endOffset).trim(),
+      startOffset: heading.startOffset,
+      endOffset,
+      children: []
+    }
+    while (stack.length > 0 && stack[stack.length - 1].level >= section.level) stack.pop()
+    if (stack.length === 0) root.push(section)
+    else (stack[stack.length - 1].children ||= []).push(section)
+    stack.push(section)
+  }
+
+  return root
+}
+
 /**
  * Word Ã¦â€“â€¡Ã¦Â¡Â£Ã¥Å Â Ã¨Â½Â½Ã¥â„¢Â¨
  * Ã¥Å¸ÂºÃ¤ÂºÅ½ mammothÃ¯Â¼Å’Ã¦â€Â¯Ã¦Å’Â DOCX Ã¥â€™Å’ DOC
@@ -67,6 +103,8 @@ export class DocxLoader implements IDocumentLoader {
           // Ã¦ÂÂÃ¥Ââ€“Ã§Â«Â Ã¨Å â€šÃ§Â»â€œÃ¦Å¾â€ž
           sections = this.extractSectionsFromHtml($, content)
         }
+
+        if (!sections?.length) sections = extractVietnameseLegalSections(content)
       }
 
       return {

@@ -9,6 +9,7 @@ export interface NotebookOverviewSourceChunk {
 
 export interface NotebookOverviewSourceDocument {
   index: number
+  citationId?: number
   title: string
   chunks: NotebookOverviewSourceChunk[]
 }
@@ -95,7 +96,11 @@ function buildDocumentSection(document: NotebookOverviewSourceDocument, maxChars
   if (maxChars <= 0) return ''
 
   const header =
-    'Tài liệu ' + document.index + ': ' + normalizeSourceText(document.title).slice(0, 120) + '\n'
+    'Tài liệu [' +
+    (document.citationId ?? document.index) +
+    ']: ' +
+    normalizeSourceText(document.title).slice(0, 120) +
+    '\n'
   if (header.length >= maxChars) return header.slice(0, maxChars)
 
   const bodyBudget = maxChars - header.length

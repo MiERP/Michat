@@ -2,7 +2,10 @@ import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DocxLoader } from '../../src/main/services/loaders/DocxLoader'
+import {
+  DocxLoader,
+  extractVietnameseLegalSections
+} from '../../src/main/services/loaders/DocxLoader'
 
 const extract = vi.fn().mockResolvedValue({
   getBody: () => 'Noi dung tai lieu Word cu'
@@ -52,5 +55,22 @@ describe('DocxLoader', () => {
     expect(result.mimeType).toBe('application/msword')
     expect(result.metadata).toMatchObject({ parser: 'word-extractor' })
     expect(extract).toHaveBeenCalledWith(filePath)
+  })
+
+  it('detects Vietnamese legal headings when DOCX has no semantic heading tags', () => {
+    const content = `CHƯƠNG I
+QUY ĐỊNH CHUNG
+Điều 1. Phạm vi điều chỉnh
+Luật này quy định phạm vi thử nghiệm.
+Điều 2. Đối tượng áp dụng
+Doanh nghiệp và cơ quan nhà nước.`
+
+    const sections = extractVietnameseLegalSections(content)
+
+    expect(sections[0]).toMatchObject({ level: 1, title: 'CHƯƠNG I' })
+    expect(sections[0].children?.map((section) => section.title)).toEqual([
+      'Điều 1. Phạm vi điều chỉnh',
+      'Điều 2. Đối tượng áp dụng'
+    ])
   })
 })

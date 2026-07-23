@@ -20,8 +20,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-function vectorFor(text: string): Float32Array {
-  const vector = new Float32Array(1024)
+function vectorFor(text: string, dimensions = 1024): Float32Array {
+  const vector = new Float32Array(dimensions)
   const lower = text.toLowerCase()
   if (lower.includes('local-first') || lower.includes('local first')) vector[0] = 1
   if (
@@ -37,11 +37,11 @@ function vectorFor(text: string): Float32Array {
   return vector
 }
 
-function embedding(text: string, config?: EmbeddingConfig): EmbeddingResult {
+function embedding(text: string, dimensions = 1024, config?: EmbeddingConfig): EmbeddingResult {
   return {
-    embedding: vectorFor(text),
+    embedding: vectorFor(text, dimensions),
     model: config?.model || 'fake-local-embedding',
-    dimensions: 1024,
+    dimensions,
     tokensUsed: text.length
   }
 }
@@ -50,18 +50,19 @@ class FakeProviderManager {
   public embeddingCalls: string[] = []
   public failEmbeddings = false
   public remoteCalls = 0
+  public embeddingDimensions = 1024
 
   async getActiveEmbeddingProvider() {
     return {
       createEmbedding: async (text: string, config?: EmbeddingConfig) => {
         this.embeddingCalls.push(text)
         if (this.failEmbeddings) throw new Error('fake local embedding failure')
-        return embedding(text, config)
+        return embedding(text, this.embeddingDimensions, config)
       },
       createEmbeddings: async (texts: string[], config?: EmbeddingConfig) => {
         this.embeddingCalls.push(...texts)
         if (this.failEmbeddings) throw new Error('fake local embedding failure')
-        return texts.map((text) => embedding(text, config))
+        return texts.map((text) => embedding(text, this.embeddingDimensions, config))
       },
       getDefaultEmbeddingModel: () => 'fake-local-embedding'
     }
@@ -142,6 +143,23 @@ describe('KnowledgeService RAG regression', () => {
     expect(document?.chunkCount).toBe(docChunks.length)
     expect(docChunks.length).toBeGreaterThan(0)
     expect(embeddingRows).toHaveLength(docChunks.length)
+  })
+
+  it('creates and queries a sqlite-vec table matching the embedding model dimension', async () => {
+    const { service, notebookId, providerManager, dbModule } = context!
+    providerManager.embeddingDimensions = 768
+
+    await service.addDocument(notebookId, {
+      title: 'Vector 768',
+      type: 'text',
+      content: 'Doanh nghiệp phải bảo vệ dữ liệu và lưu hồ sơ xử lý.'
+    })
+    const results = await service.search(notebookId, 'doanh nghiệp bảo vệ dữ liệu')
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(
+      dbModule.getSqlite()?.prepare('SELECT count(*) as count FROM vec_embeddings_768').get()
+    ).toMatchObject({ count: expect.any(Number) })
   })
 
   it('indexes a legal profile and routes chapter and article count questions without embedding', async () => {
@@ -251,6 +269,41 @@ Chủ thể dữ liệu có quyền theo luật này.`
     expect(providerManager.embeddingCalls).toHaveLength(embeddingsBeforeCompoundQuery)
   })
 
+  it('returns the complete requested article span even when topK is one', async () => {
+    const { service, notebookId } = context!
+    await service.addDocument(notebookId, {
+      title: 'Lu\u1eadt nhi\u1ec1u kho\u1ea3n',
+      type: 'text',
+      content: `LU\u1eacT TH\u1eec NGHI\u1ec6M
+
+\u0110i\u1ec1u 2. Ngh\u0129a v\u1ee5 c\u1ee7a t\u1ed5 ch\u1ee9c
+1. T\u1ed5 ch\u1ee9c ph\u1ea3i th\u00f4ng b\u00e1o.
+2. T\u1ed5 ch\u1ee9c ph\u1ea3i l\u01b0u h\u1ed3 s\u01a1.
+a) L\u01b0u b\u1ea3n ch\u00ednh.
+b) L\u01b0u b\u1ea3n sao.`,
+      chunkOptions: { chunkSize: 35, chunkOverlap: 0, minChunkSize: 1 }
+    })
+
+    const results = await service.search(notebookId, '\u0110i\u1ec1u 2 quy \u0111\u1ecbnh g\u00ec?', {
+      topK: 1,
+      threshold: 0
+    })
+    const coordinates = results.map((result) =>
+      (result.metadata as Record<string, any>)?.legalContext
+    )
+
+    expect(results.length).toBeGreaterThan(1)
+    expect(coordinates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ articleNumber: '2', clauseNumber: '1' }),
+        expect.objectContaining({ articleNumber: '2', clauseNumber: '2' }),
+        expect.objectContaining({ articleNumber: '2', clauseNumber: '2', pointNumber: 'a' })
+      ])
+    )
+    expect(results.map((result) => result.content).join('\n')).toContain('L\u01b0u b\u1ea3n ch\u00ednh')
+    expect(results.map((result) => result.content).join('\n')).toContain('L\u01b0u b\u1ea3n sao')
+  })
+
   it('creates valid FTS5 syntax for punctuation-heavy Vietnamese queries', async () => {
     const { buildFtsMatchQuery } = await import('../../src/main/services/KnowledgeService')
 
@@ -260,6 +313,218 @@ Chủ thể dữ liệu có quyền theo luật này.`
         .map((term) => quote + term + quote)
         .join(' OR ')
     )
+  })
+
+  it('persists canonical legal work identity in document metadata', async () => {
+    const { service, notebookId } = context!
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Nghị định 103',
+      type: 'text',
+      content: `CHÍNH PHỦ
+Số: 103/2025/NĐ-CP
+
+NGHỊ ĐỊNH
+Quy định chi tiết Luật Dữ liệu
+
+Điều 1. Phạm vi điều chỉnh
+Nghị định này quy định chi tiết Luật Dữ liệu.`
+    })
+
+    expect(service.getDocument(documentId)?.metadata).toMatchObject({
+      canonicalLegalWorkKey: 'nghị định:103/2025/NĐ-CP',
+      duplicateGroup: 'nghị định:103/2025/NĐ-CP'
+    })
+  })
+
+  it('backfills canonical identity and corrected legal number for existing indexed documents', async () => {
+    const { service, notebookId, db, schema, providerManager } = context!
+    const content = `CHÍNH PHỦ
+Số: 103/2025/NĐ-CP
+
+NGHỊ ĐỊNH
+
+Điều 1. Phạm vi điều chỉnh
+Nghị định này quy định chi tiết.`
+    const firstId = await service.addDocument(notebookId, {
+      title: 'Nghị định 103.docx',
+      type: 'text',
+      content
+    })
+    const secondId = await service.addDocument(notebookId, {
+      title: 'Nghị định 103.pdf',
+      type: 'text',
+      content
+    })
+
+    for (const documentId of [firstId, secondId]) {
+      const document = service.getDocument(documentId)!
+      const metadata = { ...(document.metadata as Record<string, any>) }
+      delete metadata.canonicalLegalWorkKey
+      delete metadata.duplicateGroup
+      delete metadata.canonicalGraphDocumentId
+      metadata.legalDocument = { ...metadata.legalDocument, documentNumber: '103/2025/N' }
+      db.update(schema.documents)
+        .set({ metadata })
+        .where((await import('drizzle-orm')).eq(schema.documents.id, documentId))
+        .run()
+    }
+
+    const { KnowledgeService } = await import('../../src/main/services/KnowledgeService')
+    const reloaded = new KnowledgeService(providerManager as never)
+
+    expect(reloaded.getDocument(firstId)?.metadata).toMatchObject({
+      canonicalLegalWorkKey: 'nghị định:103/2025/NĐ-CP',
+      canonicalGraphDocumentId: firstId,
+      legalDocument: { documentNumber: '103/2025/NĐ-CP' }
+    })
+    expect(reloaded.getDocument(secondId)?.metadata).toMatchObject({
+      canonicalLegalWorkKey: 'nghị định:103/2025/NĐ-CP',
+      canonicalGraphDocumentId: firstId,
+      legalDocument: { documentNumber: '103/2025/NĐ-CP' }
+    })
+  })
+
+  it('collapses source variants only when legal coordinates match', async () => {
+    const { collapseCanonicalSearchResults } = await import(
+      '../../src/main/services/KnowledgeService'
+    )
+    const legalDocument = {
+      documentNumber: '07/2022/QH15',
+      documentType: 'Luật',
+      issuer: 'Quốc hội',
+      status: 'unknown',
+      amendsDocumentIds: [],
+      replacesDocumentIds: [],
+      repealedByDocumentIds: []
+    }
+    const results = collapseCanonicalSearchResults(
+      [
+        {
+          chunkId: 'docx-15',
+          documentId: 'docx',
+          documentTitle: '07.docx',
+          documentType: 'file',
+          content: 'Điều 15 bản DOCX',
+          matchedContent: 'Điều 15 bản DOCX',
+          score: 0.9,
+          chunkIndex: 1,
+          metadata: { legalContext: { articleNumber: '15' } },
+          documentMetadata: { legalDocument }
+        },
+        {
+          chunkId: 'pdf-15',
+          documentId: 'pdf',
+          documentTitle: '07.pdf',
+          documentType: 'file',
+          content: 'Điều 15 bản PDF',
+          matchedContent: 'Điều 15 bản PDF',
+          score: 0.8,
+          chunkIndex: 1,
+          metadata: { legalContext: { articleNumber: '15' } },
+          documentMetadata: { legalDocument }
+        },
+        {
+          chunkId: 'pdf-16',
+          documentId: 'pdf',
+          documentTitle: '07.pdf',
+          documentType: 'file',
+          content: 'Điều 16 bản PDF',
+          matchedContent: 'Điều 16 bản PDF',
+          score: 0.7,
+          chunkIndex: 2,
+          metadata: { legalContext: { articleNumber: '16' } },
+          documentMetadata: { legalDocument }
+        }
+      ],
+      3
+    )
+
+    expect(results.map((result) => result.chunkId)).toEqual(['docx-15', 'pdf-16'])
+  })
+
+  it('drops weak candidates after heuristic rerank', async () => {
+    const { service, notebookId } = context!
+    const weakDocumentId = await service.addDocument(notebookId, {
+      title: 'Weak evidence',
+      type: 'text',
+      content: 'Nội dung chung không liên quan đến câu hỏi.'
+    })
+    await service.addDocument(notebookId, {
+      title: 'Other evidence',
+      type: 'text',
+      content: 'Một nội dung chung khác để tạo ứng viên xếp hạng.'
+    })
+    const weakChunkId = service.getDocumentChunks(weakDocumentId)[0].id
+    vi.spyOn((service as any).rerankService, 'rerank').mockResolvedValue({
+      orderedIds: [weakChunkId],
+      scores: new Map([[weakChunkId, 0.08]]),
+      method: 'heuristic'
+    })
+
+    const results = await service.search(notebookId, 'hãy tự giới thiệu về bản thân bạn', {
+      topK: 3,
+      threshold: 0.5,
+      rerank: { enabled: true, heuristicFallback: true }
+    })
+
+    expect(results).toEqual([])
+  })
+
+  it('applies the local relevance gate when provider reranking is disabled', async () => {
+    const { service, notebookId } = context!
+    const weakDocumentId = await service.addDocument(notebookId, {
+      title: 'Weak evidence without rerank',
+      type: 'text',
+      content: 'Nội dung chung không trả lời câu hỏi cụ thể.'
+    })
+    await service.addDocument(notebookId, {
+      title: 'Other weak evidence',
+      type: 'text',
+      content: 'Thông tin nền khác không liên quan.'
+    })
+    const weakChunkId = service.getDocumentChunks(weakDocumentId)[0].id
+    const rerankSpy = vi.spyOn((service as any).rerankService, 'rerank').mockResolvedValue({
+      orderedIds: [weakChunkId],
+      scores: new Map([[weakChunkId, 0.05]]),
+      method: 'heuristic'
+    })
+
+    const results = await service.search(notebookId, 'Điều kiện cấp phép chuyên ngành là gì?', {
+      topK: 3,
+      threshold: 0,
+      rerank: { enabled: false }
+    })
+
+    expect(rerankSpy).toHaveBeenCalledOnce()
+    expect(results).toEqual([])
+  })
+
+  it('keeps strongly reranked evidence', async () => {
+    const { service, notebookId } = context!
+    const legalDocumentId = await service.addDocument(notebookId, {
+      title: 'Strong legal evidence',
+      type: 'text',
+      content: 'Điều 2 quy định tổ chức phải thực hiện nghĩa vụ bảo vệ dữ liệu.'
+    })
+    await service.addDocument(notebookId, {
+      title: 'Other evidence',
+      type: 'text',
+      content: 'Một nội dung chung khác để tạo ứng viên xếp hạng.'
+    })
+    const legalChunkId = service.getDocumentChunks(legalDocumentId)[0].id
+    vi.spyOn((service as any).rerankService, 'rerank').mockResolvedValue({
+      orderedIds: [legalChunkId],
+      scores: new Map([[legalChunkId, 0.72]]),
+      method: 'heuristic'
+    })
+
+    const results = await service.search(notebookId, 'Điều 2 quy định nghĩa vụ gì?', {
+      topK: 3,
+      threshold: 0.5,
+      rerank: { enabled: true, heuristicFallback: true }
+    })
+
+    expect(results.map((result) => result.chunkId)).toContain(legalChunkId)
   })
 
   it('indexes markdown files with Vietnamese tables and retrieves cited local-first chunks', async () => {

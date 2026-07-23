@@ -128,6 +128,54 @@ describe('LegalMetadataExtractionService', () => {
     expect(result.inspector.fields.documentType?.evidence?.text).toBe('LUẬT')
   })
 
+  it('extracts a complete Vietnamese decree number without truncating Đ-CP', () => {
+    const result = extractLegalMetadataFromDocument({
+      title: '103_2025_ND-CP.pdf',
+      content: `CHÍNH PHỦ
+Số: 103/2025/NĐ-CP
+
+NGHỊ ĐỊNH
+Quy định chi tiết một số điều của Luật Dữ liệu
+
+Điều 1. Phạm vi điều chỉnh
+Nghị định này quy định chi tiết Luật Dữ liệu.`,
+      structure: parseLegalStructure(`Điều 1. Phạm vi điều chỉnh
+Nghị định này quy định chi tiết Luật Dữ liệu.`)!
+    })
+
+    expect(result.legalDocument.documentNumber).toBe('103/2025/NĐ-CP')
+    expect(result.inspector.fields.documentNumber).toMatchObject({
+      value: '103/2025/NĐ-CP',
+      confidence: 0.99
+    })
+  })
+
+  it('normalizes spaces around decree-number hyphens from PDF text', () => {
+    const result = extractLegalMetadataFromDocument({
+      title: '103_2025_ND-CP.pdf',
+      content: `CHÍNH PHỦ
+Số: 103/2025/NĐ - CP Hà Nội, ngày 15 tháng 5 năm 2025
+
+NGHỊ ĐỊNH
+Điều 1. Phạm vi điều chỉnh`
+    })
+
+    expect(result.legalDocument.documentNumber).toBe('103/2025/NĐ-CP')
+  })
+
+  it('prefers a complete header number over an earlier truncated profile number', () => {
+    const content = `Số: 103/2025/N
+
+CHÍNH PHỦ
+Số: 103/2025/NĐ-CP
+
+NGHỊ ĐỊNH
+Điều 1. Phạm vi điều chỉnh`
+    const result = extractLegalMetadataFromDocument({ title: '103_2025.pdf', content })
+
+    expect(result.legalDocument.documentNumber).toBe('103/2025/NĐ-CP')
+  })
+
   it('extracts intrinsic metadata with source evidence and leaves current status unknown', () => {
     const result = extractLegalMetadataFromDocument({
       title: 'Luật thử nghiệm',

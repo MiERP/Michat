@@ -95,7 +95,6 @@ export interface LegalGraphWorkerOptions {
 export class LegalGraphWorker {
   private readonly repository: LegalGraphWorkerRepository
   private readonly extractor: LegalGraphExtractionService
-  private readonly providerManager: Pick<ProviderManager, 'getActiveChatLanguageModel'>
   private readonly sourceLoader: LegalGraphSourceLoader
   private readonly workerId: string
   private readonly pollIntervalMs: number
@@ -112,7 +111,7 @@ export class LegalGraphWorker {
   constructor(options: LegalGraphWorkerOptions) {
     this.repository = options.repository
     this.extractor = options.extractor ?? new LegalGraphExtractionService()
-    this.providerManager = options.providerManager
+    void options.providerManager
     this.sourceLoader = options.sourceLoader
     this.workerId = options.workerId ?? `legal-graph-worker:${randomUUID()}`
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
@@ -191,15 +190,46 @@ export class LegalGraphWorker {
 
     this.activeAbortController = new AbortController()
     try {
-      const activeModel = await this.providerManager.getActiveChatLanguageModel()
-      if (!activeModel) throw new LegalGraphRetryableError('No active chat model available')
       const source = await this.sourceLoader(job.documentId)
       if (!source) throw new Error('Legal graph source document is unavailable')
+
+      const articleNumbers = new Set(
+        source.chunks
+          .map((chunk) => {
+            const context = chunk.metadata?.legalContext
+            return context && typeof context === 'object'
+              ? (context as Record<string, unknown>).articleNumber
+              : undefined
+          })
+          .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      )
+      const sourceUnitCount = articleNumbers.size || source.chunks.length
+      const initialized = this.repository.updateJobProgress(
+        job.id,
+        this.workerId,
+        0,
+        sourceUnitCount,
+        this.now(),
+        this.leaseMs
+      )
+      if (!initialized) throw new Error('Legal graph job lease was lost')
+      this.emitProgress({
+        documentId: job.documentId,
+        status: 'processing',
+        attempts: job.attempts,
+        sourceUnitCount,
+        processedUnitCount: 0,
+        nodeCount: 0,
+        relationCount: 0,
+        model: 'deterministic-parser',
+        extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
+        promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
+        ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
+      })
 
       const candidate = await this.extractor.extractDocument(
         source.document,
         source.chunks,
-        activeModel,
         this.activeAbortController.signal,
         (processedUnitCount, sourceUnitCount) => {
           const renewed = this.repository.updateJobProgress(
@@ -219,7 +249,7 @@ export class LegalGraphWorker {
             processedUnitCount,
             nodeCount: 0,
             relationCount: 0,
-            model: activeModel.provenance,
+            model: 'deterministic-parser',
             extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
             promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
             ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
@@ -229,7 +259,7 @@ export class LegalGraphWorker {
 
       if (this.stopping) return true
       this.repository.replaceDocumentGraph(job.documentId, candidate, {
-        model: activeModel.provenance,
+        model: 'deterministic-parser',
         extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
         promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
         ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
@@ -242,7 +272,7 @@ export class LegalGraphWorker {
         processedUnitCount: candidate.processedUnitCount ?? candidate.sourceUnitCount ?? 0,
         nodeCount: candidate.nodes.length,
         relationCount: candidate.relations.length,
-        model: activeModel.provenance,
+        model: 'deterministic-parser',
         extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
         promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
         ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION
@@ -290,7 +320,7 @@ export class LegalGraphWorker {
 
   private currentVersions(): LegalGraphProvenance {
     return {
-      model: '',
+      model: 'deterministic-parser',
       extractorVersion: LEGAL_GRAPH_EXTRACTOR_VERSION,
       promptVersion: LEGAL_GRAPH_PROMPT_VERSION,
       ontologyVersion: LEGAL_GRAPH_ONTOLOGY_VERSION

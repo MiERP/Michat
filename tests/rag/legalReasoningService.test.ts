@@ -28,7 +28,10 @@ function seed(overrides: Partial<LegalReasoningSeed> = {}): LegalReasoningSeed {
   }
 }
 
-function createService(status: 'ready' | 'pending' | 'failed' | 'unavailable' = 'ready') {
+function createService(
+  status: 'ready' | 'pending' | 'processing' | 'retry' | 'failed' | 'unavailable' = 'ready',
+  relationCount = status === 'ready' ? 2 : 0
+) {
   const repository = {
     getDocumentGraphStatus: vi.fn(() => ({
       status,
@@ -36,11 +39,11 @@ function createService(status: 'ready' | 'pending' | 'failed' | 'unavailable' = 
       sourceUnitCount: 1,
       processedUnitCount: status === 'ready' ? 1 : 0,
       nodeCount: 3,
-      relationCount: 2
+      relationCount
     })),
     getDocumentGraph: vi.fn(() => ({
       nodes: [
-        { id: 'article-15', chunkId: 'chunk-1' },
+        { id: 'article-15', chunkId: 'chunk-1', articleNumber: '15' },
         { id: 'action-file', chunkId: 'chunk-1' },
         { id: 'sanction-late', chunkId: 'chunk-2' }
       ],
@@ -152,6 +155,16 @@ describe('LegalReasoningService', () => {
     expect(result.context).toContain('[2] File dossier --sanction_for--> Late filing sanction')
   })
 
+  it('seeds traversal by legal coordinates when retrieval chunk differs from graph chunk', () => {
+    const { repository, service } = createService()
+
+    service.reason('Điều 15 quy định chế tài nào?', [seed({ chunkId: 'retrieval-chunk' })])
+
+    expect(repository.traverse).toHaveBeenCalledWith(
+      expect.objectContaining({ seedNodeIds: ['article-15'] })
+    )
+  })
+
   it('returns pending limitation instead of fabricated path', () => {
     const { repository, service } = createService('pending')
     const result = service.reason('Ngh\u0129a v\u1ee5 l\u00e0 g\u00ec?', [seed()])
@@ -159,6 +172,21 @@ describe('LegalReasoningService', () => {
     expect(result).toMatchObject({ graphStatus: 'pending', paths: [] })
     expect(result.limitations).not.toHaveLength(0)
     expect(repository.traverse).not.toHaveBeenCalled()
+  })
+
+  it('uses existing verified graph while a version refresh is pending', () => {
+    const { repository, service } = createService('retry', 2)
+    const result = service.reason(
+      'Doanh nghi\u1ec7p b\u1ecb x\u1eed l\u00fd th\u1ebf n\u00e0o n\u1ebfu kh\u00f4ng n\u1ed9p h\u1ed3 s\u01a1?',
+      [seed()]
+    )
+
+    expect(result.graphStatus).toBe('ready')
+    expect(result.paths).toHaveLength(1)
+    expect(result.limitations).toContain(
+      'Legal graph refresh is pending; existing verified graph remains in use.'
+    )
+    expect(repository.traverse).toHaveBeenCalledOnce()
   })
 
   it('keeps comparison compatibility and refuses unverified priority', () => {
@@ -173,7 +201,90 @@ describe('LegalReasoningService', () => {
     )
 
     expect(result.intent).toBe('applicability')
-    expect(result.comparison?.resolution.status).toBe('needs_metadata')
+    expect(result.comparison?.resolution.status).toBe('needs_user_facts')
+  })
+
+  it('hides comparison paths contained within one canonical legal work', () => {
+    const lawAMetadata = buildLegalDocumentMetadata({
+      documentNumber: '07/2022/QH15',
+      documentType: 'Luật',
+      status: 'unknown'
+    })
+    const lawBMetadata = buildLegalDocumentMetadata({
+      documentNumber: '24/2018/QH14',
+      documentType: 'Luật',
+      status: 'unknown'
+    })
+    const repository = {
+      getDocumentGraphStatus: vi.fn(() => ({
+        status: 'ready',
+        attempts: 0,
+        sourceUnitCount: 1,
+        processedUnitCount: 1,
+        nodeCount: 2,
+        relationCount: 1
+      })),
+      getDocumentGraph: vi.fn((documentId: string) => ({
+        nodes:
+          documentId === 'law-a'
+            ? [
+                { id: 'law-a-clause', documentId: 'law-a', chunkId: 'chunk-a', articleNumber: '26' },
+                { id: 'law-a-article', documentId: 'law-a', chunkId: 'chunk-a', articleNumber: '16' }
+              ]
+            : [{ id: 'law-b-document', documentId: 'law-b', chunkId: 'chunk-b' }],
+        relations: []
+      })),
+      traverse: vi.fn(() => [
+        {
+          score: 1,
+          nodeIds: ['law-a-clause', 'law-a-article'],
+          steps: [
+            {
+              relationId: 'law-a-reference',
+              relationType: 'references',
+              sourceNodeId: 'law-a-clause',
+              sourceLabel: 'Khoản 2, Điều 26',
+              targetNodeId: 'law-a-article',
+              targetLabel: 'Điều 16',
+              confidence: 1,
+              evidenceChunkId: 'chunk-a',
+              evidenceText: 'Điều 16',
+              evidenceStartOffset: 0,
+              evidenceEndOffset: 7,
+              direction: 'outbound'
+            }
+          ]
+        }
+      ])
+    }
+    const service = new LegalReasoningService(repository as never, () => [], new LegalComparisonService())
+    const result = service.reason(
+      'Luật số 07/2022/QH15 và Luật số 24/2018/QH14 có quan hệ sửa đổi, thay thế hoặc viện dẫn trực tiếp nhau không?',
+      [
+        seed({
+          documentId: 'law-a',
+          documentTitle: 'Luật 07/2022/QH15',
+          chunkId: 'chunk-a',
+          citationId: 1,
+          content: 'Khoản 2, Điều 26 viện dẫn Điều 16.',
+          metadata: lawAMetadata,
+          legalContext: { articleNumber: '26' }
+        }),
+        seed({
+          documentId: 'law-b',
+          documentTitle: 'Luật 24/2018/QH14',
+          chunkId: 'chunk-b',
+          citationId: 2,
+          content: 'Điều 1. Phạm vi điều chỉnh.',
+          metadata: lawBMetadata,
+          legalContext: { articleNumber: '1' }
+        })
+      ]
+    )
+
+    expect(result.intent).toBe('comparison')
+    expect(result.graphStatus).toBe('ready')
+    expect(result.paths).toEqual([])
   })
 
   it('rejects paths whose evidence chunk cannot be validated', () => {

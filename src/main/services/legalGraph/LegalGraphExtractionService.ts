@@ -1,23 +1,12 @@
 import { createHash } from 'crypto'
-import { generateText, NoObjectGeneratedError, Output, type LanguageModel } from 'ai'
 import type { Chunk, Document } from '../../db/schema'
-import type { LegalNodeType } from '../../../shared/types/legalReasoning'
+import { getCanonicalLegalWorkKey, getLegalDocumentMetadata } from '../LegalComparisonService'
 import type {
   LegalGraphCandidate,
   LegalGraphCandidateNode,
   LegalGraphCandidateRelation
 } from './LegalGraphRepository'
-import {
-  buildLegalGraphPrompt,
-  legalGraphOutputSchema,
-  type LegalGraphModelOutput,
-  type LegalGraphPromptSourceNode
-} from './legalGraphPrompt'
-
-export interface ActiveLegalGraphModel {
-  model: LanguageModel
-  provenance: string
-}
+import { extractVietnameseLegalSemantics } from './VietnameseLegalSemanticExtractor'
 
 export class LegalGraphRetryableError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -34,69 +23,6 @@ function normalizeText(value: string): string {
   return value.normalize('NFC').trim().replace(/\s+/gu, ' ')
 }
 
-function semanticKey(type: string, label: string): string {
-  return `${type}:${normalizeText(label).toLocaleLowerCase('vi-VN')}`
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.map(normalizeText).filter(Boolean))]
-}
-
-function locateNormalizedEvidence(
-  sourceText: string,
-  evidenceText: string
-): { text: string; start: number; end: number } | undefined {
-  const normalizedEvidence = evidenceText.normalize('NFC')
-  const normalizedSource = sourceText.normalize('NFC')
-  const normalizedStart = normalizedSource.indexOf(normalizedEvidence)
-  if (normalizedStart < 0) return undefined
-
-  const boundaries = [0]
-  let offset = 0
-  for (const character of sourceText) {
-    offset += character.length
-    boundaries.push(offset)
-  }
-
-  const candidateStarts = boundaries.filter(
-    (boundary) => sourceText.slice(0, boundary).normalize('NFC').length === normalizedStart
-  )
-  for (const start of candidateStarts) {
-    for (const end of boundaries) {
-      if (end <= start) continue
-      const slice = sourceText.slice(start, end)
-      if (slice.normalize('NFC') === normalizedEvidence) {
-        return { text: slice, start, end }
-      }
-      if (slice.normalize('NFC').length > normalizedEvidence.length) break
-    }
-  }
-  return undefined
-}
-
-function sourceNode(
-  localId: string,
-  nodeType: Extract<LegalNodeType, 'document' | 'article' | 'clause' | 'point'>,
-  canonicalKey: string,
-  label: string,
-  chunk: Chunk | undefined,
-  coordinates: { articleNumber?: string; clauseNumber?: string; pointNumber?: string }
-): LegalGraphCandidateNode {
-  return {
-    localId,
-    nodeType,
-    canonicalKey,
-    label,
-    aliases: [],
-    chunkId: chunk?.id,
-    articleNumber: coordinates.articleNumber,
-    clauseNumber: coordinates.clauseNumber,
-    pointNumber: coordinates.pointNumber,
-    startOffset: chunk?.startOffset ?? undefined,
-    endOffset: chunk?.endOffset ?? undefined
-  }
-}
-
 function getLegalContext(chunk: Chunk): Record<string, string> {
   const context = chunk.metadata?.legalContext
   if (!context || typeof context !== 'object') return {}
@@ -107,11 +33,30 @@ function getLegalContext(chunk: Chunk): Record<string, string> {
   )
 }
 
+function workKey(document: Document): string {
+  const metadata = (document.metadata as Record<string, unknown> | null) || {}
+  return (
+    (typeof metadata.canonicalLegalWorkKey === 'string' && metadata.canonicalLegalWorkKey) ||
+    getCanonicalLegalWorkKey(getLegalDocumentMetadata(metadata)) ||
+    `source:${document.id}`
+  )
+}
+
+function relationFingerprint(relation: LegalGraphCandidateRelation): string {
+  return JSON.stringify([
+    relation.sourceLocalId,
+    relation.relationType,
+    relation.targetLocalId,
+    relation.evidenceChunkId,
+    relation.evidenceStartOffset,
+    relation.evidenceEndOffset
+  ])
+}
+
 export class LegalGraphExtractionService {
   async extractDocument(
     document: Document,
     chunks: Chunk[],
-    activeModel: ActiveLegalGraphModel,
     abortSignal?: AbortSignal,
     onSourceUnitProcessed?: (processedUnitCount: number, sourceUnitCount: number) => void
   ): Promise<LegalGraphCandidate> {
@@ -129,250 +74,224 @@ export class LegalGraphExtractionService {
       }
     }
 
-    const nodeByLocalId = new Map<string, LegalGraphCandidateNode>()
-    const semanticNodeByKey = new Map<string, LegalGraphCandidateNode>()
+    const canonicalWorkKey = workKey(document)
+    const nodesByLocalId = new Map<string, LegalGraphCandidateNode>()
+    const coordinateNodeIds = new Map<string, string>()
     const relations: LegalGraphCandidateRelation[] = []
     const relationFingerprints = new Set<string>()
-    const documentLocalId = `source:document:${document.id}`
-    nodeByLocalId.set(
-      documentLocalId,
-      sourceNode(
-        documentLocalId,
-        'document',
-        `document:${document.id}`,
-        document.title,
-        undefined,
-        {}
-      )
-    )
+    const documentLocalId = `source:document:${stableHash(canonicalWorkKey)}`
+    nodesByLocalId.set(documentLocalId, {
+      localId: documentLocalId,
+      nodeType: 'document',
+      canonicalKey: `document:${canonicalWorkKey}`,
+      label: document.title,
+      aliases: []
+    })
 
-    for (const [chunkIndex, chunk] of chunks.entries()) {
-      const promptSourceNodes = this.addSourceNodes(document, chunk, nodeByLocalId)
-      const output = await this.extractSourceUnit(
-        document.title,
-        promptSourceNodes,
-        chunk.content,
-        activeModel.model,
-        abortSignal
-      )
-      this.mergeSourceUnit(
+    for (const chunk of chunks) {
+      if (abortSignal?.aborted) throw new LegalGraphRetryableError('Legal graph extraction cancelled')
+      const context = getLegalContext(chunk)
+      const articleNumber = context.articleNumber
+      const clauseNumber = context.clauseNumber
+      const pointNumber = context.pointNumber
+      if (!articleNumber) continue
+
+      const articleKey = `article:${articleNumber}`
+      const articleLocalId = this.ensureNode(nodesByLocalId, coordinateNodeIds, articleKey, {
+        localId: `source:article:${stableHash(`${canonicalWorkKey}:${articleNumber}`)}`,
+        nodeType: 'article',
+        canonicalKey: `article:${canonicalWorkKey}:${articleNumber}`,
+        label: context.articleTitle
+          ? `Điều ${articleNumber}: ${context.articleTitle}`
+          : `Điều ${articleNumber}`,
+        aliases: [],
+        chunkId: chunk.id,
+        articleNumber,
+        startOffset: chunk.startOffset ?? undefined,
+        endOffset: chunk.endOffset ?? undefined
+      })
+
+      if (clauseNumber) {
+        const clauseKey = `article:${articleNumber}:clause:${clauseNumber}`
+        this.ensureNode(nodesByLocalId, coordinateNodeIds, clauseKey, {
+          localId: `source:clause:${stableHash(`${canonicalWorkKey}:${articleNumber}:${clauseNumber}`)}`,
+          nodeType: 'clause',
+          canonicalKey: `clause:${canonicalWorkKey}:${articleNumber}:${clauseNumber}`,
+          label: `Khoản ${clauseNumber}, Điều ${articleNumber}`,
+          aliases: [],
+          chunkId: chunk.id,
+          articleNumber,
+          clauseNumber,
+          startOffset: chunk.startOffset ?? undefined,
+          endOffset: chunk.endOffset ?? undefined
+        })
+      }
+
+      if (clauseNumber && pointNumber) {
+        const pointKey = `article:${articleNumber}:clause:${clauseNumber}:point:${pointNumber}`
+        this.ensureNode(nodesByLocalId, coordinateNodeIds, pointKey, {
+          localId: `source:point:${stableHash(`${canonicalWorkKey}:${articleNumber}:${clauseNumber}:${pointNumber}`)}`,
+          nodeType: 'point',
+          canonicalKey: `point:${canonicalWorkKey}:${articleNumber}:${clauseNumber}:${pointNumber}`,
+          label: `Điểm ${pointNumber}, Khoản ${clauseNumber}, Điều ${articleNumber}`,
+          aliases: [],
+          chunkId: chunk.id,
+          articleNumber,
+          clauseNumber,
+          pointNumber,
+          startOffset: chunk.startOffset ?? undefined,
+          endOffset: chunk.endOffset ?? undefined
+        })
+      }
+
+      const sourceLocalId =
+        (clauseNumber && pointNumber
+          ? coordinateNodeIds.get(
+              `article:${articleNumber}:clause:${clauseNumber}:point:${pointNumber}`
+            )
+          : undefined) ||
+        (clauseNumber
+          ? coordinateNodeIds.get(`article:${articleNumber}:clause:${clauseNumber}`)
+          : undefined) ||
+        articleLocalId
+      this.addReferences(
+        document,
+        canonicalWorkKey,
         chunk,
-        output,
-        nodeByLocalId,
-        semanticNodeByKey,
+        articleNumber,
+        sourceLocalId,
+        nodesByLocalId,
+        coordinateNodeIds,
         relations,
         relationFingerprints
       )
-      onSourceUnitProcessed?.(chunkIndex + 1, chunks.length)
+      const semantics = extractVietnameseLegalSemantics(chunk, sourceLocalId, canonicalWorkKey)
+      for (const node of semantics.nodes) nodesByLocalId.set(node.localId, node)
+      for (const relation of semantics.relations) {
+        this.pushRelation(relation, relations, relationFingerprints)
+      }
+    }
+
+    const articleUnits = new Set(
+      chunks.map((chunk) => getLegalContext(chunk).articleNumber).filter(Boolean)
+    )
+    const sourceUnitCount = articleUnits.size || chunks.length
+    for (let processedUnitCount = 1; processedUnitCount <= sourceUnitCount; processedUnitCount++) {
+      if (abortSignal?.aborted) throw new LegalGraphRetryableError('Legal graph extraction cancelled')
+      onSourceUnitProcessed?.(processedUnitCount, sourceUnitCount)
     }
 
     return {
-      nodes: [...nodeByLocalId.values()],
+      nodes: [...nodesByLocalId.values()],
       relations,
-      sourceUnitCount: chunks.length,
-      processedUnitCount: chunks.length
+      sourceUnitCount,
+      processedUnitCount: sourceUnitCount
     }
   }
 
-  private addSourceNodes(
+  private ensureNode(
+    nodesByLocalId: Map<string, LegalGraphCandidateNode>,
+    coordinateNodeIds: Map<string, string>,
+    coordinateKey: string,
+    node: LegalGraphCandidateNode
+  ): string {
+    const existing = coordinateNodeIds.get(coordinateKey)
+    if (existing) return existing
+    coordinateNodeIds.set(coordinateKey, node.localId)
+    nodesByLocalId.set(node.localId, node)
+    return node.localId
+  }
+
+  private addReferences(
     document: Document,
+    canonicalWorkKey: string,
     chunk: Chunk,
-    nodeByLocalId: Map<string, LegalGraphCandidateNode>
-  ): LegalGraphPromptSourceNode[] {
-    const context = getLegalContext(chunk)
-    const sourceNodes: LegalGraphPromptSourceNode[] = [
-      {
-        localId: `source:document:${document.id}`,
-        type: 'document',
-        label: document.title
-      }
-    ]
-    const articleNumber = context.articleNumber
-    const clauseNumber = context.clauseNumber
-    const pointNumber = context.pointNumber
-
-    if (articleNumber) {
-      const localId = `source:article:${document.id}:${articleNumber}`
-      const label = context.articleTitle
-        ? `Article ${articleNumber}: ${context.articleTitle}`
-        : `Article ${articleNumber}`
-      nodeByLocalId.set(
-        localId,
-        sourceNode(localId, 'article', `article:${document.id}:${articleNumber}`, label, chunk, {
-          articleNumber
-        })
-      )
-      sourceNodes.push({ localId, type: 'article', label })
-    }
-
-    if (articleNumber && clauseNumber) {
-      const localId = `source:clause:${document.id}:${articleNumber}:${clauseNumber}`
-      const label = `Clause ${clauseNumber}, Article ${articleNumber}`
-      nodeByLocalId.set(
-        localId,
-        sourceNode(
-          localId,
-          'clause',
-          `clause:${document.id}:${articleNumber}:${clauseNumber}`,
-          label,
-          chunk,
-          { articleNumber, clauseNumber }
-        )
-      )
-      sourceNodes.push({ localId, type: 'clause', label })
-    }
-
-    if (articleNumber && clauseNumber && pointNumber) {
-      const localId = `source:point:${document.id}:${articleNumber}:${clauseNumber}:${pointNumber}`
-      const label = `Point ${pointNumber}, Clause ${clauseNumber}, Article ${articleNumber}`
-      nodeByLocalId.set(
-        localId,
-        sourceNode(
-          localId,
-          'point',
-          `point:${document.id}:${articleNumber}:${clauseNumber}:${pointNumber}`,
-          label,
-          chunk,
-          { articleNumber, clauseNumber, pointNumber }
-        )
-      )
-      sourceNodes.push({ localId, type: 'point', label })
-    }
-
-    return sourceNodes
-  }
-
-  private async extractSourceUnit(
-    documentTitle: string,
-    sourceNodes: LegalGraphPromptSourceNode[],
-    sourceText: string,
-    model: LanguageModel,
-    abortSignal?: AbortSignal
-  ): Promise<LegalGraphModelOutput> {
-    const timeoutSignal = AbortSignal.timeout(90_000)
-    const combinedSignal = abortSignal
-      ? AbortSignal.any([abortSignal, timeoutSignal])
-      : timeoutSignal
-
-    try {
-      const result = await generateText({
-        model,
-        experimental_output: Output.object({ schema: legalGraphOutputSchema }),
-        prompt: buildLegalGraphPrompt(documentTitle, sourceNodes, sourceText),
-        maxRetries: 2,
-        abortSignal: combinedSignal
-      })
-      if (!result.experimental_output) {
-        throw new LegalGraphRetryableError('No legal graph object generated')
-      }
-      return legalGraphOutputSchema.parse(result.experimental_output)
-    } catch (error) {
-      if (error instanceof LegalGraphRetryableError) throw error
-      if (NoObjectGeneratedError.isInstance(error)) {
-        throw new LegalGraphRetryableError('Model did not produce a legal graph object', {
-          cause: error
-        })
-      }
-      if (error instanceof Error && error.name === 'ZodError') throw error
-      throw new LegalGraphRetryableError('Legal graph model request failed', { cause: error })
-    }
-  }
-
-  private mergeSourceUnit(
-    chunk: Chunk,
-    output: LegalGraphModelOutput,
-    nodeByLocalId: Map<string, LegalGraphCandidateNode>,
-    semanticNodeByKey: Map<string, LegalGraphCandidateNode>,
+    currentArticleNumber: string,
+    sourceLocalId: string,
+    nodesByLocalId: Map<string, LegalGraphCandidateNode>,
+    coordinateNodeIds: Map<string, string>,
     relations: LegalGraphCandidateRelation[],
     relationFingerprints: Set<string>
   ): void {
-    const endpointMap = new Map<string, string>()
-    for (const sourceLocalId of nodeByLocalId.keys()) endpointMap.set(sourceLocalId, sourceLocalId)
-
-    const outputLocalIds = new Set<string>()
-    for (const node of output.nodes) {
-      if (outputLocalIds.has(node.localId) || nodeByLocalId.has(node.localId)) {
-        throw new Error('Duplicate legal graph extracted node ID')
-      }
-      outputLocalIds.add(node.localId)
-      const canonicalKey = semanticKey(node.type, node.label)
-      let candidateNode = semanticNodeByKey.get(canonicalKey)
-      if (!candidateNode) {
-        const localId = `semantic:${node.type}:${stableHash(canonicalKey)}`
-        candidateNode = {
-          localId,
-          nodeType: node.type,
-          canonicalKey,
-          label: normalizeText(node.label),
-          aliases: uniqueStrings(node.aliases),
-          chunkId: chunk.id,
-          startOffset: chunk.startOffset ?? undefined,
-          endOffset: chunk.endOffset ?? undefined
-        }
-        semanticNodeByKey.set(canonicalKey, candidateNode)
-        nodeByLocalId.set(localId, candidateNode)
-      } else {
-        candidateNode.aliases = uniqueStrings([...candidateNode.aliases, ...node.aliases])
-      }
-      endpointMap.set(node.localId, candidateNode.localId)
+    const internalPattern = /(?:^|[^\p{L}\p{N}_])(điều\s+(\d+[a-z]?))/giu
+    for (const match of chunk.content.matchAll(internalPattern)) {
+      const targetArticleNumber = match[2].toUpperCase()
+      if (targetArticleNumber === currentArticleNumber.toUpperCase()) continue
+      const coordinateKey = `article:${targetArticleNumber}`
+      const targetLocalId = this.ensureNode(nodesByLocalId, coordinateNodeIds, coordinateKey, {
+        localId: `source:article:${stableHash(`${canonicalWorkKey}:${targetArticleNumber}`)}`,
+        nodeType: 'article',
+        canonicalKey: `article:${canonicalWorkKey}:${targetArticleNumber}`,
+        label: `Điều ${targetArticleNumber}`,
+        aliases: [],
+        articleNumber: targetArticleNumber
+      })
+      this.pushRelation(
+        {
+          sourceLocalId,
+          targetLocalId,
+          relationType: 'references',
+          evidenceChunkId: chunk.id,
+          evidenceText: normalizeText(match[1]),
+          evidenceStartOffset:
+            (chunk.startOffset ?? 0) + (match.index ?? 0) + match[0].indexOf(match[1]),
+          evidenceEndOffset:
+            (chunk.startOffset ?? 0) +
+            (match.index ?? 0) +
+            match[0].indexOf(match[1]) +
+            match[1].length,
+          confidence: 1,
+          qualifiers: { extractor: 'deterministic' }
+        },
+        relations,
+        relationFingerprints
+      )
     }
 
-    for (const relation of output.relations) {
-      const sourceLocalId = this.resolveEndpoint(relation.source, endpointMap, nodeByLocalId)
-      const targetLocalId = this.resolveEndpoint(relation.target, endpointMap, nodeByLocalId)
-      const evidence = locateNormalizedEvidence(chunk.content, relation.evidenceText)
-      if (!evidence) throw new Error('Evidence text is not present in source chunk')
-
-      const fingerprint = JSON.stringify([
-        sourceLocalId,
-        relation.type,
-        targetLocalId,
-        chunk.id,
-        evidence.start,
-        evidence.end
-      ])
-      if (relationFingerprints.has(fingerprint)) continue
-      relationFingerprints.add(fingerprint)
-      relations.push({
-        sourceLocalId,
-        targetLocalId,
-        relationType: relation.type,
-        evidenceChunkId: chunk.id,
-        evidenceText: evidence.text,
-        evidenceStartOffset: (chunk.startOffset ?? 0) + evidence.start,
-        evidenceEndOffset: (chunk.startOffset ?? 0) + evidence.end,
-        confidence: relation.confidence,
-        qualifiers: relation.qualifiers
-      })
+    const currentNumber = getLegalDocumentMetadata(document.metadata).documentNumber
+      ?.replace(/\s+/gu, '')
+      .toLocaleUpperCase('vi-VN')
+    const documentPattern = /\b\d+[A-Z]?\/\d{4}\/[A-ZĐ0-9.-]+(?:\/[A-ZĐ0-9.-]+)?/giu
+    for (const match of chunk.content.matchAll(documentPattern)) {
+      const targetNumber = match[0].replace(/\s+/gu, '').toLocaleUpperCase('vi-VN')
+      if (targetNumber === currentNumber) continue
+      const targetLocalId = `external:document:${stableHash(targetNumber)}`
+      if (!nodesByLocalId.has(targetLocalId)) {
+        nodesByLocalId.set(targetLocalId, {
+          localId: targetLocalId,
+          nodeType: 'external_reference',
+          canonicalKey: `external-document:${targetNumber}`,
+          label: targetNumber,
+          aliases: [],
+          metadata: { documentNumber: targetNumber, unresolved: true }
+        })
+      }
+      this.pushRelation(
+        {
+          sourceLocalId,
+          targetLocalId,
+          relationType: 'references',
+          evidenceChunkId: chunk.id,
+          evidenceText: match[0],
+          evidenceStartOffset: (chunk.startOffset ?? 0) + (match.index ?? 0),
+          evidenceEndOffset: (chunk.startOffset ?? 0) + (match.index ?? 0) + match[0].length,
+          confidence: 1,
+          qualifiers: { extractor: 'deterministic' }
+        },
+        relations,
+        relationFingerprints
+      )
     }
   }
 
-  private resolveEndpoint(
-    endpoint: string,
-    endpointMap: Map<string, string>,
-    nodeByLocalId: Map<string, LegalGraphCandidateNode>
-  ): string {
-    const resolved = endpointMap.get(endpoint)
-    if (resolved) return resolved
-    if (!endpoint.startsWith('external:')) {
-      throw new Error('Legal graph relation references an unknown extracted node')
-    }
-
-    const label = normalizeText(endpoint.slice('external:'.length))
-    if (!label) throw new Error('Legal graph external reference is empty')
-    const canonicalKey = semanticKey('external_reference', label)
-    const localId = `semantic:external_reference:${stableHash(canonicalKey)}`
-    if (!nodeByLocalId.has(localId)) {
-      nodeByLocalId.set(localId, {
-        localId,
-        nodeType: 'external_reference',
-        canonicalKey,
-        label,
-        aliases: [],
-        metadata: { unresolved: true }
-      })
-    }
-    endpointMap.set(endpoint, localId)
-    return localId
+  private pushRelation(
+    relation: LegalGraphCandidateRelation,
+    relations: LegalGraphCandidateRelation[],
+    relationFingerprints: Set<string>
+  ): void {
+    const fingerprint = relationFingerprint(relation)
+    if (relationFingerprints.has(fingerprint)) return
+    relationFingerprints.add(fingerprint)
+    relations.push(relation)
   }
 }

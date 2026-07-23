@@ -4,10 +4,18 @@ import { join, basename } from 'path'
 import fs from 'fs'
 import Logger from '../../shared/utils/logger'
 import { settingsManager } from '../config'
-import { getGemma4CpuTuning } from './llamaRuntimeTuning'
+import { getGemma4CpuTuning, hasGpuBackendLibrary } from './llamaRuntimeTuning'
 
 type ServerKind = 'chat' | 'embedding'
 type Backend = string
+
+export function shouldSkipLlamaWarmup(
+  kind: ServerKind,
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  if (kind === 'chat') return env.KN_LLAMA_SKIP_CHAT_WARMUP === '1'
+  return env.KN_LLAMA_SKIP_EMBED_WARMUP === '1'
+}
 
 type RuntimeProfile = {
   backend: Backend
@@ -66,6 +74,7 @@ export class LlamaService {
   private embedProc: ChildProcess | null = null
   private machine: MachineInfo | null = null
   private runtimeProfile: RuntimeProfile | null = null
+  private warmupPromises = new Map<ServerKind, Promise<void>>()
 
   private isWin(): boolean {
     return process.platform === 'win32'
@@ -218,6 +227,16 @@ export class LlamaService {
     return 'llama-bin'
   }
 
+  private backendSupportsGpuOffload(backend: Backend): boolean {
+    const root = this.getAutoRoot()
+    if (!root) return false
+    try {
+      return hasGpuBackendLibrary(fs.readdirSync(join(root, backend)))
+    } catch {
+      return false
+    }
+  }
+
   private computeRuntimeProfile(): RuntimeProfile {
     if (this.runtimeProfile) return this.runtimeProfile
 
@@ -233,7 +252,18 @@ export class LlamaService {
       process.env.KN_LLAMA_THREADS || Math.max(2, Math.min(8, info.cpuThreads || 4))
     )
 
-    const useGpu = (info.gpuVendor === 'NVIDIA' || info.gpuVendor === 'AMD') && info.hasDGPU
+    const gpuBackendAvailable = this.backendSupportsGpuOffload(backend)
+    const useGpu =
+      gpuBackendAvailable &&
+      (info.gpuVendor === 'NVIDIA' || info.gpuVendor === 'AMD') &&
+      info.hasDGPU
+
+    if (info.hasDGPU && !gpuBackendAvailable) {
+      Logger.warn(
+        'LlamaService',
+        `GPU ${info.gpuName} detected, but backend ${backend} is CPU-only; GPU offload disabled.`
+      )
+    }
 
     const profile: RuntimeProfile = {
       backend,
@@ -393,11 +423,50 @@ export class LlamaService {
     const port = this.getPort(kind)
     const baseUrl = `http://${host}:${port}/v1`
     try {
-      const r = await fetch(`${baseUrl}/models`, { method: 'GET' })
+      const r = await fetch(`${baseUrl}/models`, { method: 'GET', signal: AbortSignal.timeout(2000) })
       return r.ok
     } catch {
       return false
     }
+  }
+
+  private async warmUpServer(kind: ServerKind): Promise<void> {
+    const host = this.getHost()
+    const port = this.getPort(kind)
+    const baseUrl = `http://${host}:${port}/v1`
+    const modelsResponse = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000)
+    })
+    if (!modelsResponse.ok) throw new Error(`${kind} model list returned ${modelsResponse.status}`)
+    const models = await modelsResponse.json() as { data?: Array<{ id?: string }> }
+    const model = models.data?.[0]?.id
+    if (!model) throw new Error(`${kind} server returned no model id`)
+    const endpoint = kind === 'chat' ? 'chat/completions' : 'embeddings'
+    const body = kind === 'chat'
+      ? { model, messages: [{ role: 'user', content: 'Trả lời: OK' }], max_tokens: 1, temperature: 0 }
+      : { model, input: ['khởi động'] }
+    const response = await fetch(`${baseUrl}/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(kind === 'chat' ? 60000 : 30000)
+    })
+    if (!response.ok) throw new Error(`${kind} warm-up returned ${response.status}`)
+    Logger.info('LlamaService', `${kind === 'chat' ? 'Chat' : 'Embedding'} model warm-up complete`)
+  }
+
+  private async ensureServerWarm(kind: ServerKind): Promise<void> {
+    if (shouldSkipLlamaWarmup(kind)) return
+    let promise = this.warmupPromises.get(kind)
+    if (!promise) {
+      promise = this.warmUpServer(kind).catch((error) => {
+        this.warmupPromises.delete(kind)
+        Logger.warn('LlamaService', `${kind} warm-up failed:`, error)
+      })
+      this.warmupPromises.set(kind, promise)
+    }
+    await promise
   }
 
   private buildArgs(kind: ServerKind, modelPath: string): string[] {
@@ -518,8 +587,7 @@ export class LlamaService {
     // Pass a mode explicitly so --no-warmup is not misparsed as the flag value.
     args.push('--flash-attn', process.env.KN_LLAMA_NO_FLASH_ATTN === '1' ? 'off' : 'auto')
 
-    // b8797+: skip warmup to reduce startup time
-    if (process.env.KN_LLAMA_NO_SKIP_WARMUP !== '1') {
+    if (shouldSkipLlamaWarmup(kind)) {
       args.push('--no-warmup')
     }
 
@@ -578,6 +646,7 @@ export class LlamaService {
       } else {
         this.embedProc = null
       }
+      this.warmupPromises.delete(kind)
     })
 
     if (kind === 'chat') {
@@ -606,7 +675,10 @@ export class LlamaService {
       return false
     }
 
-    if (await this.isServerUp('chat')) return true
+    if (await this.isServerUp('chat')) {
+      await this.ensureServerWarm('chat')
+      return true
+    }
 
     Logger.warn('LlamaService', 'Chat server is down. Attempting auto-restart...')
 
@@ -630,6 +702,7 @@ export class LlamaService {
     }
 
     Logger.info('LlamaService', 'Chat server is up')
+    await this.ensureServerWarm('chat')
     return true
   }
 
@@ -643,7 +716,10 @@ export class LlamaService {
       return false
     }
 
-    if (await this.isServerUp('embedding')) return true
+    if (await this.isServerUp('embedding')) {
+      await this.ensureServerWarm('embedding')
+      return true
+    }
 
     Logger.warn('LlamaService', 'Embedding server is down. Attempting auto-restart...')
 
@@ -667,6 +743,7 @@ export class LlamaService {
     }
 
     Logger.info('LlamaService', 'Embedding server is up')
+    await this.ensureServerWarm('embedding')
     return true
   }
 
@@ -680,6 +757,7 @@ export class LlamaService {
     const embUp = await this.isServerUp('embedding')
     if (chatUp && embUp) {
       Logger.info('LlamaService', 'llama.cpp servers already running')
+      await Promise.all([this.ensureServerWarm('chat'), this.ensureServerWarm('embedding')])
       return
     }
 
@@ -728,6 +806,7 @@ export class LlamaService {
       const okEmb = await this.isServerUp('embedding')
       if (okChat && okEmb) {
         Logger.info('LlamaService', 'llama.cpp servers are up')
+        await Promise.all([this.ensureServerWarm('chat'), this.ensureServerWarm('embedding')])
         return
       }
       await new Promise((r) => setTimeout(r, 500))
@@ -750,6 +829,7 @@ export class LlamaService {
       Logger.warn('LlamaService', 'Failed to kill embedding process:', e as any)
     }
     this.embedProc = null
+    this.warmupPromises.clear()
   }
 
   // ==================== GGUF Model Management ====================

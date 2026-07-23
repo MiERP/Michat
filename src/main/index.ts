@@ -107,7 +107,9 @@ app.whenReady().then(async () => {
 
     // Auto-start llama.cpp servers (best effort)
     llamaService = new LlamaService()
-    await llamaService.ensureStarted()
+    const llamaStartup = llamaService
+      .ensureStarted()
+      .catch((error) => Logger.warn('Main', 'Background llama.cpp startup failed:', error))
 
     // Set app user model id for windows
     electronApp.setAppUserModelId('com.michat.app')
@@ -223,6 +225,7 @@ app.whenReady().then(async () => {
     })
 
     // Create main window
+    await llamaStartup
     const mainWindow = createMainWindow()
     void legalGraphWorker.start()
 

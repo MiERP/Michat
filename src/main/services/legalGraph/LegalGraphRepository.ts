@@ -126,6 +126,12 @@ function sanitizeError(error: Error): string {
     .slice(0, MAX_ERROR_LENGTH)
 }
 
+function normalizeDocumentNumber(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.normalize('NFC').replace(/\s+/gu, '').toLocaleUpperCase('vi-VN')
+  return normalized || undefined
+}
+
 function mapJob(row: DatabaseRow): LegalExtractionJob {
   return {
     id: String(row.id),
@@ -217,6 +223,10 @@ export class LegalGraphRepository {
          LEFT JOIN legal_extraction_jobs job ON job.document_id = d.id
          WHERE d.status = 'indexed'
            AND json_type(d.metadata, '$.legalStructure') IS NOT NULL
+           AND (
+             json_extract(d.metadata, '$.canonicalGraphDocumentId') IS NULL OR
+             json_extract(d.metadata, '$.canonicalGraphDocumentId') = d.id
+           )
            AND (
              job.id IS NULL OR
              job.extractor_version <> ? OR
@@ -484,6 +494,8 @@ export class LegalGraphRepository {
         )
       }
 
+      this.linkNotebookDocumentReferences(notebookId)
+
       const retainedNodeIds = new Set(nodeIds.values())
       const obsoleteNodeIds = previousNodeIds.filter((nodeId) => !retainedNodeIds.has(nodeId))
       if (obsoleteNodeIds.length > 0) {
@@ -499,6 +511,7 @@ export class LegalGraphRepository {
           )
           .run(...obsoleteNodeIds)
       }
+      this.deleteLegacyOrphanNodes(notebookId)
 
       this.database
         .prepare(
@@ -746,11 +759,70 @@ export class LegalGraphRepository {
           )
           .run(...nodeIds)
       }
+      if (notebookId) this.deleteLegacyOrphanNodes(notebookId)
       this.database
         .prepare('DELETE FROM legal_extraction_jobs WHERE document_id = ?')
         .run(documentId)
     })()
     if (notebookId) this.bumpNotebookRevision(notebookId)
+  }
+
+  private deleteLegacyOrphanNodes(notebookId: string): void {
+    this.database
+      .prepare(
+        `DELETE FROM legal_nodes
+         WHERE notebook_id = ?
+           AND document_id IS NOT NULL
+           AND node_type IN ('subject', 'action', 'concept', 'sanction', 'external_reference')
+           AND instr(canonical_key, document_id || ':') <> 1
+           AND NOT EXISTS (
+             SELECT 1 FROM legal_relations
+             WHERE source_node_id = legal_nodes.id OR target_node_id = legal_nodes.id
+           )`
+      )
+      .run(notebookId)
+  }
+
+  private linkNotebookDocumentReferences(notebookId: string): void {
+    const targetNodeByNumber = new Map<string, string>()
+    const targetRows = this.database
+      .prepare(
+        `SELECT node.id, document.metadata
+         FROM legal_nodes node
+         JOIN documents document ON document.id = node.document_id
+         WHERE node.notebook_id = ? AND node.node_type = 'document'`
+      )
+      .all(notebookId) as DatabaseRow[]
+    for (const row of targetRows) {
+      const metadata = parseJson<Record<string, any>>(row.metadata, {})
+      const number = normalizeDocumentNumber(
+        metadata.legalDocument?.documentNumber ||
+          metadata.legalMetadataInspector?.fields?.documentNumber?.value
+      )
+      if (number) targetNodeByNumber.set(number, String(row.id))
+    }
+
+    const externalRows = this.database
+      .prepare(
+        `SELECT id, metadata FROM legal_nodes
+         WHERE notebook_id = ? AND node_type = 'external_reference'`
+      )
+      .all(notebookId) as DatabaseRow[]
+    const relinkTarget = this.database.prepare(
+      'UPDATE legal_relations SET target_node_id = ?, updated_at = ? WHERE target_node_id = ?'
+    )
+    const relinkSource = this.database.prepare(
+      'UPDATE legal_relations SET source_node_id = ?, updated_at = ? WHERE source_node_id = ?'
+    )
+    const now = Date.now()
+    for (const row of externalRows) {
+      const metadata = parseJson<Record<string, unknown>>(row.metadata, {})
+      const number = normalizeDocumentNumber(metadata.documentNumber)
+      const targetNodeId = number ? targetNodeByNumber.get(number) : undefined
+      if (!targetNodeId) continue
+      relinkTarget.run(targetNodeId, now, String(row.id))
+      relinkSource.run(targetNodeId, now, String(row.id))
+    }
   }
 
   private enqueueDocumentWithVersions(

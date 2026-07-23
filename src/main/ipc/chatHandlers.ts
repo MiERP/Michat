@@ -6,25 +6,41 @@ import { SessionAutoSwitchService } from '../services/SessionAutoSwitchService'
 import { KnowledgeService } from '../services/KnowledgeService'
 import {
   LegalComparisonService,
+  buildCanonicalVariantAnswer,
   buildLegalComparisonContext,
   getLegalDocumentMetadata,
   isLegalComparisonQuery,
-  removeInvalidComparisonCitations,
-  validateComparisonCitations,
   type LegalComparisonResult
 } from '../services/LegalComparisonService'
+import { finalizeChatEvidence } from '../services/chatEvidence'
+import { fitChatPrompt } from '../services/ChatPromptBudget'
+import { filterRelevantEvidence } from '../services/EvidenceRelevanceGate'
+import {
+  matchesLegalDocumentMention,
+  matchesExplicitLegalFileMention,
+  interleaveEvidenceGroups,
+  isCompleteDirectLookup,
+  isNarrowLegalScopeComparison,
+  routeLegalAnswer,
+  selectFallbackLegalChunks,
+  type LegalAnswerRoutingDecision
+} from '../services/LegalAnswerRouter'
 import { LlamaService } from '../services/LlamaService'
-import type { LegalReasoningSeed } from '../services/legalGraph/LegalReasoningService'
-import type { LegalReasoningService } from '../services/legalGraph/LegalReasoningService'
+import {
+  classifyLegalReasoningIntent,
+  type LegalReasoningSeed,
+  type LegalReasoningService
+} from '../services/legalGraph/LegalReasoningService'
 import type { LegalGraphWorker } from '../services/legalGraph/LegalGraphWorker'
 import { LicenseService } from '../services/LicenseService'
 import { combineSystemMessages, validateAndCleanMessages } from '../utils/messageValidator'
 import { settingsManager } from '../config'
-import type { ChatCitation, ChatMessageMetadata } from '../../shared/types/chat'
+import type { APIMessage, ChatCitation, ChatMessageMetadata, ChatPhase } from '../../shared/types/chat'
 import type { LegalReasoningEvidence, LegalReasoningResult } from '../../shared/types/legalReasoning'
 import type { AppSettings } from '../../shared/types'
 import Logger from '../../shared/utils/logger'
 import { ChatSchemas, validate, validateWithEvent } from './validation'
+import { minimizeRemoteMessages } from '../security/piiRedaction'
 
 const CONTROL_CHARS_PATTERN = new RegExp('[' + String.fromCharCode(0) + '-' + String.fromCharCode(8) + String.fromCharCode(11) + String.fromCharCode(12) + String.fromCharCode(14) + '-' + String.fromCharCode(31) + String.fromCharCode(127) + ']', 'g')
 
@@ -40,6 +56,8 @@ const RAG_MAX_CHARS_PER_DOC = 1600
 const RAG_MAX_TOTAL_CONTEXT_CHARS = 12000
 const LEGAL_COMPARISON_MAX_DOCUMENTS = 5
 const LEGAL_COMPARISON_TOP_K_PER_DOCUMENT = 2
+const SOCIAL_HISTORY_MAX_MESSAGES = 6
+const SOCIAL_HISTORY_MAX_CHARS = 1600
 const legalComparisonService = new LegalComparisonService()
 
 function sanitizePromptText(raw: string): string {
@@ -56,6 +74,36 @@ function clipText(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value
   return `${value.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`
 }
+
+function buildNoEvidenceAnswer(): string {
+  return 'Chưa tìm thấy căn cứ phù hợp trong tài liệu bạn đã nhập. MiChat không suy đoán hoặc dùng nguồn bên ngoài.'
+}
+
+function buildDirectLookupAnswer(
+  query: string,
+  results: LegalSearchResult[],
+  citations: ChatCitation[]
+): { content: string; citations: ChatCitation[] } {
+  const citationByChunkId = new Map(citations.map((citation) => [citation.chunkId, citation.index]))
+  const selectedResults = results
+    .filter((result) => citationByChunkId.has(result.chunkId))
+    .slice(0, isCompleteDirectLookup(query) ? 12 : 3)
+  const selectedChunkIds = new Set(selectedResults.map((result) => result.chunkId))
+  const evidence = selectedResults
+    .map((result) => `${clipText(sanitizePromptText(result.content), 1200)} [${citationByChunkId.get(result.chunkId)}]`)
+    .join('\n\n')
+  const firstResult = selectedResults[0]
+  const firstCitation = firstResult ? citationByChunkId.get(firstResult.chunkId) : undefined
+  const legalMetadata = getLegalDocumentMetadata(firstResult?.documentMetadata)
+  const effectiveDate = legalMetadata.effectiveFrom?.match(/^(\d{4})-(\d{2})-(\d{2})$/u)
+  const effectiveLine = /hiệu lực/iu.test(query) && effectiveDate && firstCitation
+    ? `${legalMetadata.documentType || 'Văn bản'}${legalMetadata.documentNumber ? ` số ${legalMetadata.documentNumber}` : ''} có hiệu lực từ ngày ${effectiveDate[3]}/${effectiveDate[2]}/${effectiveDate[1]} [${firstCitation}].\n\n`
+    : ''
+  return {
+    content: `${effectiveLine}${evidence}\n\nThông tin tham khảo từ MiChat AI, không thay thế tư vấn pháp lý chuyên nghiệp; cần đối chiếu văn bản hiện hành.`,
+    citations: citations.filter((citation) => selectedChunkIds.has(citation.chunkId))
+  }
+}
 async function retrieveLegalComparisonEvidence(
   knowledgeService: KnowledgeService,
   notebookId: string,
@@ -71,10 +119,46 @@ async function retrieveLegalComparisonEvidence(
     return !!metadata.legalStructure || !!metadata.legalDocument
   })
   const candidates = legalDocuments.length >= 2 ? legalDocuments : indexedDocuments
-  const selectedDocuments = candidates.slice(0, LEGAL_COMPARISON_MAX_DOCUMENTS)
+  const explicitFileMentions = candidates.filter((document) =>
+    matchesExplicitLegalFileMention(query, document.title)
+  )
+  const uniqueCandidates = [...new Map(candidates.map((document) => [
+    String((document.metadata as Record<string, unknown> | undefined)?.canonicalLegalWorkKey || document.id),
+    document
+  ])).values()]
+  const normalizedQuery = query.normalize('NFC').toLocaleUpperCase('vi-VN')
+  const documentCandidates = explicitFileMentions.length >= 2 ? explicitFileMentions : uniqueCandidates
+  const mentionedDocuments = documentCandidates.filter((document) => {
+    const metadata = getLegalDocumentMetadata(document.metadata)
+    return matchesLegalDocumentMention(query, document.title, metadata.documentNumber) ||
+      (!!metadata.documentNumber && normalizedQuery.includes(metadata.documentNumber.toLocaleUpperCase('vi-VN')))
+  })
+  const selectedDocuments = (mentionedDocuments.length >= 2 ? mentionedDocuments : documentCandidates).slice(
+    0,
+    LEGAL_COMPARISON_MAX_DOCUMENTS
+  )
+  const narrowScopeComparison = isNarrowLegalScopeComparison(query)
   const groups = await Promise.all(
-    selectedDocuments.map((document) =>
-      knowledgeService.search(notebookId, query, {
+    selectedDocuments.map(async (document) => {
+      if (narrowScopeComparison && mentionedDocuments.includes(document)) {
+        return selectFallbackLegalChunks(query, knowledgeService.getDocumentChunks(document.id), 1).map(
+          (chunk) => ({
+            chunkId: chunk.id,
+            documentId: document.id,
+            documentTitle: document.title,
+            documentType: document.type,
+            sourceUri: document.sourceUri || undefined,
+            pageNumber: Number(chunk.metadata?.pageNumber) || undefined,
+            content: chunk.content,
+            matchedContent: chunk.content,
+            score: 1,
+            chunkIndex: chunk.chunkIndex,
+            metadata: chunk.metadata || undefined,
+            documentMetadata: (document.metadata as Record<string, unknown>) || undefined
+          })
+        )
+      }
+      const options = {
         topK: LEGAL_COMPARISON_TOP_K_PER_DOCUMENT,
         threshold,
         metadataFilter: { documentIds: [document.id] },
@@ -82,13 +166,35 @@ async function retrieveLegalComparisonEvidence(
           ...rerank,
           topN: Math.max(LEGAL_COMPARISON_TOP_K_PER_DOCUMENT, rerank.topN)
         }
-      })
-    )
+      }
+      const primary = await knowledgeService.search(notebookId, query, options)
+      if (primary.length > 0 || !mentionedDocuments.includes(document)) return primary
+      const secondary = await knowledgeService.search(notebookId, query, { ...options, threshold: 0 })
+      if (secondary.length > 0) return secondary
+      return selectFallbackLegalChunks(query, knowledgeService.getDocumentChunks(document.id)).map(
+        (chunk) => ({
+          chunkId: chunk.id,
+          documentId: document.id,
+          documentTitle: document.title,
+          documentType: document.type,
+          sourceUri: document.sourceUri || undefined,
+          pageNumber: Number(chunk.metadata?.pageNumber) || undefined,
+          content: chunk.content,
+          matchedContent: chunk.content,
+          score: 0.01,
+          chunkIndex: chunk.chunkIndex,
+          metadata: chunk.metadata || undefined,
+          documentMetadata: (document.metadata as Record<string, unknown>) || undefined
+        })
+      )
+    })
   )
 
   return {
-    results: groups.flat(),
-    omittedDocumentCount: Math.max(0, candidates.length - selectedDocuments.length)
+    results: interleaveEvidenceGroups(groups),
+    omittedDocumentCount: mentionedDocuments.length >= 2
+      ? 0
+      : Math.max(0, uniqueCandidates.length - selectedDocuments.length)
   }
 }
 
@@ -205,26 +311,90 @@ function buildLongTermMemoryContext(
   return `Long-term conversation memory from previous archived sessions:\n\n${blocks}\n\nUse this memory only as background context. If user intent conflicts with old memory, follow the newest user instruction.`
 }
 
-function isLikelyChitChat(query: string, shortQueryLength: number): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  if (q.length < shortQueryLength) return true
+function normalizeRoutingQuery(query: string): { normalized: string; ascii: string } {
+  const normalized = query.normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ')
+  return {
+    normalized,
+    ascii: normalized.normalize('NFD').replace(/\p{M}/gu, '')
+  }
+}
+
+function isAssistantSocialQuery(query: string): boolean {
+  const { normalized, ascii } = normalizeRoutingQuery(query)
+  if (!normalized) return true
 
   const patterns = [
-    /^(hi|hello|hey)\b/,
-    /^(xin chao|chao|chÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡ o)\b/,
-    /^(good (morning|afternoon|evening))/,
-    /^(ban|bÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡n) (co|cÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³) (the|thÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢) (giup|giÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âºp)/,
-    /^(cam on|cÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£m ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡n|thank you)\b/
+    /^(hi|hello|hey|xin chao|chao|good (morning|afternoon|evening))([,!.? ]+(mimi|ban|nhe|nha|a))?[,!.? ]*$/,
+    /^(cam on|thank you|thanks|tam biet|bye|goodbye|hen gap lai)( ban| mimi)?[,!.? ]*$/,
+    /^(hay )?(tu gioi thieu( ve ban than ban)?|gioi thieu ve (ban than|ban than ban|ban))( cho toi)?[,!.? ]*$/,
+    /^(ban la ai|ten ban la gi)[,!.? ]*$/,
+    /^(ban|mimi) (co the|lam duoc) gi[,!.? ]*$/,
+    /^(ban|mimi) (khoe khong|hom nay the nao|dang lam gi)[,!.? ]*$/,
+    /^(noi chuyen voi toi|ke toi nghe chuyen gi do)[,!.? ]*$/
   ]
 
-  return patterns.some((re) => re.test(q))
+  return patterns.some((pattern) => pattern.test(ascii))
+}
+
+function selectRecentSocialHistory(messages: APIMessage[]): APIMessage[] {
+  const selected: APIMessage[] = []
+  let totalChars = 0
+
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (selected.length >= SOCIAL_HISTORY_MAX_MESSAGES) break
+    if (selected.length > 0 && totalChars + message.content.length > SOCIAL_HISTORY_MAX_CHARS) break
+    selected.unshift(message)
+    totalChars += message.content.length
+  }
+
+  return selected
+}
+
+function isLikelyLegalQuery(query: string): boolean {
+  const { ascii } = normalizeRoutingQuery(query)
+  return /\b(phap ly|phap luat|luat|bo luat|nghi dinh|thong tu|dieu \d+|khoan \d+|quyen|nghia vu|vi pham|xu phat|phat|che tai|hop dong|boi thuong|toa an|thu tuc|trach nhiem)\b/.test(
+    ascii
+  )
+}
+
+function shouldActivateLegalReasoning(query: string, seeds: LegalReasoningSeed[]): boolean {
+  const intent = classifyLegalReasoningIntent(query)
+  if (intent === 'general' || intent === 'definition') return false
+  return new Set(seeds.map((seed) => seed.documentId)).size >= 2
 }
 
 function normalizeCitationSnippet(raw: string, maxLength = 240): string {
   const cleaned = raw.replace(/\s+/g, ' ').trim()
   if (cleaned.length <= maxLength) return cleaned
   return `${cleaned.slice(0, maxLength).trim()}...`
+}
+
+function normalizeTokenUsage(
+  usage: ChatMessageMetadata['usage'] | undefined,
+  promptContent: string,
+  completionContent: string
+): NonNullable<ChatMessageMetadata['usage']> {
+  const estimatedPromptTokens = Math.max(1, SessionAutoSwitchService.estimateTokens(promptContent))
+  const estimatedCompletionTokens = Math.max(
+    1,
+    SessionAutoSwitchService.estimateTokens(completionContent)
+  )
+  const promptTokens = usage?.promptTokens && usage.promptTokens > 0
+    ? usage.promptTokens
+    : estimatedPromptTokens
+  const completionTokens = usage?.completionTokens && usage.completionTokens > 0
+    ? usage.completionTokens
+    : estimatedCompletionTokens
+  const reportedTotal = usage?.totalTokens && usage.totalTokens > 0 ? usage.totalTokens : 0
+  const estimated = !usage?.promptTokens || !usage?.completionTokens || !reportedTotal
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: Math.max(reportedTotal, promptTokens + completionTokens),
+    ...(estimated ? { estimated: true } : {})
+  }
 }
 
 function buildCitations(
@@ -274,7 +444,8 @@ function buildLegalReasoningSeeds(
       {
         notebookId,
         citationId,
-        documentId: result.documentId,
+        documentId:
+          (documentMetadata?.canonicalGraphDocumentId as string | undefined) || result.documentId,
         documentTitle: result.documentTitle,
         chunkId: result.chunkId,
         chunkIndex: result.chunkIndex,
@@ -414,6 +585,23 @@ export function registerChatHandlers(
 
       // 2. ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂºÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âº assistant ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦
       const assistantMessage = queries.createMessage(sessionId, 'assistant', '')
+      const requestStartedAt = Date.now()
+      let retrievalMs = 0
+      let evidenceReadyMs: number | undefined
+      let firstTokenMs: number | undefined
+      let fittedPromptTokens: number | undefined
+      const emitPhase = (
+        phase: ChatPhase,
+        metadata?: Pick<ChatMessageMetadata, 'citations'>
+      ): void => {
+        event.sender.send('message-chunk', {
+          messageId: assistantMessage.id,
+          type: 'phase',
+          phase,
+          elapsedMs: Date.now() - requestStartedAt,
+          ...(metadata ? { metadata } : {})
+        })
+      }
 
       // License guard: block chat when license is missing/invalid/expired
       const licenseStatus = LicenseService.getStatus()
@@ -424,6 +612,10 @@ export function registerChatHandlers(
         })
         return assistantMessage.id
       }
+      emitPhase('routing')
+
+      const legalDomainQuery = isLikelyLegalQuery(content)
+      const assistantSocialQuery = isAssistantSocialQuery(content) && !legalDomainQuery
 
       // 3. ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â·ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â½ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡
       const history = queries.getMessagesBySession(sessionId)
@@ -434,6 +626,7 @@ export function registerChatHandlers(
 
       // 3.1 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÆ’Ã¢â‚¬Å¡ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡ ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°
       messages = validateAndCleanMessages(messages)
+      if (assistantSocialQuery) messages = selectRecentSocialHistory(messages)
 
       // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂªÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â½ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯
       if (messages.length === 0) {
@@ -455,35 +648,41 @@ export function registerChatHandlers(
         })
       }
 
-      const session = queries.getSessionById(sessionId)
-      const summaries: Array<{ title: string; summary: string }> = []
-      let cursorSessionId = session?.parentSessionId
-      let depth = 0
+      if (!assistantSocialQuery) {
+        const session = queries.getSessionById(sessionId)
+        const summaries: Array<{ title: string; summary: string }> = []
+        let cursorSessionId = session?.parentSessionId
+        let depth = 0
 
-      while (cursorSessionId && depth < 5) {
-        const parentSession = queries.getSessionById(cursorSessionId)
-        if (!parentSession) break
-        if (parentSession.summary?.trim()) {
-          summaries.push({
-            title: parentSession.title || `Session ${depth + 1}`,
-            summary: parentSession.summary.trim()
+        while (cursorSessionId && depth < 5) {
+          const parentSession = queries.getSessionById(cursorSessionId)
+          if (!parentSession) break
+          if (parentSession.summary?.trim()) {
+            summaries.push({
+              title: parentSession.title || `Session ${depth + 1}`,
+              summary: parentSession.summary.trim()
+            })
+          }
+          cursorSessionId = parentSession.parentSessionId || undefined
+          depth++
+        }
+
+        const memoryContext = buildLongTermMemoryContext(summaries)
+        if (memoryContext) {
+          messages.unshift({
+            role: 'system',
+            content: memoryContext
           })
         }
-        cursorSessionId = parentSession.parentSessionId || undefined
-        depth++
-      }
-
-      const memoryContext = buildLongTermMemoryContext(summaries)
-      if (memoryContext) {
-        messages.unshift({
-          role: 'system',
-          content: memoryContext
-        })
       }
 
       let citationMetadata: ChatCitation[] = []
       let legalComparison: LegalComparisonResult | undefined
       let legalReasoning: LegalReasoningResult | undefined
+      let retrievedResults: LegalSearchResult[] = []
+      let evidenceContext = ''
+      let graphContext = ''
+      let answerDecision: LegalAnswerRoutingDecision | undefined
 
       // 3.2 RAG ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â´ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂºÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡
       // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂªÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂµÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ RAG
@@ -494,20 +693,13 @@ export function registerChatHandlers(
           effectiveSettings.defaultEmbeddingModel.includes(':')
         const ragTopK = Math.min(Math.max(effectiveSettings.ragTopK ?? 3, 1), 8)
         const ragThreshold = Math.min(Math.max(effectiveSettings.ragThreshold ?? 0.62, 0), 1)
-        const shortQueryLength = Math.min(
-          Math.max(effectiveSettings.ragSkipShortQueryLength ?? 12, 4),
-          32
-        )
-        const useChitChatHeuristic = effectiveSettings.ragEnableChitChatHeuristic ?? true
         const rerankEnabled = effectiveSettings.rerankEnabled ?? true
         const rerankTopN = Math.min(Math.max(effectiveSettings.rerankTopN ?? 12, ragTopK), 100)
         const rerankModel = effectiveSettings.defaultRerankModel?.trim() || undefined
         const rerankUseHeuristicFallback = effectiveSettings.rerankUseHeuristicFallback ?? true
 
-        if (
-          hasEmbeddingModel &&
-          !(useChitChatHeuristic && isLikelyChitChat(content, shortQueryLength))
-        ) {
+        if (hasEmbeddingModel && !assistantSocialQuery) {
+          emitPhase('retrieving')
           const session = queries.getSessionById(sessionId)
           if (session?.notebookId) {
             const ragStartedAt = Date.now()
@@ -527,13 +719,16 @@ export function registerChatHandlers(
                   rerankOptions
                 )
               : undefined
-            const searchResults = comparisonRetrieval
+            const rawSearchResults = comparisonRetrieval
               ? comparisonRetrieval.results
               : await knowledgeService.search(session.notebookId, content, {
                   topK: ragTopK,
                   threshold: ragThreshold,
                   rerank: rerankOptions
                 })
+            const searchResults = filterRelevantEvidence(content, rawSearchResults)
+            retrievedResults = searchResults
+            retrievalMs = Date.now() - ragStartedAt
 
             let ragContextResult: { context: string; includedChunkIds: Set<string> } = { context: '', includedChunkIds: new Set() }
             if (searchResults.length > 0) {
@@ -559,7 +754,13 @@ export function registerChatHandlers(
                   )
                 }
                 ragContextResult = {
-                  context: buildLegalComparisonContext(legalComparison),
+                  context: isNarrowLegalScopeComparison(content)
+                    ? buildLegalComparisonContext(legalComparison, {
+                        compact: true,
+                        maxEvidenceCharsPerItem: 320,
+                        maxEvidenceItems: new Set(searchResults.map((result) => result.documentId)).size
+                      })
+                    : buildLegalComparisonContext(legalComparison),
                   includedChunkIds: new Set(searchResults.map((result) => result.chunkId))
                 }
               } else {
@@ -568,54 +769,150 @@ export function registerChatHandlers(
                   searchResults.filter((item) => ragContextResult.includedChunkIds.has(item.chunkId))
                 )
               }
+              answerDecision = routeLegalAnswer({
+                query: content,
+                evidence: citationMetadata,
+                allowRemote: !!effectiveSettings.allowRemoteProviders,
+                remoteAvailable: false
+              })
+              evidenceReadyMs = Date.now() - requestStartedAt
+              emitPhase('evidence-ready', { citations: citationMetadata })
               const directChunkIds = new Set(citationMetadata.map((citation) => citation.chunkId))
-              const reasoningSeeds = buildLegalReasoningSeeds(
-                session.notebookId,
-                searchResults,
-                citationMetadata
-              )
-              if (legalReasoningService && reasoningSeeds.length > 0) {
-                try {
-                  legalReasoning = legalReasoningService.reason(content, reasoningSeeds)
-                  legalComparison = legalReasoning.comparison || legalComparison
-                  citationMetadata = mergeReasoningCitations(citationMetadata, legalReasoning.evidence)
-                } catch (error) {
-                  Logger.warn('ChatHandlers', 'Legal graph reasoning failed; using direct RAG:', error)
+              if (answerDecision.useGraph && legalDomainQuery && citationMetadata.length > 0) {
+                emitPhase('reasoning')
+                const reasoningSeeds = buildLegalReasoningSeeds(
+                  session.notebookId,
+                  searchResults,
+                  citationMetadata
+                )
+                if (
+                  legalReasoningService &&
+                  shouldActivateLegalReasoning(content, reasoningSeeds)
+                ) {
+                  try {
+                    legalReasoning = legalReasoningService.reason(content, reasoningSeeds)
+                    legalComparison = legalReasoning.comparison || legalComparison
+                    citationMetadata = mergeReasoningCitations(citationMetadata, legalReasoning.evidence)
+                  } catch (error) {
+                    Logger.warn('ChatHandlers', 'Legal graph reasoning failed; using direct RAG:', error)
+                  }
                 }
               }
-              const ragContext = [
-                ragContextResult.context,
-                buildValidatedReasoningContext(legalReasoning, directChunkIds)
-              ].filter(Boolean).join('\n\n')
+              evidenceContext = ragContextResult.context
+              graphContext = buildValidatedReasoningContext(legalReasoning, directChunkIds)
               Logger.debug(
                 'ChatHandlers',
                 `RAG: Found ${searchResults.length} relevant chunks for query, kept ${citationMetadata.length} chunks after prompt budget trim (topK=${ragTopK}, threshold=${ragThreshold}, rerankEnabled=${rerankEnabled}, rerankTopN=${rerankTopN}, latency=${Date.now() - ragStartedAt}ms)`
               )
 
               // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬  RAG ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦ ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âº system message ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â´
-              if (ragContext) {
-                messages.unshift({
-                  role: 'system',
-                  content: ragContext
-                })
-              }
+            } else {
+              answerDecision = routeLegalAnswer({ query: content, evidence: [] })
+              evidenceReadyMs = Date.now() - requestStartedAt
+              emitPhase('evidence-ready', { citations: [] })
             }
           }
         } else {
           Logger.debug(
             'ChatHandlers',
             hasEmbeddingModel
-              ? 'RAG skipped: query identified as chit-chat/short text'
+              ? 'RAG skipped: query identified as assistant/social'
               : 'RAG disabled: No embedding model configured'
           )
+          if (!assistantSocialQuery) {
+            answerDecision = routeLegalAnswer({ query: content, evidence: [] })
+            evidenceReadyMs = Date.now() - requestStartedAt
+            emitPhase('evidence-ready', { citations: [] })
+          }
         }
       } catch (error) {
         // RAG ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â´ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂªÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¹Ã…â€œÃƒÆ’Ã¢â‚¬Â¦
         Logger.warn('ChatHandlers', 'RAG search failed:', error)
+        if (legalDomainQuery) answerDecision = routeLegalAnswer({ query: content, evidence: [] })
+      }
+
+      if (answerDecision && !answerDecision.requiresModel) {
+        const immediateAnswer =
+          answerDecision.route === 'direct_lookup'
+            ? buildDirectLookupAnswer(content, retrievedResults, citationMetadata)
+            : { content: buildNoEvidenceAnswer(), citations: [] }
+        const finalizedImmediate = finalizeChatEvidence(
+          immediateAnswer.content,
+          immediateAnswer.citations,
+          {
+            requireCitation: answerDecision.route === 'direct_lookup',
+            addMissingClaimCitations: answerDecision.route !== 'direct_lookup'
+          }
+        )
+        const immediateCitations = finalizedImmediate.citations
+        const finalMetadata: ChatMessageMetadata = {
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          citations: immediateCitations,
+          finishReason: answerDecision.route,
+          telemetry: {
+            route: answerDecision.route,
+            totalMs: Date.now() - requestStartedAt,
+            retrievalMs,
+            evidenceReadyMs,
+            evidenceCount: immediateCitations.length,
+            remote: false
+          }
+        }
+        setTimeout(() => {
+          queries.updateMessageContent(assistantMessage.id, finalizedImmediate.content, '', finalMetadata)
+          event.sender.send('message-chunk', {
+            messageId: assistantMessage.id,
+            type: 'text-delta',
+            content: finalizedImmediate.content
+          })
+          emitPhase('complete')
+          event.sender.send('message-chunk', {
+            messageId: assistantMessage.id,
+            type: 'finish',
+            content: finalizedImmediate.content,
+            metadata: finalMetadata
+          })
+          event.sender.send('message-complete', { messageId: assistantMessage.id })
+        }, 0)
+        return assistantMessage.id
       }
 
       // 4. ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ AI Provider ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂµÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â
-      messages = combineSystemMessages(messages)
+      let modelDecision = answerDecision || {
+        route: 'compact_synthesis',
+        requiresModel: true,
+        useGraph: false,
+        maxOutputTokens: 256,
+        maxHistoryMessages: assistantSocialQuery ? 6 : 2
+      }
+      const systemPrompt = messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n')
+      const modelHistory = messages.filter((message) => message.role !== 'system')
+      const currentQueryIndex = modelHistory.findLastIndex(
+        (message) => message.role === 'user' && message.content.trim() === content.trim()
+      )
+      if (currentQueryIndex >= 0) modelHistory.splice(currentQueryIndex, 1)
+      const localPromptWindow =
+        modelDecision.route === 'compact_synthesis'
+          ? 1024
+          : modelDecision.route === 'deep_reasoning'
+            ? 1152
+            : 4096
+      const fittedPrompt = fitChatPrompt({
+        system: systemPrompt,
+        history: modelHistory,
+        query: content,
+        evidence: evidenceContext,
+        graph: graphContext,
+        contextWindow: localPromptWindow,
+        maxOutputTokens: modelDecision.maxOutputTokens,
+        safetyTokens: 256,
+        maxHistoryMessages: modelDecision.maxHistoryMessages
+      })
+      fittedPromptTokens = fittedPrompt.estimatedPromptTokens
+      messages = combineSystemMessages(fittedPrompt.messages)
 
       const provider = await providerManager.getActiveChatProvider()
       if (!provider) {
@@ -627,6 +924,37 @@ export function registerChatHandlers(
       }
 
       const providerName = String((provider as any)?.name || '').toLowerCase()
+      const remoteProvider =
+        (providerManager as any).getDescriptor?.(providerName)?.locality === 'remote'
+      if (remoteProvider && !settings?.allowRemoteProviders) {
+        event.sender.send('message-error', {
+          messageId: assistantMessage.id,
+          error: 'Remote provider requires explicit opt-in in settings.'
+        })
+        return assistantMessage.id
+      }
+      if (remoteProvider) {
+        modelDecision = routeLegalAnswer({
+          query: content,
+          evidence: citationMetadata,
+          allowRemote: true,
+          remoteAvailable: true
+        })
+        const remotePrompt = fitChatPrompt({
+          system: systemPrompt,
+          history: modelHistory,
+          query: content,
+          evidence: legalComparison ? buildLegalComparisonContext(legalComparison) : evidenceContext,
+          graph: graphContext,
+          contextWindow: 8192,
+          maxOutputTokens: modelDecision.maxOutputTokens,
+          safetyTokens: 384,
+          maxHistoryMessages: modelDecision.maxHistoryMessages
+        })
+        fittedPromptTokens = remotePrompt.estimatedPromptTokens
+        messages = combineSystemMessages(remotePrompt.messages)
+        messages = minimizeRemoteMessages(messages)
+      }
       const isLlamaChat = providerName === 'llama' || providerName === 'llama-embed'
       if (isLlamaChat) {
         const chatReady = await llamaService.ensureChatStarted()
@@ -654,6 +982,7 @@ export function registerChatHandlers(
 
       let abortController: AbortController
       try {
+        emitPhase('generating')
         abortController = await provider.sendMessageStream(
         messages,
         // onChunk - ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬  AI SDK fullStream ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â part ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¹
@@ -689,6 +1018,7 @@ export function registerChatHandlers(
           }
           // 4. ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â®ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã¢â‚¬Â¹ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â text-deltaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°
           else if (content) {
+            if (firstTokenMs === undefined) firstTokenMs = Date.now() - requestStartedAt
             fullTextContent += content
 
             event.sender.send('message-chunk', {
@@ -719,22 +1049,37 @@ export function registerChatHandlers(
         // onComplete
         async () => {
           try {
-            if (citationMetadata.length > 0) {
-              const allowedCitationIds = citationMetadata.map((citation) => citation.index)
-              const validation = validateComparisonCitations(fullTextContent, allowedCitationIds)
-              if (!validation.valid) {
-                fullTextContent = removeInvalidComparisonCitations(fullTextContent, allowedCitationIds)
-                Logger.warn('ChatHandlers', 'Removed citation markers outside allowed evidence', {
-                  invalidCitationIds: validation.invalidCitationIds
-                })
-              }
-            }
+            emitPhase('validating')
+            fullTextContent = buildCanonicalVariantAnswer(legalComparison) || fullTextContent
+            const finalizedEvidence = finalizeChatEvidence(fullTextContent, citationMetadata, {
+              requireCitation: citationMetadata.length > 0
+            })
+            fullTextContent = finalizedEvidence.content
+            citationMetadata = finalizedEvidence.citations
+            const normalizedUsage = normalizeTokenUsage(
+              usageMetadata?.usage,
+              messages.map((message) => message.content).join('\n'),
+              fullTextContent
+            )
 
             const finalMetadata: ChatMessageMetadata = {
               ...(usageMetadata || {}),
+              usage: normalizedUsage,
               citations: citationMetadata,
               ...(legalComparison ? { legalComparison } : {}),
-              ...(legalReasoning ? { legalReasoning } : {})
+              ...(legalReasoning ? { legalReasoning } : {}),
+              telemetry: {
+                route: modelDecision.route,
+                totalMs: Date.now() - requestStartedAt,
+                retrievalMs,
+                evidenceReadyMs,
+                firstTokenMs,
+                promptTokensEstimated: fittedPromptTokens,
+                maxOutputTokens: modelDecision.maxOutputTokens,
+                contextWindow: 4096,
+                evidenceCount: citationMetadata.length,
+                remote: modelDecision.route === 'remote_complex'
+              }
             }
 
             // Update DB with final content (including reasoning)
@@ -744,20 +1089,15 @@ export function registerChatHandlers(
               fullReasoningContent,
               finalMetadata
             )
+            emitPhase('complete')
             event.sender.send('message-chunk', {
               messageId: assistantMessage.id,
               type: 'finish',
+              content: fullTextContent,
               metadata: finalMetadata
             })
 
-            let tokensUsed = 0
-            if (usageMetadata?.usage?.totalTokens) {
-              tokensUsed = usageMetadata.usage.totalTokens
-            } else {
-              const userTokens = SessionAutoSwitchService.estimateTokens(content)
-              const assistantTokens = SessionAutoSwitchService.estimateTokens(fullTextContent)
-              tokensUsed = userTokens + assistantTokens
-            }
+            const tokensUsed = normalizedUsage.totalTokens || 0
 
             Logger.debug('ChatHandlers', `Tokens used in this conversation: ${tokensUsed}`)
 
@@ -783,8 +1123,9 @@ export function registerChatHandlers(
           } finally {
             settleStream()
           }
-        }
-        )
+        },
+        { maxOutputTokens: modelDecision.maxOutputTokens }
+      )
       } catch (error) {
         settleStream()
         const normalizedError = error instanceof Error ? error : new Error(String(error))

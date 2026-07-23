@@ -28,7 +28,8 @@ def build_user_msg(tc):
     for s in tc.get("sources", []):
         src_parts.append(f"[source_id: {s['source_id']} | hieu_luc: {s['status']} | dieu: {s['dieu']}]\n{s['text']}")
     src_block = "\n\n".join(src_parts) if src_parts else "(Khong co nguon)"
-    return f"<question>\n{tc['question']}\n</question>\n<sources>\n{src_block}\n</sources>"
+    graph_status = tc.get("graph_status", "ready")
+    return f"<question>\n{tc['question']}\n</question>\n<graph_status>{graph_status}</graph_status>\n<sources>\n{src_block}\n</sources>"
 
 def check_citation(resp, tc):
     r = resp.lower()

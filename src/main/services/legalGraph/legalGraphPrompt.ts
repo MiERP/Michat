@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import { LEGAL_RELATION_TYPES } from '../../../shared/types/legalReasoning'
 
-export const LEGAL_GRAPH_EXTRACTOR_VERSION = '1'
-export const LEGAL_GRAPH_PROMPT_VERSION = '1'
+export const LEGAL_GRAPH_EXTRACTOR_VERSION = '4'
+export const LEGAL_GRAPH_PROMPT_VERSION = 'deterministic-vietnamese-2'
 export const LEGAL_GRAPH_ONTOLOGY_VERSION = '1'
 
 export const legalGraphOutputSchema = z.object({

@@ -12,6 +12,7 @@ import { createQwen } from 'qwen-ai-provider'
 import { createOllama } from 'ollama-ai-provider-v2'
 import { streamText, embed, embedMany } from 'ai'
 import type { BaseProvider, LLMProviderConfig } from '../capabilities/BaseProvider'
+import type { ChatStreamOptions } from '../capabilities/ChatCapability'
 import type { ChatCapability } from '../capabilities/ChatCapability'
 import type { EmbeddingCapability } from '../capabilities/EmbeddingCapability'
 import type { APIMessage, StreamChunk } from '../../../shared/types/chat'
@@ -206,7 +207,8 @@ export class AISDKProvider implements BaseProvider {
     messages: APIMessage[],
     onChunk: (chunk: StreamChunk) => void,
     onError: (error: Error) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    options: ChatStreamOptions = {}
   ): Promise<AbortController> {
     if (!this.aiProvider) {
       const error = new Error(
@@ -247,7 +249,7 @@ export class AISDKProvider implements BaseProvider {
           model,
           messages: coreMessages,
           temperature: this.config.temperature,
-          maxOutputTokens: this.config.maxTokens,
+          maxOutputTokens: options.maxOutputTokens ?? this.config.maxTokens,
           abortSignal: abortController.signal
         })
 

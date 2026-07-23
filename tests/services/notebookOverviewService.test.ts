@@ -112,10 +112,17 @@ describe('NotebookOverviewService', () => {
     expect(overview!.content).toContain('## Tổng quan')
   })
 
-  it('uses one short LLM request without citations for multiple documents', async () => {
+  it('allocates overview coverage per canonical work and persists used citations', async () => {
     const now = new Date()
-    for (let index = 1; index <= 3; index++) {
+    const sources = [
+      { key: 'law:07/2022/QH15', content: 'LAW_07_DOCX' },
+      { key: 'law:07/2022/QH15', content: 'LAW_07_PDF_DUPLICATE' },
+      { key: 'law:24/2018/QH14', content: 'LAW_24' },
+      { key: 'decree:103/2025/NĐ-CP', content: 'DECREE_103' }
+    ]
+    for (let index = 1; index <= sources.length; index++) {
       const documentId = 'document_' + index
+      const source = sources[index - 1]
       dbModule
         .getDatabase()
         .insert(schema.documents)
@@ -125,6 +132,7 @@ describe('NotebookOverviewService', () => {
           title: 'Source ' + index + '.pdf',
           type: 'file',
           contentHash: 'source-v' + index,
+          metadata: { canonicalLegalWorkKey: source.key },
           status: 'indexed',
           chunkCount: 1,
           createdAt: new Date(now.getTime() + index),
@@ -138,7 +146,7 @@ describe('NotebookOverviewService', () => {
           id: 'chunk_' + index,
           documentId,
           notebookId,
-          content: 'DOCUMENT_' + index + ' Điều ' + index + ' quy định quyền và nghĩa vụ.',
+          content: source.content + ' Điều ' + index + ' quy định quyền và nghĩa vụ.',
           chunkIndex: 0,
           createdAt: now
         })
@@ -157,7 +165,10 @@ describe('NotebookOverviewService', () => {
       getActiveChatProvider: async () => provider
     } as never)
     generateTextMock.mockResolvedValue({
-      text: Array.from({ length: 300 }, (_, index) => 'word' + index).join(' ')
+      text:
+        '## Tổng quan [1]\n' +
+        'Luật 07 và Luật 24 quy định các nghĩa vụ chính [1] [2].\n\n' +
+        'Nghị định 103 quy định chi tiết phạm vi áp dụng [3].'
     })
 
     const progressEvents: Array<{ stage: string; progress: number }> = []
@@ -168,14 +179,19 @@ describe('NotebookOverviewService', () => {
     expect(generateTextMock).toHaveBeenCalledTimes(1)
     const prompt = generateTextMock.mock.calls[0][0].prompt as string
     expect(prompt.length).toBeLessThan(11_000)
-    expect(prompt).toContain('DOCUMENT_1')
-    expect(prompt).toContain('DOCUMENT_2')
-    expect(prompt).toContain('DOCUMENT_3')
+    expect(prompt).toContain('LAW_07_DOCX')
+    expect(prompt).not.toContain('LAW_07_PDF_DUPLICATE')
+    expect(prompt).toContain('LAW_24')
+    expect(prompt).toContain('DECREE_103')
     expect(prompt).toContain('160-220 từ')
-    expect(prompt.toLowerCase()).not.toContain('citation')
-    expect(prompt).not.toMatch(/\[\d+\]/)
-    expect(overview.content.trim().split(/\s+/)).toHaveLength(240)
-    expect('citations' in overview).toBe(false)
+    expect(prompt).toMatch(/Tài liệu \[1\]/)
+    expect(overview.citations).toHaveLength(3)
+    expect(overview.citations.map((citation) => citation.documentId)).toEqual([
+      'document_1',
+      'document_3',
+      'document_4'
+    ])
+    expect(overview.content).toContain('[3]')
     expect(progressEvents[0]).toEqual({ stage: 'preparing_sources', progress: 5 })
     expect(progressEvents.some((event) => event.stage === 'synthesizing_overview')).toBe(true)
   })

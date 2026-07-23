@@ -168,9 +168,17 @@ declare global {
       onMessageChunk: (
         callback: (data: {
           messageId: string
-          type: 'reasoning-start' | 'reasoning-delta' | 'reasoning-end' | 'text-delta' | 'finish'
+          type:
+            | 'phase'
+            | 'reasoning-start'
+            | 'reasoning-delta'
+            | 'reasoning-end'
+            | 'text-delta'
+            | 'finish'
           content?: string
           reasoningId?: string
+          phase?: import('../shared/types/chat').ChatPhase
+          elapsedMs?: number
           metadata?: any
         }) => void
       ) => () => void

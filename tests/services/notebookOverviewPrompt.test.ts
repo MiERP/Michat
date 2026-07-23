@@ -36,9 +36,9 @@ describe('notebook overview source selection', () => {
     )
 
     expect(source.length).toBeLessThanOrEqual(900)
-    expect(source).toContain('Tài liệu 1: First.pdf')
-    expect(source).toContain('Tài liệu 2: Middle.pdf')
-    expect(source).toContain('Tài liệu 3: Last.pdf')
+    expect(source).toContain('Tài liệu [1]: First.pdf')
+    expect(source).toContain('Tài liệu [2]: Middle.pdf')
+    expect(source).toContain('Tài liệu [3]: Last.pdf')
     expect(source).toContain('FIRST')
     expect(source).toContain('MIDDLE')
     expect(source).toContain('LAST')

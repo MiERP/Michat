@@ -28,7 +28,8 @@ function BuildUserMsg($tc) {
         }
     }
     $srcBlock = if ($srcLines.Count -gt 0) { ($srcLines -join "`n`n") } else { "(Khong co nguon nao duoc cung cap)" }
-    return "<question>`n$($tc.question)`n</question>`n<sources>`n$srcBlock`n</sources>"
+    $graphStatus = if ($tc.graph_status) { $tc.graph_status } else { "ready" }
+    return "<question>`n$($tc.question)`n</question>`n<graph_status>$graphStatus</graph_status>`n<sources>`n$srcBlock`n</sources>"
 }
 
 function Check-Citation($resp, $tc) {

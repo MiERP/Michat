@@ -175,10 +175,15 @@ function fieldFromMatch(
 
 function extractDocumentNumber(content: string): LegalMetadataField | undefined {
   const header = content.slice(0, 5000)
-  const match = header.match(
-    /(?:^|\n)\s*(?:(?:văn\s+bản\s+hợp\s+nhất|nghị\s+định|thông\s+tư|quyết\s+định|nghị\s+quyết|chỉ\s+thị|pháp\s+lệnh|luật)\s+)?số\s*:\s*([0-9]+[A-Z]?(?:\/[A-ZĐ0-9.\-]+){1,3})\b/iu
-  )
-  return match ? fieldFromMatch(match[1].toUpperCase(), content, match, 0.99) : undefined
+  const matches = [
+    ...header.matchAll(
+      /(?:^|\n)\s*(?:(?:văn\s+bản\s+hợp\s+nhất|nghị\s+định|thông\s+tư|quyết\s+định|nghị\s+quyết|chỉ\s+thị|pháp\s+lệnh|luật)\s+)?số\s*:\s*([0-9]+[A-Z]?(?:\/[A-ZĐ0-9.]+(?:\s*-\s*[A-ZĐ0-9.]+)*){1,3})(?=\s|$)/gimu
+    )
+  ]
+  const match = matches.sort((left, right) => right[1].length - left[1].length)[0]
+  return match
+    ? fieldFromMatch(match[1].replace(/\s*-\s*/gu, '-').toUpperCase(), content, match, 0.99)
+    : undefined
 }
 
 function extractDocumentType(title: string, content: string): LegalMetadataField | undefined {
@@ -402,7 +407,7 @@ function extractDeclaredRelations(
   structure?: LegalDocumentStructure
 ): DeclaredLegalRelation[] {
   const relations: DeclaredLegalRelation[] = []
-  const pattern = /(thay\s+thế|bãi\s+bỏ|sửa\s+đổi(?:\s*,\s*bổ\s+sung)?)\s+(?:(?:luật|nghị\s+định|thông\s+tư|quyết\s+định|nghị\s+quyết|pháp\s+lệnh)\s+)?(?:số\s+)?([0-9]+[A-Z]?\/[0-9]{4}\/[A-ZĐ0-9\-]+)/giu
+  const pattern = /(thay\s+thế|bãi\s+bỏ|sửa\s+đổi(?:\s*,\s*bổ\s+sung)?)\s+(?:(?:luật|nghị\s+định|thông\s+tư|quyết\s+định|nghị\s+quyết|pháp\s+lệnh)\s+)?(?:số\s+)?([0-9]+[A-Z]?\/[0-9]{4}\/[A-ZĐ0-9-]+)/giu
   for (const match of content.matchAll(pattern)) {
     const action = match[1].toLocaleLowerCase('vi-VN')
     const type = action.startsWith('thay') ? 'replaces' : action.startsWith('bãi') ? 'repeals' : 'amends'

@@ -30,17 +30,41 @@ export interface ChatCitation {
   pageNumber?: number
 }
 
+export type ChatPhase =
+  | 'routing'
+  | 'retrieving'
+  | 'evidence-ready'
+  | 'reasoning'
+  | 'generating'
+  | 'validating'
+  | 'complete'
+
+export interface ChatTelemetry {
+  route: string
+  totalMs: number
+  retrievalMs?: number
+  evidenceReadyMs?: number
+  firstTokenMs?: number
+  promptTokensEstimated?: number
+  maxOutputTokens?: number
+  contextWindow?: number
+  evidenceCount: number
+  remote: boolean
+}
+
 export interface ChatMessageMetadata {
   usage?: {
     promptTokens?: number
     completionTokens?: number
     totalTokens?: number
+    estimated?: boolean
   }
   model?: string
   finishReason?: string
   citations?: ChatCitation[]
   legalComparison?: LegalComparisonResult
   legalReasoning?: LegalReasoningResult
+  telemetry?: ChatTelemetry
 }
 
 /**
@@ -80,6 +104,7 @@ export interface StreamChunk {
       promptTokens?: number
       completionTokens?: number
       totalTokens?: number
+      estimated?: boolean
     }
     citations?: ChatCitation[]
     legalComparison?: LegalComparisonResult

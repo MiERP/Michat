@@ -9,6 +9,7 @@ import type {
 import { LEGAL_RELATION_TYPES } from '../../../shared/types/legalReasoning'
 import {
   LegalComparisonService,
+  getCanonicalLegalWorkKey,
   isLegalApplicabilityQuery,
   type LegalComparisonEvidence
 } from '../LegalComparisonService'
@@ -93,7 +94,7 @@ export function classifyLegalReasoningIntent(query: string): LegalReasoningInten
     return 'definition'
   }
   if (isLegalApplicabilityQuery(normalized)) return 'applicability'
-  if (/so\s*sánh|đối\s*chiếu|khác\s*nhau|mâu\s*thuẫn|xung\s*đột/iu.test(normalized)) {
+  if (/so\s*sánh|đối\s*chiếu|khác\s*nhau|mâu\s*thuẫn|xung\s*đột|quan\s*hệ|viện\s*dẫn|tham\s*chiếu/iu.test(normalized)) {
     return 'comparison'
   }
   return 'general'
@@ -103,28 +104,74 @@ function includesNormalized(content: string, evidenceText: string): boolean {
   return content.normalize('NFC').includes(evidenceText.normalize('NFC'))
 }
 
+function matchingSeedNodeIds(
+  graph: LegalDocumentGraph,
+  seed: LegalReasoningSeed
+): string[] {
+  const articleNumber = seed.legalContext?.articleNumber
+  const clauseNumber = seed.legalContext?.clauseNumber
+  const pointNumber = seed.legalContext?.pointNumber
+  const coordinateMatches = graph.nodes.filter((node) => {
+    if (!articleNumber || node.articleNumber !== articleNumber) return false
+    if (pointNumber) {
+      return node.clauseNumber === clauseNumber && node.pointNumber === pointNumber
+    }
+    if (clauseNumber) {
+      return node.clauseNumber === clauseNumber && !node.pointNumber
+    }
+    return !node.clauseNumber && !node.pointNumber
+  })
+
+  if (coordinateMatches.length > 0) return coordinateMatches.map((node) => node.id)
+  return graph.nodes.filter((node) => node.chunkId === seed.chunkId).map((node) => node.id)
+}
+
 function graphStatusForSeeds(
   repository: LegalReasoningRepository,
   seeds: LegalReasoningSeed[]
-): { status: LegalReasoningResult['graphStatus']; readyDocumentIds: Set<string> } {
-  const statuses = new Map<string, LegalGraphDocumentStatus['status']>()
+): {
+  status: LegalReasoningResult['graphStatus']
+  readyDocumentIds: Set<string>
+  limitations: string[]
+} {
+  const statuses = new Map<string, LegalGraphDocumentStatus>()
   for (const seed of seeds) {
     if (!statuses.has(seed.documentId)) {
-      statuses.set(seed.documentId, repository.getDocumentGraphStatus(seed.documentId).status)
+      statuses.set(seed.documentId, repository.getDocumentGraphStatus(seed.documentId))
     }
   }
-  const values = [...statuses.values()]
   const readyDocumentIds = new Set(
-    [...statuses.entries()].filter((entry) => entry[1] === 'ready').map((entry) => entry[0])
+    [...statuses.entries()]
+      .filter((entry) => entry[1].status === 'ready' || entry[1].relationCount > 0)
+      .map((entry) => entry[0])
   )
+  if (readyDocumentIds.size > 0) {
+    const limitations: string[] = []
+    if (
+      [...statuses.values()].some(
+        (item) =>
+          item.relationCount > 0 &&
+          (item.status === 'pending' || item.status === 'processing' || item.status === 'retry')
+      )
+    ) {
+      limitations.push('Legal graph refresh is pending; existing verified graph remains in use.')
+    }
+    if ([...statuses.values()].some((item) => item.relationCount > 0 && item.status === 'failed')) {
+      limitations.push('Legal graph refresh failed; existing verified graph remains in use.')
+    }
+    return { status: 'ready', readyDocumentIds, limitations }
+  }
+
+  const values = [...statuses.values()].map((item) => item.status)
   if (
     values.some((status) => status === 'pending' || status === 'processing' || status === 'retry')
   ) {
-    return { status: 'pending', readyDocumentIds }
+    return { status: 'pending', readyDocumentIds, limitations: [] }
   }
-  if (readyDocumentIds.size > 0) return { status: 'ready', readyDocumentIds }
-  if (values.some((status) => status === 'failed')) return { status: 'failed', readyDocumentIds }
-  return { status: 'unavailable', readyDocumentIds }
+  if (values.some((status) => status === 'failed')) {
+    return { status: 'failed', readyDocumentIds, limitations: [] }
+  }
+  return { status: 'unavailable', readyDocumentIds, limitations: [] }
 }
 
 function buildContext(paths: LegalReasoningPath[]): string {
@@ -183,6 +230,7 @@ export class LegalReasoningService {
 
     const notebookId = notebookIds[0]
     const graphState = graphStatusForSeeds(this.repository, seeds)
+    limitations.push(...graphState.limitations)
     if (graphState.status !== 'ready') {
       const messages = {
         pending: 'Legal graph extraction is still pending.',
@@ -200,13 +248,29 @@ export class LegalReasoningService {
       }
     }
 
+    const canonicalSeedWorkByDocumentId = new Map(
+      seeds.map((seed) => [
+        seed.documentId,
+        getCanonicalLegalWorkKey(seed.metadata) || `document:${seed.documentId}`
+      ])
+    )
+    const graphByDocumentId = new Map<string, LegalDocumentGraph>()
+    const nodeDocumentIdByNodeId = new Map<string, string>()
+    for (const documentId of graphState.readyDocumentIds) {
+      const graph = this.repository.getDocumentGraph(documentId)
+      graphByDocumentId.set(documentId, graph)
+      for (const node of graph.nodes) {
+        if (node.documentId) nodeDocumentIdByNodeId.set(node.id, node.documentId)
+      }
+    }
+
     const seedScoreByNodeId = new Map<string, number>()
     for (const seed of seeds) {
       if (!graphState.readyDocumentIds.has(seed.documentId)) continue
-      const graph = this.repository.getDocumentGraph(seed.documentId)
-      for (const node of graph.nodes) {
-        if (node.chunkId !== seed.chunkId) continue
-        seedScoreByNodeId.set(node.id, Math.max(seedScoreByNodeId.get(node.id) ?? 0, seed.score))
+      const graph = graphByDocumentId.get(seed.documentId)
+      if (!graph) continue
+      for (const nodeId of matchingSeedNodeIds(graph, seed)) {
+        seedScoreByNodeId.set(nodeId, Math.max(seedScoreByNodeId.get(nodeId) ?? 0, seed.score))
       }
     }
     if (seedScoreByNodeId.size === 0) {
@@ -230,8 +294,25 @@ export class LegalReasoningService {
       maxPaths: 20,
       minimumConfidence: MINIMUM_RELATION_CONFIDENCE
     })
+    const eligibleTraversalPaths =
+      intent === 'comparison'
+        ? traversalPaths.filter((path) => {
+            const canonicalWorks = new Set(
+              path.nodeIds.flatMap((nodeId) => {
+                const documentId = nodeDocumentIdByNodeId.get(nodeId)
+                const canonicalWork = documentId
+                  ? canonicalSeedWorkByDocumentId.get(documentId)
+                  : undefined
+                return canonicalWork ? [canonicalWork] : []
+              })
+            )
+            return canonicalWorks.size >= 2
+          })
+        : traversalPaths
     const requestedChunkIds = [
-      ...new Set(traversalPaths.flatMap((path) => path.steps.map((step) => step.evidenceChunkId)))
+      ...new Set(
+        eligibleTraversalPaths.flatMap((path) => path.steps.map((step) => step.evidenceChunkId))
+      )
     ]
     const evidenceByChunkId = new Map<string, LegalReasoningEvidence>()
     for (const seed of seeds) evidenceByChunkId.set(seed.chunkId, seed)
@@ -242,9 +323,10 @@ export class LegalReasoningService {
     const citationByChunkId = new Map(seeds.map((seed) => [seed.chunkId, seed.citationId]))
     let nextCitationId = Math.max(0, ...seeds.map((seed) => seed.citationId)) + 1
     let expandedEvidenceCount = 0
+    let rejectedForInvalidEvidence = false
     const acceptedPaths: LegalReasoningPath[] = []
 
-    for (const path of traversalPaths) {
+    for (const path of eligibleTraversalPaths) {
       if (path.steps.some((step) => step.confidence < MINIMUM_RELATION_CONFIDENCE)) continue
       let valid = true
       for (const step of path.steps) {
@@ -262,7 +344,10 @@ export class LegalReasoningService {
           expandedEvidenceCount++
         }
       }
-      if (!valid) continue
+      if (!valid) {
+        rejectedForInvalidEvidence = true
+        continue
+      }
 
       const seedScore = seedScoreByNodeId.get(path.nodeIds[0]) ?? 0
       const confidenceProduct = path.steps.reduce((product, step) => product * step.confidence, 1)
@@ -294,8 +379,12 @@ export class LegalReasoningService {
     }
 
     acceptedPaths.sort((left, right) => right.score - left.score)
-    const paths = acceptedPaths.slice(0, MAX_REASONING_PATHS)
-    if (paths.length === 0 && traversalPaths.length > 0) {
+    const bestMultiHopPath = acceptedPaths.find((path) => path.steps.length >= 2)
+    const paths = [
+      ...(bestMultiHopPath ? [bestMultiHopPath] : []),
+      ...acceptedPaths.filter((path) => path !== bestMultiHopPath)
+    ].slice(0, MAX_REASONING_PATHS)
+    if (paths.length === 0 && rejectedForInvalidEvidence) {
       limitations.push('Graph paths were rejected because source evidence could not be validated.')
     }
     const usedCitationIds = new Set(

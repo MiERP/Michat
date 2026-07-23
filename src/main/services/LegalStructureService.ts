@@ -33,9 +33,9 @@ export interface LegalChunkContext {
   modalities?: LegalModalityTag[]
 }
 
-const CHAPTER_PATTERN = /^\s*chương\s+([ivxlcdm]+|\d+[a-z]?)\s*[.:\-]?\s*(.*)$/iu
-const SECTION_PATTERN = /^\s*mục\s+(\d+[a-z]?)\s*[.:\-]?\s*(.*)$/iu
-const ARTICLE_PATTERN = /^\s*điều\s+(\d+[a-z]?)\s*[.:\-]\s*(.*)$/iu
+const CHAPTER_PATTERN = /^\s*chương\s+([ivxlcdm]+|\d+[a-z]?)\s*[.:-]?\s*(.*)$/iu
+const SECTION_PATTERN = /^\s*mục\s+(\d+[a-z]?)\s*[.:-]?\s*(.*)$/iu
+const ARTICLE_PATTERN = /^\s*điều\s+(\d+[a-z]?)\s*[.:-]\s*(.*)$/iu
 const CLAUSE_PATTERN = /^\s*(\d+[a-z]?)\s*[.)]\s*(.*)$/iu
 const POINT_PATTERN = /^\s*([a-zđ])\)\s*(.*)$/iu
 

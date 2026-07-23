@@ -46,6 +46,42 @@ function candidate(documentId: string, relationCount: number): LegalGraphCandida
   }
 }
 
+function legacySharedCandidate(documentId: string): LegalGraphCandidate {
+  const chunkId = 'chunk-' + documentId
+  return {
+    nodes: [
+      {
+        localId: 'shared-action',
+        nodeType: 'action',
+        canonicalKey: 'action:shared-filing',
+        label: 'Shared filing action',
+        aliases: [],
+        chunkId
+      },
+      {
+        localId: 'sanction',
+        nodeType: 'sanction',
+        canonicalKey: documentId + ':sanction',
+        label: 'Sanction ' + documentId,
+        aliases: [],
+        chunkId
+      }
+    ],
+    relations: [
+      {
+        sourceLocalId: 'shared-action',
+        targetLocalId: 'sanction',
+        relationType: 'sanction_for',
+        evidenceChunkId: chunkId,
+        evidenceText: 'evidence',
+        evidenceStartOffset: 0,
+        evidenceEndOffset: 8,
+        confidence: 0.9
+      }
+    ]
+  }
+}
+
 describe('LegalGraphRepository', () => {
   let database: Database.Database
   let repository: LegalGraphRepository
@@ -97,6 +133,87 @@ describe('LegalGraphRepository', () => {
 
     expect(repository.getDocumentGraph(documentA).relations).toHaveLength(1)
     expect(repository.getDocumentGraph(documentB).relations).toHaveLength(2)
+  })
+
+  it('links external document references to a canonical document node in the notebook', () => {
+    database
+      .prepare('UPDATE documents SET metadata = ? WHERE id = ?')
+      .run(JSON.stringify({ legalDocument: { documentNumber: '24/2018/QH14' } }), documentB)
+    repository.replaceDocumentGraph(
+      documentB,
+      {
+        nodes: [
+          {
+            localId: 'target-document',
+            nodeType: 'document',
+            canonicalKey: 'document:luật:24/2018/QH14',
+            label: 'Luật 24/2018/QH14',
+            aliases: []
+          }
+        ],
+        relations: []
+      },
+      provenance
+    )
+    repository.replaceDocumentGraph(
+      documentA,
+      {
+        nodes: [
+          {
+            localId: 'source-article',
+            nodeType: 'article',
+            canonicalKey: 'article:source:1',
+            label: 'Điều 1',
+            aliases: [],
+            chunkId: `chunk-${documentA}`,
+            articleNumber: '1'
+          },
+          {
+            localId: 'external-target',
+            nodeType: 'external_reference',
+            canonicalKey: 'external-document:24/2018/QH14',
+            label: '24/2018/QH14',
+            aliases: [],
+            metadata: { documentNumber: '24/2018/QH14', unresolved: true }
+          }
+        ],
+        relations: [
+          {
+            sourceLocalId: 'source-article',
+            targetLocalId: 'external-target',
+            relationType: 'references',
+            evidenceChunkId: `chunk-${documentA}`,
+            evidenceText: '24/2018/QH14',
+            evidenceStartOffset: 0,
+            evidenceEndOffset: 13,
+            confidence: 1
+          }
+        ]
+      },
+      provenance
+    )
+
+    const targetDocumentNode = repository
+      .getDocumentGraph(documentB)
+      .nodes.find((node) => node.nodeType === 'document')
+    expect(repository.getDocumentGraph(documentA).relations[0].targetNodeId).toBe(
+      targetDocumentNode?.id
+    )
+  })
+
+  it('cleans legacy shared semantic nodes after versioned replacement', () => {
+    repository.replaceDocumentGraph(documentA, legacySharedCandidate(documentA), provenance)
+    repository.replaceDocumentGraph(documentB, legacySharedCandidate(documentB), provenance)
+
+    repository.replaceDocumentGraph(documentA, candidate(documentA, 1), provenance)
+    repository.replaceDocumentGraph(documentB, candidate(documentB, 1), provenance)
+
+    const legacyNodeCount = database
+      .prepare('SELECT COUNT(*) AS count FROM legal_nodes WHERE canonical_key = ?')
+      .get('action:shared-filing') as { count: number }
+    expect(legacyNodeCount.count).toBe(0)
+    expect(repository.getDocumentGraph(documentA).relations).toHaveLength(1)
+    expect(repository.getDocumentGraph(documentB).relations).toHaveLength(1)
   })
 
   it('keeps the previous graph when replacement validation fails', () => {

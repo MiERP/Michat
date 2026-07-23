@@ -15,9 +15,11 @@ export interface RerankCandidate {
 
 export interface RerankOptions {
   enabled?: boolean
+  localOnly?: boolean
   topN?: number
   model?: string
   heuristicFallback?: boolean
+  timeoutMs?: number
 }
 
 export interface RerankOutcome {
@@ -34,7 +36,7 @@ export class RerankService {
     candidates: RerankCandidate[],
     options: RerankOptions = {}
   ): Promise<RerankOutcome> {
-    if (!options.enabled || candidates.length <= 1) {
+    if (!options.enabled || candidates.length === 0) {
       return {
         orderedIds: candidates.map((c) => c.id),
         scores: new Map(candidates.map((c) => [c.id, c.baseScore])),
@@ -44,7 +46,15 @@ export class RerankService {
 
     const topN = Math.min(Math.max(options.topN ?? candidates.length, 1), candidates.length)
 
-    const providerOutcome = await this.tryProviderRerank(query, candidates, topN, options.model)
+    const providerOutcome = options.localOnly
+      ? null
+      : await this.tryProviderRerank(
+          query,
+          candidates,
+          topN,
+          options.model,
+          options.timeoutMs ?? 650
+        )
     if (providerOutcome) {
       return providerOutcome
     }
@@ -64,7 +74,8 @@ export class RerankService {
     query: string,
     candidates: RerankCandidate[],
     topN: number,
-    model?: string
+    model?: string,
+    timeoutMs = 650
   ): Promise<RerankOutcome | null> {
     try {
       const provider = await this.providerManager.getActiveRerankProvider(model)
@@ -78,10 +89,15 @@ export class RerankService {
       }))
 
       const modelId = this.extractModelId(model)
-      const rerankResults = await provider.rerank(query, documents, {
-        model: modelId || provider.getDefaultRerankModel?.(),
-        topN
-      })
+      const rerankResults = await Promise.race([
+        provider.rerank(query, documents, {
+          model: modelId || provider.getDefaultRerankModel?.(),
+          topN
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Rerank deadline exceeded: ${timeoutMs}ms`)), timeoutMs)
+        )
+      ])
 
       if (!rerankResults || rerankResults.length === 0) {
         return null
@@ -124,9 +140,25 @@ export class RerankService {
     topN: number
   ): RerankOutcome {
     const queryTokens = this.tokenize(query)
+    const tokenizedDocuments = candidates.map((candidate) => this.tokenize(candidate.text))
+    const documentFrequency = new Map<string, number>()
+    for (const tokens of tokenizedDocuments) {
+      for (const token of new Set(tokens)) {
+        documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1)
+      }
+    }
+    const averageLength =
+      tokenizedDocuments.reduce((sum, tokens) => sum + tokens.length, 0) /
+      Math.max(tokenizedDocuments.length, 1)
     const scored = candidates.map((candidate) => {
-      const lexical = this.lexicalScore(queryTokens, this.tokenize(candidate.text))
-      // Blend semantic base score with lexical overlap.
+      const index = candidates.indexOf(candidate)
+      const lexical = this.bm25Score(
+        queryTokens,
+        tokenizedDocuments[index],
+        documentFrequency,
+        candidates.length,
+        averageLength
+      )
       const score = candidate.baseScore * 0.65 + lexical * 0.35
       return { id: candidate.id, score }
     })
@@ -157,18 +189,25 @@ export class RerankService {
       .filter((token) => token.length >= 2)
   }
 
-  private lexicalScore(queryTokens: string[], docTokens: string[]): number {
-    if (queryTokens.length === 0 || docTokens.length === 0) return 0
-
-    const docSet = new Set(docTokens)
-    let hits = 0
-    for (const token of queryTokens) {
-      if (docSet.has(token)) {
-        hits += 1
-      }
+  private bm25Score(
+    queryTokens: string[],
+    documentTokens: string[],
+    documentFrequency: Map<string, number>,
+    documentCount: number,
+    averageLength: number
+  ): number {
+    if (!queryTokens.length || !documentTokens.length) return 0
+    const frequencies = new Map<string, number>()
+    documentTokens.forEach((token) => frequencies.set(token, (frequencies.get(token) || 0) + 1))
+    let score = 0
+    for (const token of new Set(queryTokens)) {
+      const frequency = frequencies.get(token) || 0
+      if (!frequency) continue
+      const idf = Math.log(1 + (documentCount - (documentFrequency.get(token) || 0) + 0.5) / ((documentFrequency.get(token) || 0) + 0.5))
+      const denominator = frequency + 1.2 * (0.25 + 0.75 * (documentTokens.length / Math.max(averageLength, 1)))
+      score += idf * ((frequency * 2.2) / denominator)
     }
-
-    return hits / queryTokens.length
+    return score / (score + 1)
   }
 
   private getBaseScore(candidates: RerankCandidate[], id: string): number | undefined {

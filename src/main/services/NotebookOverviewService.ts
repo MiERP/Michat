@@ -6,7 +6,9 @@ import { chunks, documents, notebookOverviews } from '../db/schema'
 import { ProviderManager } from '../providers/ProviderManager'
 import { AISDKProvider } from '../providers/base/AISDKProvider'
 import type { NotebookOverview } from '../../shared/types/notebookOverview'
+import type { ChatCitation } from '../../shared/types/chat'
 import Logger from '../../shared/utils/logger'
+import { finalizeChatEvidence } from './chatEvidence'
 import {
   buildNotebookOverviewSource,
   limitWords,
@@ -37,6 +39,7 @@ export class NotebookOverviewService {
       id: record.id,
       notebookId: record.notebookId,
       content: record.content,
+      citations: record.citations as unknown as ChatCitation[],
       sourceFingerprint: record.sourceFingerprint,
       status: record.status as 'fresh' | 'stale',
       model: record.model,
@@ -71,6 +74,20 @@ export class NotebookOverviewService {
       throw new Error('No indexed documents available to create a notebook overview')
     }
 
+    const canonicalDocuments = new Map<string, (typeof docs)[number]>()
+    for (const doc of docs) {
+      const metadata = (doc.metadata as Record<string, unknown> | null) || {}
+      const key =
+        (metadata.canonicalLegalWorkKey as string | undefined) ||
+        (metadata.canonicalGraphDocumentId as string | undefined) ||
+        doc.id
+      const current = canonicalDocuments.get(key)
+      if (!current || doc.id === (metadata.canonicalGraphDocumentId as string | undefined)) {
+        canonicalDocuments.set(key, doc)
+      }
+    }
+    const overviewDocuments = [...canonicalDocuments.values()]
+
     const provider = await this.providerManager.getActiveChatProvider()
     if (!provider) throw new Error('No active chat provider configured')
     if (!(provider instanceof AISDKProvider)) {
@@ -80,18 +97,19 @@ export class NotebookOverviewService {
     const model = provider.getAIModel()
     const modelName = provider.name
     const sourceDocuments: NotebookOverviewSourceDocument[] = []
+    const sourceCitations: ChatCitation[] = []
     let totalChunks = 0
 
     Logger.info(
       'NotebookOverviewService',
-      'Starting: ' + docs.length + ' docs, model: ' + modelName
+      'Starting: ' + overviewDocuments.length + ' canonical works, model: ' + modelName
     )
     onProgress?.('preparing_sources', 5)
 
-    for (let index = 0; index < docs.length; index++) {
+    for (let index = 0; index < overviewDocuments.length; index++) {
       if (abortSignal?.aborted) throw new Error('Notebook overview generation cancelled')
 
-      const doc = docs[index]
+      const doc = overviewDocuments[index]
       const docChunks = db
         .select()
         .from(chunks)
@@ -102,6 +120,7 @@ export class NotebookOverviewService {
 
       sourceDocuments.push({
         index: index + 1,
+        citationId: index + 1,
         title: doc.title,
         chunks: docChunks.map((chunk) => ({
           chunkIndex: chunk.chunkIndex,
@@ -109,7 +128,24 @@ export class NotebookOverviewService {
         }))
       })
 
-      onProgress?.('preparing_sources', 5 + Math.round(((index + 1) / docs.length) * 30))
+      const citationChunk = docChunks[0]
+      if (citationChunk) {
+        sourceCitations.push({
+          index: index + 1,
+          documentId: doc.id,
+          documentTitle: doc.title,
+          chunkId: citationChunk.id,
+          chunkIndex: citationChunk.chunkIndex,
+          score: 1,
+          snippet: citationChunk.content.replace(/\s+/gu, ' ').trim().slice(0, 240),
+          sourceUri: doc.sourceUri || undefined
+        })
+      }
+
+      onProgress?.(
+        'preparing_sources',
+        5 + Math.round(((index + 1) / overviewDocuments.length) * 30)
+      )
     }
 
     const sourceText = buildNotebookOverviewSource(sourceDocuments)
@@ -120,15 +156,19 @@ export class NotebookOverviewService {
         ' chars from ' +
         totalChunks +
         ' chunks across ' +
-        docs.length +
-        ' docs, 1 LLM request'
+        overviewDocuments.length +
+        ' canonical works, 1 LLM request'
     )
 
     onProgress?.('synthesizing_overview', 40)
     if (abortSignal?.aborted) throw new Error('Notebook overview generation cancelled')
 
     const generatedContent = await this.synthesizeOverview(model, sourceText, abortSignal)
-    const overviewContent = limitWords(generatedContent, MAX_OUTPUT_WORDS)
+    const finalizedOverview = finalizeChatEvidence(
+      limitWords(generatedContent, MAX_OUTPUT_WORDS),
+      sourceCitations
+    )
+    const overviewContent = finalizedOverview.content
     if (!overviewContent) throw new Error('Model returned an empty notebook overview')
 
     onProgress?.('saving', 90)
@@ -144,7 +184,7 @@ export class NotebookOverviewService {
       db.update(notebookOverviews)
         .set({
           content: overviewContent,
-          citations: [],
+          citations: finalizedOverview.citations as unknown as Record<string, unknown>[],
           sourceFingerprint: fingerprint,
           status: 'fresh',
           model: modelName,
@@ -159,7 +199,7 @@ export class NotebookOverviewService {
           id: 'overview_' + randomUUID(),
           notebookId,
           content: overviewContent,
-          citations: [],
+          citations: finalizedOverview.citations as unknown as Record<string, unknown>[],
           sourceFingerprint: fingerprint,
           status: 'fresh',
           model: modelName,
@@ -176,8 +216,8 @@ export class NotebookOverviewService {
       'Done in ' +
         (Date.now() - startedAt) +
         'ms: ' +
-        docs.length +
-        ' docs, ' +
+        overviewDocuments.length +
+        ' canonical works, ' +
         totalChunks +
         ' chunks, ' +
         outputWords +
@@ -198,7 +238,7 @@ export class NotebookOverviewService {
       'Chỉ gồm một tiêu đề ngắn và hai đoạn văn cô đọng.',
       'Bao quát chủ đề, phạm vi, quy định hoặc kết luận quan trọng nhất từ toàn bộ nguồn.',
       'Không phân tích chuyên sâu, không lặp ý, không suy diễn hoặc thêm kiến thức ngoài nguồn.',
-      'Không chèn ký hiệu nguồn, số tham chiếu, liên kết hoặc danh sách gạch đầu dòng.',
+      'Mỗi đoạn phải có ít nhất một trích dẫn [n] tương ứng với số nguồn; không dùng số ngoài nguồn.',
       '',
       '--- NGUỒN ĐÃ CHỌN CỤC BỘ ---',
       sourceText,

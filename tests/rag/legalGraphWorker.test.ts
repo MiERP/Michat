@@ -11,7 +11,7 @@ function createJob() {
     notebookId: 'notebook-1',
     documentId: 'document-1',
     status: 'processing',
-    extractorVersion: '1',
+    extractorVersion: '2',
     promptVersion: '1',
     ontologyVersion: '1',
     model: null,
@@ -45,7 +45,7 @@ function createDependencies() {
     retryDocument: vi.fn()
   }
   const extractor = {
-    extractDocument: vi.fn(async (_document, chunks, _model, _signal, onProgress) => {
+    extractDocument: vi.fn(async (_document, chunks, _signal, onProgress) => {
       onProgress?.(chunks.length, chunks.length)
       return {
         nodes: [],
@@ -137,6 +137,12 @@ describe('LegalGraphWorker', () => {
       expect.objectContaining({
         documentId: 'document-1',
         status: 'processing',
+        processedUnitCount: 0,
+        sourceUnitCount: 1
+      }),
+      expect.objectContaining({
+        documentId: 'document-1',
+        status: 'processing',
         processedUnitCount: 1,
         sourceUnitCount: 1
       }),
@@ -150,6 +156,30 @@ describe('LegalGraphWorker', () => {
     expect(JSON.stringify(progressEvents)).not.toContain('chunk-1')
   })
 
+  it('publishes 0/source progress before deterministic extraction', async () => {
+    let progressAtExtraction: Record<string, unknown> | undefined
+    dependencies.extractor.extractDocument.mockImplementation(async (_document, chunks) => {
+      progressAtExtraction = progressEvents[0]
+      return {
+        nodes: [],
+        relations: [],
+        sourceUnitCount: chunks.length,
+        processedUnitCount: chunks.length
+      }
+    })
+
+    await worker.runOnce()
+
+    expect(progressAtExtraction).toEqual(
+      expect.objectContaining({
+        documentId: 'document-1',
+        status: 'processing',
+        processedUnitCount: 0,
+        sourceUnitCount: 1
+      })
+    )
+  })
+
   it('does not claim work while chat is active', async () => {
     worker.setChatActive(true)
 
@@ -157,7 +187,7 @@ describe('LegalGraphWorker', () => {
     expect(dependencies.repository.claimNextJob).not.toHaveBeenCalled()
   })
 
-  it('retries transient model failure and preserves old graph', async () => {
+  it('retries transient extraction failure and preserves old graph', async () => {
     dependencies.extractor.extractDocument.mockRejectedValue(
       new LegalGraphRetryableError('model unavailable')
     )
@@ -188,13 +218,14 @@ describe('LegalGraphWorker', () => {
       expect.any(Date),
       30_000
     )
+    expect(dependencies.providerManager.getActiveChatLanguageModel).not.toHaveBeenCalled()
     expect(dependencies.repository.replaceDocumentGraph).toHaveBeenCalledWith(
       dependencies.job.documentId,
       expect.objectContaining({ sourceUnitCount: 1, processedUnitCount: 1 }),
       {
-        model: 'llama:local-model',
-        extractorVersion: '1',
-        promptVersion: '1',
+        model: 'deterministic-parser',
+        extractorVersion: '4',
+        promptVersion: 'deterministic-vietnamese-2',
         ontologyVersion: '1'
       }
     )
@@ -205,9 +236,9 @@ describe('LegalGraphWorker', () => {
 
     expect(dependencies.repository.recoverExpiredLeases).toHaveBeenCalledOnce()
     expect(dependencies.repository.enqueueStaleDocuments).toHaveBeenCalledWith({
-      model: '',
-      extractorVersion: '1',
-      promptVersion: '1',
+      model: 'deterministic-parser',
+      extractorVersion: '4',
+      promptVersion: 'deterministic-vietnamese-2',
       ontologyVersion: '1'
     })
     await worker.stop()

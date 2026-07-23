@@ -1,19 +1,11 @@
-import type { LanguageModel } from 'ai'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { Chunk, Document } from '../../src/main/db/schema'
 import { LegalGraphExtractionService } from '../../src/main/services/legalGraph/LegalGraphExtractionService'
-
-const generateTextMock = vi.hoisted(() => vi.fn())
-
-vi.mock('ai', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('ai')>()),
-  generateText: generateTextMock
-}))
 
 const document = {
   id: 'document-1',
   notebookId: 'notebook-1',
-  title: 'Law source',
+  title: 'Luật thử nghiệm',
   type: 'text',
   sourceUri: null,
   localFilePath: null,
@@ -22,143 +14,130 @@ const document = {
   contentHash: null,
   mimeType: null,
   fileSize: null,
-  metadata: {},
+  metadata: {
+    canonicalLegalWorkKey: 'luật:12/2026/QH15',
+    legalDocument: {
+      documentNumber: '12/2026/QH15',
+      documentType: 'Luật',
+      status: 'unknown',
+      amendsDocumentIds: [],
+      replacesDocumentIds: [],
+      repealedByDocumentIds: []
+    }
+  },
   status: 'indexed',
   errorMessage: null,
-  chunkCount: 1,
+  chunkCount: 2,
   createdAt: new Date('2026-07-22T00:00:00.000Z'),
   updatedAt: new Date('2026-07-22T00:00:00.000Z')
 } satisfies Document
 
-const chunk = {
-  id: 'chunk-1',
-  documentId: document.id,
-  notebookId: document.notebookId,
-  content: '1. Doanh nghi\u1ec7p ph\u1ea3i n\u1ed9p h\u1ed3 s\u01a1 trong 10 ng\u00e0y.',
-  chunkIndex: 0,
-  startOffset: 100,
-  endOffset: 148,
-  metadata: {
-    legalContext: {
-      articleNumber: '15',
-      articleTitle: 'Deadline',
-      clauseNumber: '1'
-    }
-  },
-  tokenCount: 20,
-  createdAt: new Date('2026-07-22T00:00:00.000Z')
-} satisfies Chunk
-
-const activeModel = {
-  model: { modelId: 'local-test-model' } as LanguageModel,
-  provenance: 'llama:local-test-model'
-}
-
-const validOutput = {
-  nodes: [
-    {
-      localId: 'subject-1',
-      type: 'subject',
-      label: 'Doanh nghi\u1ec7p',
-      aliases: []
+function legalChunk(
+  id: string,
+  articleNumber: string,
+  content: string,
+  startOffset: number
+): Chunk {
+  return {
+    id,
+    documentId: document.id,
+    notebookId: document.notebookId,
+    content,
+    chunkIndex: Number(articleNumber),
+    startOffset,
+    endOffset: startOffset + content.length,
+    metadata: {
+      kind: 'legal-content',
+      legalContext: { articleNumber, articleTitle: `Điều ${articleNumber}` }
     },
-    {
-      localId: 'action-1',
-      type: 'action',
-      label: 'n\u1ed9p h\u1ed3 s\u01a1 trong 10 ng\u00e0y',
-      aliases: []
-    }
-  ],
-  relations: [
-    {
-      source: 'subject-1',
-      target: 'action-1',
-      type: 'requires',
-      confidence: 0.91,
-      evidenceText: 'ph\u1ea3i n\u1ed9p h\u1ed3 s\u01a1'
-    }
-  ]
+    tokenCount: 20,
+    createdAt: new Date('2026-07-22T00:00:00.000Z')
+  }
 }
 
 describe('LegalGraphExtractionService', () => {
-  beforeEach(() => generateTextMock.mockReset())
-
-  it('accepts evidence-backed closed triples', async () => {
-    generateTextMock.mockResolvedValue({ experimental_output: validOutput })
+  it('builds deterministic structural nodes and evidence-backed internal references', async () => {
+    const chunks = [
+      legalChunk('chunk-15', '15', 'Điều 15. Thực hiện theo Điều 16 của Luật này.', 100),
+      legalChunk('chunk-16', '16', 'Điều 16. Trách nhiệm thi hành.', 200)
+    ]
+    const progress: Array<[number, number]> = []
 
     const candidate = await new LegalGraphExtractionService().extractDocument(
       document,
-      [chunk],
-      activeModel
+      chunks,
+      undefined,
+      (processed, total) => progress.push([processed, total])
     )
 
-    expect(candidate.sourceUnitCount).toBe(1)
-    expect(candidate.processedUnitCount).toBe(1)
+    expect(candidate).toMatchObject({ sourceUnitCount: 2, processedUnitCount: 2 })
     expect(candidate.nodes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ nodeType: 'document' }),
+        expect.objectContaining({ nodeType: 'document', canonicalKey: 'document:luật:12/2026/QH15' }),
         expect.objectContaining({ nodeType: 'article', articleNumber: '15' }),
-        expect.objectContaining({ nodeType: 'clause', clauseNumber: '1' })
+        expect.objectContaining({ nodeType: 'article', articleNumber: '16' })
       ])
     )
     expect(candidate.relations).toEqual([
       expect.objectContaining({
-        relationType: 'requires',
-        evidenceChunkId: chunk.id,
-        evidenceText: 'ph\u1ea3i n\u1ed9p h\u1ed3 s\u01a1',
-        evidenceStartOffset: 116,
-        evidenceEndOffset: 130
+        relationType: 'references',
+        evidenceChunkId: 'chunk-15',
+        evidenceText: 'Điều 16',
+        confidence: 1
       })
+    ])
+    expect(progress).toEqual([
+      [1, 2],
+      [2, 2]
     ])
   })
 
-  it('rejects invented evidence', async () => {
-    generateTextMock.mockResolvedValue({
-      experimental_output: {
-        ...validOutput,
-        relations: [{ ...validOutput.relations[0], evidenceText: 'invented quote' }]
-      }
-    })
+  it('uses canonical legal work identity across physical source variants', async () => {
+    const first = await new LegalGraphExtractionService().extractDocument(document, [
+      legalChunk('chunk-15', '15', 'Điều 15. Quyền của chủ thể.', 100)
+    ])
+    const secondDocument = { ...document, id: 'document-2' }
+    const secondChunk = {
+      ...legalChunk('chunk-15-pdf', '15', 'Điều 15. Quyền của chủ thể.', 100),
+      documentId: secondDocument.id
+    }
+    const second = await new LegalGraphExtractionService().extractDocument(secondDocument, [secondChunk])
 
-    await expect(
-      new LegalGraphExtractionService().extractDocument(document, [chunk], activeModel)
-    ).rejects.toThrow('Evidence text is not present in source chunk')
+    expect(first.nodes.find((node) => node.nodeType === 'article')?.canonicalKey).toBe(
+      second.nodes.find((node) => node.nodeType === 'article')?.canonicalKey
+    )
   })
 
-  it('rejects unknown predicates even when provider bypasses structured validation', async () => {
-    generateTextMock.mockResolvedValue({
-      experimental_output: {
-        ...validOutput,
-        relations: [{ ...validOutput.relations[0], type: 'causes' }]
-      }
-    })
-
+  it('rejects chunks crossing document or notebook boundaries', async () => {
     await expect(
-      new LegalGraphExtractionService().extractDocument(document, [chunk], activeModel)
-    ).rejects.toThrow()
-  })
-
-  it('rejects relations with unknown endpoints', async () => {
-    generateTextMock.mockResolvedValue({
-      experimental_output: {
-        ...validOutput,
-        relations: [{ ...validOutput.relations[0], target: 'missing-node' }]
-      }
-    })
-
-    await expect(
-      new LegalGraphExtractionService().extractDocument(document, [chunk], activeModel)
-    ).rejects.toThrow('Legal graph relation references an unknown extracted node')
-  })
-
-  it('requires every chunk to belong to the source document and notebook', async () => {
-    await expect(
-      new LegalGraphExtractionService().extractDocument(
-        document,
-        [{ ...chunk, notebookId: 'other-notebook' }],
-        activeModel
-      )
+      new LegalGraphExtractionService().extractDocument(document, [
+        { ...legalChunk('chunk-15', '15', 'Điều 15. Nội dung.', 100), notebookId: 'other' }
+      ])
     ).rejects.toThrow('Legal graph source crosses document or notebook boundary')
-    expect(generateTextMock).not.toHaveBeenCalled()
+  })
+
+  it('extracts evidence-backed Vietnamese obligation and sanction semantics', async () => {
+    const candidate = await new LegalGraphExtractionService().extractDocument(document, [
+      legalChunk(
+        'chunk-20',
+        '20',
+        'Điều 20. Doanh nghiệp phải nộp hồ sơ đúng hạn. Doanh nghiệp vi phạm bị phạt tiền từ 10.000.000 đồng.',
+        300
+      )
+    ])
+
+    expect(candidate.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ nodeType: 'subject', label: 'Doanh nghiệp' }),
+        expect.objectContaining({ nodeType: 'action', label: 'nộp hồ sơ đúng hạn' }),
+        expect.objectContaining({ nodeType: 'sanction', label: expect.stringContaining('phạt tiền') })
+      ])
+    )
+    expect(candidate.relations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ relationType: 'requires', evidenceChunkId: 'chunk-20' }),
+        expect.objectContaining({ relationType: 'sanction_for', evidenceChunkId: 'chunk-20' })
+      ])
+    )
   })
 })

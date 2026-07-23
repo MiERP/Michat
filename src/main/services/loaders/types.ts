@@ -16,6 +16,11 @@ export interface PageInfo {
     height?: number
     hasImages?: boolean
     imageCount?: number
+    extractionMethod?: 'text' | 'ocr' | 'mixed'
+    textQuality?: number
+    ocrConfidence?: number
+    layout?: 'single-column' | 'two-column' | 'unknown'
+    warnings?: string[]
     [key: string]: unknown
   }
 }
@@ -58,7 +63,7 @@ export interface DocumentLoadResult {
 export interface LoadOptions {
   preserveStructure?: boolean // 是否保留结构信息（默认 true）
   extractImages?: boolean // 是否提取图片信息（默认 false，预留）
-  ocrEnabled?: boolean // 是否启用 OCR（默认 false，预留）
+  ocrEnabled?: boolean // Chỉ OCR trang có chất lượng text thấp; mặc định true cho PDF
   password?: string // PDF 密码（预留）
 }
 
