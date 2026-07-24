@@ -8,7 +8,9 @@ import {
   Loader2,
   StickyNote,
   ArrowLeft,
-  FolderUp
+  FolderUp,
+  Pencil,
+  RefreshCw
 } from 'lucide-react'
 import { useKnowledgeStore, setupKnowledgeListeners } from '../../store/knowledgeStore'
 import { useItemStore } from '../../store/itemStore'
@@ -23,6 +25,11 @@ import { Card } from '../ui/card'
 import { PanelHeader } from '../ui/panel-header'
 import DocumentList from './source/DocumentList'
 import type { KnowledgeDocument } from '../../../../shared/types/knowledge'
+import type {
+  DocumentMetadata,
+  DocumentMetadataField,
+  DocumentMetadataInspector
+} from '../../../../main/services/DocumentMetadataExtractionService'
 
 type AddSourceType = 'text' | 'note'
 
@@ -50,7 +57,7 @@ function AddSourceModal({
   // 状态会在组件重新挂载时自动重置（通过父组件的 key 属性）
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
-  
+
   const [selectedNoteId, setSelectedNoteId] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -65,12 +72,9 @@ function AddSourceModal({
   // 判断是否可以提交
   const canSubmit =
     !isLoading &&
-    (
-      (type === 'text' && title.trim() && content.trim()) ||
-      (type === 'note' && selectedNoteId))
+    ((type === 'text' && title.trim() && content.trim()) || (type === 'note' && selectedNoteId))
 
   const getTitle = () => {
-
     if (type === 'text') return t('pasteText')
     if (type === 'note') return t('importNote')
     return ''
@@ -84,7 +88,6 @@ function AddSourceModal({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-
           {type === 'text' && (
             <div className="flex flex-col gap-4">
               <Input
@@ -133,6 +136,329 @@ function AddSourceModal({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface MetadataModalProps {
+  document: KnowledgeDocument
+  onClose: () => void
+  onSaved: () => void
+}
+
+const metadataStatusLabels: Record<string, string> = {
+  extracted: 'Tự động trích xuất',
+  user_corrected: 'Người dùng đã sửa',
+  unknown: 'Chưa xác định'
+}
+
+function InspectorField({
+  label,
+  field,
+  children
+}: {
+  label: string
+  field?: DocumentMetadataField
+  children: React.ReactNode
+}): ReactElement {
+  return (
+    <div className="space-y-1 rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-sm font-medium">{label}</label>
+        <span className="text-[11px] text-muted-foreground">
+          {field ? metadataStatusLabels[field.status] : 'Chưa xác định'}
+          {field ? ` · ${Math.round(field.confidence * 100)}%` : ''}
+        </span>
+      </div>
+      {children}
+      {field?.evidence && (
+        <div className="rounded bg-muted/60 p-2 text-xs text-muted-foreground">
+          “{field.evidence.text}”
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatMetadataDate(value?: string): string | undefined {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value
+}
+
+function MetadataSummaryField({
+  label,
+  value,
+  field,
+  multiline = false
+}: {
+  label: string
+  value?: string
+  field?: DocumentMetadataField
+  multiline?: boolean
+}): ReactElement {
+  return (
+    <div className="min-w-0 rounded-md border border-border/70 bg-background/60 p-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {field ? metadataStatusLabels[field.status] : 'Chưa xác định'}
+          {field ? ` · ${Math.round(field.confidence * 100)}%` : ''}
+        </span>
+      </div>
+      <p
+        className={`mt-1 whitespace-pre-wrap text-xs leading-5 ${
+          multiline ? 'line-clamp-4' : 'truncate'
+        } ${value ? 'text-foreground' : 'text-muted-foreground'}`}
+        title={value}
+      >
+        {value || 'Chưa xác định'}
+      </p>
+    </div>
+  )
+}
+
+function MetadataSummaryPanel({
+  document,
+  onEdit,
+  onReextract
+}: {
+  document: KnowledgeDocument | null
+  onEdit: (document: KnowledgeDocument) => void
+  onReextract: (document: KnowledgeDocument) => Promise<void>
+}): ReactElement {
+  const [isReextracting, setIsReextracting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => setError(''), [document?.id])
+
+  if (!document) {
+    return (
+      <section
+        className="shrink-0 border-t border-border bg-muted/20 p-4"
+        aria-label="Thông tin pháp lý"
+      >
+        <p className="text-center text-xs text-muted-foreground">
+          Chọn tài liệu để xem thông tin pháp lý
+        </p>
+      </section>
+    )
+  }
+
+  const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
+  const existing = (rootMetadata.documentMetadata as Partial<DocumentMetadata> | undefined) || {}
+  const inspector = rootMetadata.documentMetadataInspector as DocumentMetadataInspector | undefined
+  const handleReextract = async () => {
+    try {
+      setIsReextracting(true)
+      setError('')
+      await onReextract(document)
+    } catch (extractError) {
+      setError((extractError as Error).message || 'Không thể trích xuất lại thông tin pháp lý.')
+    } finally {
+      setIsReextracting(false)
+    }
+  }
+
+  return (
+    <section
+      className="max-h-[48%] shrink-0 overflow-y-auto border-t border-border bg-muted/20"
+      aria-label="Thông tin pháp lý"
+    >
+      <div className="sticky top-0 z-[1] flex items-center justify-between gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">
+        <div className="min-w-0">
+          <h2 className="text-xs font-semibold">Thông tin pháp lý</h2>
+          <p className="truncate text-[11px] text-muted-foreground" title={document.title}>
+            {document.title}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={handleReextract}
+            disabled={isReextracting}
+            title="Trích xuất lại thông tin pháp lý"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isReextracting ? 'animate-spin' : ''}`} />
+            Trích xuất lại
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => onEdit(document)}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Chỉnh sửa
+          </Button>
+        </div>
+      </div>
+      <div className="space-y-2 p-3">
+        <div className="grid grid-cols-2 gap-2">
+          <MetadataSummaryField
+            label="Số, ký hiệu"
+            value={existing.documentNumber || inspector?.fields.documentNumber?.value}
+            field={inspector?.fields.documentNumber}
+          />
+          <MetadataSummaryField
+            label="Loại văn bản"
+            value={existing.documentType || inspector?.fields.documentType?.value}
+            field={inspector?.fields.documentType}
+          />
+          <MetadataSummaryField
+            label="Cơ quan ban hành"
+            value={existing.issuer || inspector?.fields.issuer?.value}
+            field={inspector?.fields.issuer}
+          />
+          <MetadataSummaryField
+            label="Ngày ban hành"
+            value={formatMetadataDate(existing.issuedAt || inspector?.fields.issuedAt?.value)}
+            field={inspector?.fields.issuedAt}
+          />
+        </div>
+        <MetadataSummaryField
+          label="Tên văn bản"
+          value={existing.documentTitle || inspector?.fields.documentTitle?.value}
+          field={inspector?.fields.documentTitle}
+          multiline
+        />
+        <MetadataSummaryField
+          label="Căn cứ ban hành"
+          value={existing.legalBases || inspector?.fields.legalBases?.value}
+          field={inspector?.fields.legalBases}
+          multiline
+        />
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    </section>
+  )
+}
+
+function MetadataModal({ document, onClose, onSaved }: MetadataModalProps): ReactElement {
+  const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
+  const existing = (rootMetadata.documentMetadata as Partial<DocumentMetadata> | undefined) || {}
+  const inspector = rootMetadata.documentMetadataInspector as DocumentMetadataInspector | undefined
+  const [form, setForm] = useState<DocumentMetadata>({
+    documentNumber: existing.documentNumber,
+    documentType: existing.documentType,
+    issuer: existing.issuer,
+    issuedAt: existing.issuedAt,
+    documentTitle: existing.documentTitle,
+    legalBases: existing.legalBases
+  })
+  const [error, setError] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
+  const updateField = (name: keyof DocumentMetadata, value: string) => {
+    setForm((current) => ({ ...current, [name]: value || undefined }))
+  }
+
+  const handleSave = async () => {
+    try {
+      setIsSaving(true)
+      setError('')
+      const result = await window.api.knowledge.updateDocumentMetadata(document.id, form)
+      if (!result.success) {
+        setError(result.error || 'Không thể lưu metadata pháp lý.')
+        return
+      }
+      onSaved()
+    } catch (saveError) {
+      setError((saveError as Error).message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleReextract = async () => {
+    try {
+      setIsSaving(true)
+      setError('')
+      const result = await window.api.knowledge.reindexDocument(document.id)
+      if (!result.success) {
+        setError(result.error || 'Không thể trích xuất lại metadata.')
+        return
+      }
+      onSaved()
+    } catch (extractError) {
+      setError((extractError as Error).message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[820px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Trình kiểm tra thông tin pháp lý · {document.title}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Sáu trường đầu văn bản được trích tự động. Có thể kiểm tra bằng chứng và sửa giá trị trước
+          khi lưu.
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <InspectorField label="Số, ký hiệu" field={inspector?.fields.documentNumber}>
+            <Input
+              value={form.documentNumber || ''}
+              onChange={(event) => updateField('documentNumber', event.target.value)}
+              disabled={isSaving}
+            />
+          </InspectorField>
+          <InspectorField label="Loại văn bản" field={inspector?.fields.documentType}>
+            <Input
+              value={form.documentType || ''}
+              onChange={(event) => updateField('documentType', event.target.value)}
+              disabled={isSaving}
+            />
+          </InspectorField>
+          <InspectorField label="Cơ quan ban hành" field={inspector?.fields.issuer}>
+            <Input
+              value={form.issuer || ''}
+              onChange={(event) => updateField('issuer', event.target.value)}
+              disabled={isSaving}
+            />
+          </InspectorField>
+          <InspectorField label="Ngày ban hành" field={inspector?.fields.issuedAt}>
+            <Input
+              type="date"
+              value={form.issuedAt || ''}
+              onChange={(event) => updateField('issuedAt', event.target.value)}
+              disabled={isSaving}
+            />
+          </InspectorField>
+        </div>
+        <InspectorField label="Tên văn bản" field={inspector?.fields.documentTitle}>
+          <Textarea
+            value={form.documentTitle || ''}
+            onChange={(event) => updateField('documentTitle', event.target.value)}
+            className="min-h-20"
+            disabled={isSaving}
+          />
+        </InspectorField>
+        <InspectorField label="Căn cứ ban hành" field={inspector?.fields.legalBases}>
+          <Textarea
+            value={form.legalBases || ''}
+            onChange={(event) => updateField('legalBases', event.target.value)}
+            className="min-h-32"
+            disabled={isSaving}
+          />
+        </InspectorField>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+            Hủy
+          </Button>
+          <Button variant="outline" onClick={handleReextract} disabled={isSaving}>
+            Trích xuất lại
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+            Lưu sửa chữa
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -228,7 +554,9 @@ export default function SourcePanel(): ReactElement {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [modalType, setModalType] = useState<AddSourceType | null>(null)
   const [defaultEmbeddingModel, setDefaultEmbeddingModel] = useState<string | undefined>(undefined)
-  const [selectedDocument, setSelectedDocument] = useState<KnowledgeDocument | null>(null)
+  const [openedDocument, setOpenedDocument] = useState<KnowledgeDocument | null>(null)
+  const [inspectedDocumentId, setInspectedDocumentId] = useState<string | null>(null)
+  const [metadataDocument, setMetadataDocument] = useState<KnowledgeDocument | null>(null)
 
   const {
     documents,
@@ -248,6 +576,8 @@ export default function SourcePanel(): ReactElement {
   const { notes, loadNotes } = useItemStore()
 
   const { openSettings } = useUIStore()
+  const inspectedDocument =
+    documents.find((document) => document.id === inspectedDocumentId) || null
 
   // 加载默认嵌入模型设置
   useEffect(() => {
@@ -283,8 +613,16 @@ export default function SourcePanel(): ReactElement {
 
   // 当 notebook 切换时清空选中的文档
   useEffect(() => {
-    setSelectedDocument(null)
+    setOpenedDocument(null)
+    setInspectedDocumentId(null)
+    setMetadataDocument(null)
   }, [notebookId])
+
+  useEffect(() => {
+    if (inspectedDocumentId && !documents.some((document) => document.id === inspectedDocumentId)) {
+      setInspectedDocumentId(null)
+    }
+  }, [documents, inspectedDocumentId])
 
   // 处理文件上传
   const handleFileUpload = useCallback(async () => {
@@ -387,9 +725,14 @@ export default function SourcePanel(): ReactElement {
   const handleDelete = useCallback(
     async (documentId: string) => {
       if (!notebookId) return
+      const deletedIndex = documents.findIndex((document) => document.id === documentId)
+      const nextDocument = documents[deletedIndex + 1] || documents[deletedIndex - 1] || null
       await deleteDocument(notebookId, documentId)
+      if (inspectedDocumentId === documentId) {
+        setInspectedDocumentId(nextDocument?.id || null)
+      }
     },
-    [notebookId, deleteDocument]
+    [notebookId, documents, inspectedDocumentId, deleteDocument]
   )
 
   // 处理打开设置
@@ -412,12 +755,16 @@ export default function SourcePanel(): ReactElement {
     [t]
   )
 
-  // 处理文档点击
-  const handleSelectDocument = useCallback(
+  const handleInspectDocument = useCallback((document: KnowledgeDocument) => {
+    setInspectedDocumentId(document.id)
+  }, [])
+
+  // 双击或按 Enter 时打开文档
+  const handleOpenDocument = useCallback(
     (document: KnowledgeDocument) => {
       // 文本和笔记类型可以预览，直接显示预览页面
       if (document.type === 'text' || document.type === 'note') {
-        setSelectedDocument(document)
+        setOpenedDocument(document)
       } else {
         // 其他类型（文件、URL）直接打开
         handleOpenSource(document.id)
@@ -428,8 +775,19 @@ export default function SourcePanel(): ReactElement {
 
   // 返回列表
   const handleBack = useCallback(() => {
-    setSelectedDocument(null)
+    setOpenedDocument(null)
   }, [])
+
+  const handleReextractMetadata = useCallback(
+    async (document: KnowledgeDocument) => {
+      const result = await window.api.knowledge.reindexDocument(document.id)
+      if (!result.success) {
+        throw new Error(result.error || 'Không thể trích xuất lại thông tin pháp lý.')
+      }
+      if (notebookId) await loadDocuments(notebookId)
+    },
+    [notebookId, loadDocuments]
+  )
 
   // 处理弹窗提交
   const handleModalSubmit = useCallback(
@@ -445,11 +803,11 @@ export default function SourcePanel(): ReactElement {
 
   return (
     <Card className="flex flex-col rounded-xl border-0 overflow-hidden h-full shadow-md">
-      {selectedDocument ? (
+      {openedDocument ? (
         // 文档预览页面
         <DocumentViewerPanel
-          key={selectedDocument.id}
-          document={selectedDocument}
+          key={openedDocument.id}
+          document={openedDocument}
           onBack={handleBack}
         />
       ) : (
@@ -530,15 +888,24 @@ export default function SourcePanel(): ReactElement {
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <ScrollArea className="flex-1">
-              <DocumentList
-                documents={documents}
-                hasEmbeddingModel={!!defaultEmbeddingModel}
-                onDeleteDocument={handleDelete}
-                onSelectDocument={handleSelectDocument}
-                onOpenSettings={handleOpenSettings}
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ScrollArea className="min-h-0 flex-1">
+                <DocumentList
+                  documents={documents}
+                  hasEmbeddingModel={!!defaultEmbeddingModel}
+                  selectedDocumentId={inspectedDocumentId}
+                  onDeleteDocument={handleDelete}
+                  onSelectDocument={handleInspectDocument}
+                  onOpenDocument={handleOpenDocument}
+                  onOpenSettings={handleOpenSettings}
+                />
+              </ScrollArea>
+              <MetadataSummaryPanel
+                document={inspectedDocument}
+                onEdit={setMetadataDocument}
+                onReextract={handleReextractMetadata}
               />
-            </ScrollArea>
+            </div>
           )}
         </>
       )}
@@ -555,6 +922,17 @@ export default function SourcePanel(): ReactElement {
           notes={notes
             .filter((n) => n.content.trim().length > 0)
             .map((n) => ({ id: n.id, title: n.title }))}
+        />
+      )}
+
+      {metadataDocument && (
+        <MetadataModal
+          document={metadataDocument}
+          onClose={() => setMetadataDocument(null)}
+          onSaved={async () => {
+            if (notebookId) await loadDocuments(notebookId)
+            setMetadataDocument(null)
+          }}
         />
       )}
 

@@ -199,6 +199,18 @@ export const ProviderSchemas = {
 /**
  * 知识库相关的验证 schemas
  */
+const documentMetadataSchema = z.object({
+  documentNumber: z.string().trim().max(200).optional(),
+  documentType: z.string().trim().max(200).optional(),
+  issuer: z.string().trim().max(500).optional(),
+  issuedAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  documentTitle: z.string().trim().max(2000).optional(),
+  legalBases: z.string().trim().max(12000).optional()
+})
+
 export const KnowledgeSchemas = {
   addDocument: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
@@ -236,7 +248,6 @@ export const KnowledgeSchemas = {
       })
   }),
 
-
   addNote: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
     noteId: z.string().min(1, 'Note ID cannot be empty')
@@ -248,6 +259,11 @@ export const KnowledgeSchemas = {
 
   getDocument: z.object({
     documentId: z.string().min(1, 'Document ID cannot be empty')
+  }),
+
+  updateDocumentMetadata: z.object({
+    documentId: z.string().min(1, 'Document ID cannot be empty'),
+    metadata: documentMetadataSchema
   }),
 
   getDocumentChunks: z.object({

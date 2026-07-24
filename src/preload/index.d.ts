@@ -13,6 +13,7 @@ import type {
 import type { UpdateState, UpdateCheckResult, UpdateOperationResult } from '../shared/types/update'
 import type { LicenseStatus } from '../shared/types/license'
 import type { MindMap, Quiz, QuizSession } from '../main/db/schema'
+import type { DocumentMetadata } from '../main/services/DocumentMetadataExtractionService'
 
 // 重新导出共享类型
 export type {
@@ -237,6 +238,10 @@ declare global {
         // 文档管理
         getDocuments: (notebookId: string) => Promise<KnowledgeDocument[]>
         getDocument: (documentId: string) => Promise<KnowledgeDocument | null>
+        updateDocumentMetadata: (
+          documentId: string,
+          metadata: DocumentMetadata
+        ) => Promise<{ success: boolean; document?: KnowledgeDocument; error?: string }>
         getDocumentChunks: (documentId: string) => Promise<KnowledgeChunk[]>
         getDocumentPage: (
           documentId: string,

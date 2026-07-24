@@ -277,6 +277,19 @@ export function registerKnowledgeHandlers(
 
   // 获取文档的 chunks
   ipcMain.handle(
+    'knowledge:update-document-metadata',
+    validate(KnowledgeSchemas.updateDocumentMetadata, async (params) => {
+      try {
+        const document = knowledgeService.updateDocumentMetadata(params.documentId, params.metadata)
+        return { success: true, document }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error updating document metadata:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
+  ipcMain.handle(
     'knowledge:get-document-chunks',
     validate(KnowledgeSchemas.getDocumentChunks, async (params) => {
       Logger.debug('KnowledgeHandlers', 'get-document-chunks:', params.documentId)

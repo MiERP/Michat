@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { DocumentMetadata } from '../main/services/DocumentMetadataExtractionService'
 
 /**
  * IPC 调用超时包装函数
@@ -190,6 +191,8 @@ const api = {
       ipcRenderer.invoke('knowledge:get-documents', { notebookId }),
     getDocument: (documentId: string) =>
       ipcRenderer.invoke('knowledge:get-document', { documentId }),
+    updateDocumentMetadata: (documentId: string, metadata: DocumentMetadata) =>
+      ipcRenderer.invoke('knowledge:update-document-metadata', { documentId, metadata }),
     getDocumentChunks: (documentId: string) =>
       ipcRenderer.invoke('knowledge:get-document-chunks', { documentId }),
     getDocumentPage: (documentId: string, pageNumber: number, highlightText?: string) =>

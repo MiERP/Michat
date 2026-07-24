@@ -18,6 +18,14 @@ import { and, eq, desc, inArray, sql } from 'drizzle-orm'
 import { EmbeddingService } from './EmbeddingService'
 import { ChunkingService, type ChunkOptions } from './ChunkingService'
 import { FileParserService } from './FileParserService'
+import {
+  extractDocumentMetadata,
+  inspectorFromMetadata,
+  mergeDocumentMetadataInspector,
+  metadataFromInspector,
+  type DocumentMetadata,
+  type DocumentMetadataInspector
+} from './DocumentMetadataExtractionService'
 import { RerankService } from './RerankService'
 import { vectorStoreManager } from '../vectorstore'
 import { ProviderManager } from '../providers/ProviderManager'
@@ -322,6 +330,30 @@ export class KnowledgeService {
   ): Promise<void> {
     const db = getDatabase()
     const now = new Date()
+    const document = db.select().from(documents).where(eq(documents.id, documentId)).get()
+
+    if (document) {
+      const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
+      const extracted = extractDocumentMetadata({ title: document.title, content })
+      const inspector = mergeDocumentMetadataInspector(
+        extracted.inspector,
+        rootMetadata.documentMetadataInspector as DocumentMetadataInspector | undefined
+      )
+
+      if (Object.values(inspector.fields).some(Boolean)) {
+        db.update(documents)
+          .set({
+            metadata: {
+              ...rootMetadata,
+              documentMetadata: metadataFromInspector(inspector),
+              documentMetadataInspector: inspector
+            },
+            updatedAt: now
+          })
+          .where(eq(documents.id, documentId))
+          .run()
+      }
+    }
 
     // 1. Chunk
     onProgress?.('chunking', 10)
@@ -540,17 +572,17 @@ export class KnowledgeService {
       onProgress?.('creating_document', 5)
       db.update(documents)
         .set({
-        title: parseResult.title || basename(filePath) || 'Untitled',
-        type: docType,
-        content: parseResult.content,
-        contentHash,
-        mimeType: parseResult.mimeType,
-        fileSize: (parseResult.metadata?.fileSize as number | undefined) ?? fileInfo?.size,
-        metadata: {
-          ...(parseResult.metadata || {}),
-          ...(structureMetadata || {})
-        },
-        updatedAt: now
+          title: parseResult.title || basename(filePath) || 'Untitled',
+          type: docType,
+          content: parseResult.content,
+          contentHash,
+          mimeType: parseResult.mimeType,
+          fileSize: (parseResult.metadata?.fileSize as number | undefined) ?? fileInfo?.size,
+          metadata: {
+            ...(parseResult.metadata || {}),
+            ...(structureMetadata || {})
+          },
+          updatedAt: now
         })
         .where(eq(documents.id, documentId))
         .run()
@@ -912,6 +944,27 @@ export class KnowledgeService {
   getDocument(documentId: string): Document | undefined {
     const db = getDatabase()
     return db.select().from(documents).where(eq(documents.id, documentId)).get()
+  }
+
+  updateDocumentMetadata(documentId: string, metadata: DocumentMetadata): Document {
+    const db = getDatabase()
+    const document = this.getDocument(documentId)
+    if (!document) throw new Error(`Document ${documentId} not found`)
+
+    const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
+    db.update(documents)
+      .set({
+        metadata: {
+          ...rootMetadata,
+          documentMetadata: metadata,
+          documentMetadataInspector: inspectorFromMetadata(metadata)
+        },
+        updatedAt: new Date()
+      })
+      .where(eq(documents.id, documentId))
+      .run()
+
+    return this.getDocument(documentId)!
   }
 
   getDocumentPageContent(

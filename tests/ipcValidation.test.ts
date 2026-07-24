@@ -1,10 +1,13 @@
 ﻿import { describe, expect, it } from 'vitest'
-import { ProviderSchemas, SettingsSchemas } from '../src/main/ipc/validation'
+import { KnowledgeSchemas, ProviderSchemas, SettingsSchemas } from '../src/main/ipc/validation'
 
 describe('ipc validation schemas', () => {
   it('accepts known settings keys with correctly typed values', () => {
     expect(SettingsSchemas.set.parse({ key: 'language', value: 'vi-VN' }).key).toBe('language')
-    expect(SettingsSchemas.update.parse({ updates: { allowRemoteProviders: false, ragTopK: 5 } }).updates.ragTopK).toBe(5)
+    expect(
+      SettingsSchemas.update.parse({ updates: { allowRemoteProviders: false, ragTopK: 5 } }).updates
+        .ragTopK
+    ).toBe(5)
   })
 
   it('rejects unknown settings keys and invalid values', () => {
@@ -27,6 +30,25 @@ describe('ipc validation schemas', () => {
         providerName: 'remote',
         enabled: true,
         config: { baseUrl: 'not-a-url' }
+      })
+    ).toThrow()
+  })
+  it('validates document metadata updates', () => {
+    expect(
+      KnowledgeSchemas.updateDocumentMetadata.parse({
+        documentId: 'doc-1',
+        metadata: {
+          documentNumber: '99/2025/NĐ-CP',
+          documentType: 'Nghị định',
+          issuedAt: '2025-05-06'
+        }
+      }).metadata.documentNumber
+    ).toBe('99/2025/NĐ-CP')
+
+    expect(() =>
+      KnowledgeSchemas.updateDocumentMetadata.parse({
+        documentId: 'doc-1',
+        metadata: { issuedAt: '06/05/2025' }
       })
     ).toThrow()
   })
