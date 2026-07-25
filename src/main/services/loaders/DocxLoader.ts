@@ -5,8 +5,8 @@
 
 import { readFile } from 'fs/promises'
 import { extname } from 'path'
-import officeparser from 'officeparser'
-import mammoth from 'mammoth'
+import WordExtractor from 'word-extractor'
+import { OfficeParser } from 'officeparser'
 import * as cheerio from 'cheerio'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
@@ -46,16 +46,17 @@ export class DocxLoader implements IDocumentLoader {
 
     try {
       // Ã¦ÂÂÃ¥Ââ€“Ã§ÂºÂ¯Ã¦â€“â€¡Ã¦Å“Â¬
-      const textResult = await mammoth.extractRawText({ buffer })
-      const content = textResult.value.trim()
+      const document = await OfficeParser.parseOffice(buffer)
+      const content = document.toText().trim()
 
       // Ã¦ÂÂÃ¥Ââ€“Ã§Â»â€œÃ¦Å¾â€žÃ¤Â¿Â¡Ã¦ÂÂ¯Ã¯Â¼Ë†Ã¥Â°â€ Ã¦â€“â€¡Ã¦Â¡Â£Ã¨Â½Â¬Ã¦ÂÂ¢Ã¤Â¸Âº HTMLÃ¯Â¼Å’Ã¤Â»Å½Ã¤Â¸Â­Ã¦ÂÂÃ¥Ââ€“Ã¦Â â€¡Ã©Â¢ËœÃ¯Â¼â€°
       let sections: SectionInfo[] | undefined
       let title: string | undefined
 
       if (opts.preserveStructure) {
-        const htmlResult = await mammoth.convertToHtml({ buffer })
-        const $ = cheerio.load(htmlResult.value)
+        const htmlResult = await document.to('html')
+        const html = typeof htmlResult.value === 'string' ? htmlResult.value : ''
+        const $ = cheerio.load(html)
 
         // Ã¦ÂÂÃ¥Ââ€“Ã§Â¬Â¬Ã¤Â¸â‚¬Ã¤Â¸ÂªÃ¦Â â€¡Ã©Â¢ËœÃ¤Â½Å“Ã¤Â¸ÂºÃ¦â€“â€¡Ã¦Â¡Â£Ã¦Â â€¡Ã©Â¢Ëœ
         const firstH1 = $('h1').first().text().trim()
@@ -76,7 +77,7 @@ export class DocxLoader implements IDocumentLoader {
             }
           : undefined,
         metadata: {
-          warnings: textResult.messages,
+          warnings: document.warnings,
           characterCount: content.length,
           wordCount: content.split(/\s+/).length
         }
@@ -169,23 +170,25 @@ export class DocxLoader implements IDocumentLoader {
     return root
   }
 
-  
   private async loadLegacyDoc(filePath: string): Promise<DocumentLoadResult> {
-    Logger.info('DocxLoader', `Parsing legacy .doc file: `)
+    Logger.info('DocxLoader', `Parsing legacy .doc file: ${filePath}`)
     try {
-      const buffer = await readFile(filePath)
-      const text = await (officeparser as unknown as { parseOfficeAsync: (input: Buffer) => Promise<string> }).parseOfficeAsync(buffer)
-      const content = text.trim()
+      const document = await new WordExtractor().extract(filePath)
+      const content = document.getBody().trim()
       if (!content) throw new Error('No readable text content found in legacy .doc file')
       return {
-        content: content,
+        content,
         mimeType: 'application/msword',
         structure: undefined,
-        metadata: { characterCount: content.length, wordCount: content.split(/\s+/).length, parser: 'officeparser' }
+        metadata: {
+          characterCount: content.length,
+          wordCount: content.split(/\s+/).length,
+          parser: 'word-extractor'
+        }
       }
     } catch (error) {
       Logger.error('DocxLoader', 'Failed to parse legacy .doc file:', error)
-      throw new Error(`Failed to parse .doc file: `)
+      throw new Error(`Failed to parse .doc file: ${(error as Error).message}`)
     }
   }
 }
