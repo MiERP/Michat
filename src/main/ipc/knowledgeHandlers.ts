@@ -368,6 +368,19 @@ export function registerKnowledgeHandlers(
     return validated
   })
 
+  ipcMain.handle(
+    'knowledge:refresh-document-metadata',
+    validate(KnowledgeSchemas.refreshDocumentMetadata, async (params) => {
+      try {
+        knowledgeService.refreshDocumentMetadata(params.documentId)
+        return { success: true }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error refreshing document metadata:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
   // 获取知识库统计信息
   ipcMain.handle(
     'knowledge:get-stats',

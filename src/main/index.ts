@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { LlamaService } from './services/LlamaService'
+import { OfficeProviderBridgeService } from './services/office/OfficeProviderBridgeService'
 import { initDatabase, runMigrations, initExtensions, closeDatabase, executeCheckpoint } from './db'
 import { ProviderManager } from './providers/ProviderManager'
 import { SessionAutoSwitchService } from './services/SessionAutoSwitchService'
@@ -22,6 +23,7 @@ let shortcutManager: ShortcutManager | null = null
 let isQuitting = false // Flag to indicate if app is quitting
 
 let llamaService: LlamaService | null = null
+let officeProviderBridgeService: OfficeProviderBridgeService | null = null
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
@@ -37,6 +39,11 @@ app.whenReady().then(async () => {
   // Auto-start llama.cpp servers (best effort)
   llamaService = new LlamaService()
   await llamaService.ensureStarted()
+
+  officeProviderBridgeService = new OfficeProviderBridgeService()
+  officeProviderBridgeService.setLlamaService(llamaService)
+  await officeProviderBridgeService.start()
+  Logger.info('Main', `Office provider bridge started at ${officeProviderBridgeService.address}`)
 
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.michat.app')
@@ -180,6 +187,7 @@ app.on('window-all-closed', () => {
   if (llamaService) {
     llamaService.stop()
   }
+  officeProviderBridgeService?.stop()
 })
 
 // First line of defense: before-quit event (user initiated quit)
@@ -199,6 +207,7 @@ app.on('before-quit', () => {
   if (llamaService) {
     llamaService.stop()
   }
+  officeProviderBridgeService?.stop()
 
   Logger.info('Main', 'Closing database connection...')
   closeDatabase()
@@ -218,6 +227,7 @@ const handleShutdown = (signal: string) => {
 
   if (!isQuitting) {
     isQuitting = true
+    officeProviderBridgeService?.stop()
     closeDatabase()
   }
 

@@ -60,7 +60,11 @@ export default defineConfig({
       }
     }
   },
-  preload: {},
+  preload: {
+    build: {
+      emptyOutDir: false
+    }
+  },
   renderer: {
     resolve: {
       alias: {
@@ -68,6 +72,9 @@ export default defineConfig({
         '@': resolve('src/renderer/src')
       }
     },
-    plugins: [tailwindcss(), react()]
+    plugins: [tailwindcss(), react()],
+    build: {
+      emptyOutDir: false
+    }
   }
 })

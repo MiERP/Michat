@@ -179,6 +179,70 @@ describe('KnowledgeService RAG regression', () => {
     expect(providerManager.remoteCalls).toBe(0)
   })
 
+  it('reparses the managed file when reindexing an existing document', async () => {
+    const { service, notebookId } = context!
+    const filePath = join(userDataDir, 'updated-source.txt')
+    await writeFile(filePath, 'Original local-first source content.', 'utf8')
+
+    const documentId = await service.addDocumentFromFile(notebookId, filePath)
+    const localFilePath = service.getDocument(documentId)?.localFilePath
+    expect(localFilePath).toBeTruthy()
+    await writeFile(localFilePath!, 'Updated local-first source content.', 'utf8')
+
+    await service.reindexDocument(documentId)
+
+    expect(service.getDocument(documentId)?.content).toBe('Updated local-first source content.')
+    expect(service.getDocumentChunks(documentId).some((chunk) => chunk.content.includes('Updated'))).toBe(true)
+  })
+
+  it('clears stale legal metadata when reindexing a report', async () => {
+    const { service, notebookId, db, schema } = context!
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Analysis report',
+      type: 'text',
+      content: 'BÁO CÁO PHÂN TÍCH: Nghị quyết 08-NQ/TW ban hành ngày 26 tháng 01 năm 2022.'
+    })
+    const { eq } = await import('drizzle-orm')
+    db.update(schema.documents)
+      .set({
+        metadata: {
+          documentMetadata: { issuedAt: '2022-01-26' },
+          documentMetadataInspector: {
+            version: 1,
+            extractedAt: new Date().toISOString(),
+            fields: { issuedAt: { value: '2022-01-26', status: 'user_corrected', confidence: 1 } }
+          }
+        }
+      })
+      .where(eq(schema.documents.id, documentId))
+      .run()
+
+    await service.reindexDocument(documentId)
+
+    const metadata = service.getDocument(documentId)?.metadata as Record<string, unknown>
+    expect(metadata.documentMetadata).toEqual({})
+  })
+
+  it('refreshes legal metadata without requesting embeddings or changing indexed chunks', async () => {
+    const { service, notebookId, providerManager } = context!
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Resolution',
+      type: 'text',
+      content: 'CHÍNH PHỦ\nSố: 15/NQ-CP\nCỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nNGHỊ QUYẾT'
+    })
+    const chunksBefore = service.getDocumentChunks(documentId)
+    const embeddingCount = providerManager.embeddingCalls.length
+    providerManager.failEmbeddings = true
+
+    await service.refreshDocumentMetadata(documentId)
+
+    expect(service.getDocument(documentId)?.metadata).toMatchObject({
+      documentMetadata: { documentNumber: '15/NQ-CP' }
+    })
+    expect(service.getDocumentChunks(documentId)).toEqual(chunksBefore)
+    expect(providerManager.embeddingCalls).toHaveLength(embeddingCount)
+  })
+
   it('indexes XLSX tables with citations retrievable in top 3', async () => {
     const { service, notebookId } = context!
     const filePath = join(userDataDir, 'rag-evidence.xlsx')

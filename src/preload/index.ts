@@ -201,6 +201,8 @@ const api = {
       ipcRenderer.invoke('knowledge:delete-document', { documentId }),
     reindexDocument: (documentId: string) =>
       ipcRenderer.invoke('knowledge:reindex-document', { documentId }),
+    refreshDocumentMetadata: (documentId: string) =>
+      ipcRenderer.invoke('knowledge:refresh-document-metadata', { documentId }),
 
     // 统计
     getStats: (notebookId: string) => ipcRenderer.invoke('knowledge:get-stats', { notebookId }),

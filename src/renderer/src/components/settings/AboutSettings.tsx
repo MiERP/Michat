@@ -35,23 +35,40 @@ export default function AboutSettings(): ReactElement {
   }, [])
 
   const handleOpenWebsite = async () => {
-    await window.api.openExternalUrl('')
+    await window.api.openExternalUrl('https://github.com/HAVS/MiChat')
   }
 
   const handleFeedback = async () => {
-    await window.api.openExternalUrl('')
+    await window.api.openExternalUrl('https://github.com/HAVS/MiChat/issues')
+  }
+
+  const handleOpenLicense = async () => {
+    await window.api.openExternalUrl('https://github.com/HAVS/MiChat/blob/main/LICENSE')
   }
 
   return (
     <div className="space-y-6">
       <div className="text-center py-8 flex flex-col items-center gap-4">
-        <img src={logoImg} alt="Logo" className="w-16 h-16 rounded-xl" />
+        <img src={logoImg} alt="MiChat" className="w-16 h-16 rounded-xl" />
         <div className="flex flex-col gap-2">
           <h2 className="text-h1 text-foreground">MiChat</h2>
           <p className="text-sm text-muted-foreground">
             {t('version')} {appVersion}
           </p>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+        <h3 className="text-sm font-medium text-foreground">{t('legalNotices')}</h3>
+        <p className="text-xs text-muted-foreground">{t('copyrightNotice')}</p>
+        <p className="text-xs text-muted-foreground">{t('licenseNotice')}</p>
+        <p className="text-xs text-muted-foreground">{t('warrantyNotice')}</p>
+        <button
+          onClick={handleOpenLicense}
+          className="text-sm text-primary underline underline-offset-4 cursor-pointer"
+        >
+          {t('viewLicense')}
+        </button>
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -69,10 +86,14 @@ export default function AboutSettings(): ReactElement {
 
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
           <span className="text-muted-foreground">{t('licenseName')}</span>
-          <span className="text-foreground font-medium break-all">{licenseStatus?.name || '-'}</span>
+          <span className="text-foreground font-medium break-all">
+            {licenseStatus?.name || '-'}
+          </span>
 
           <span className="text-muted-foreground">{t('licenseExpiry')}</span>
-          <span className="text-foreground font-medium">{formatDate(licenseStatus?.expiresAt)}</span>
+          <span className="text-foreground font-medium">
+            {formatDate(licenseStatus?.expiresAt)}
+          </span>
 
           <span className="text-muted-foreground">{t('licenseDaysRemaining')}</span>
           <span className="text-foreground font-medium">

@@ -30,6 +30,7 @@ import type {
   DocumentMetadataField,
   DocumentMetadataInspector
 } from '../../../../main/services/DocumentMetadataExtractionService'
+import { isOriginalLegalDocument } from '../../../../main/services/DocumentMetadataExtractionService'
 
 type AddSourceType = 'text' | 'note'
 
@@ -260,6 +261,17 @@ function MetadataSummaryPanel({
     }
   }
 
+  if (!isOriginalLegalDocument(document.content || '')) {
+    if (document.mimeType !== 'application/pdf') return <></>
+    return (
+      <section className="shrink-0 border-t border-border bg-muted/20 px-3 py-2" aria-label="Kiểm tra PDF">
+        <p className="text-xs text-muted-foreground">
+          Thông tin pháp lý chỉ hiển thị cho văn bản gốc.
+        </p>
+      </section>
+    )
+  }
+
   return (
     <section
       className="max-h-[48%] shrink-0 overflow-y-auto border-t border-border bg-muted/20"
@@ -376,7 +388,7 @@ function MetadataModal({ document, onClose, onSaved }: MetadataModalProps): Reac
     try {
       setIsSaving(true)
       setError('')
-      const result = await window.api.knowledge.reindexDocument(document.id)
+      const result = await window.api.knowledge.refreshDocumentMetadata(document.id)
       if (!result.success) {
         setError(result.error || 'Không thể trích xuất lại metadata.')
         return
@@ -780,7 +792,7 @@ export default function SourcePanel(): ReactElement {
 
   const handleReextractMetadata = useCallback(
     async (document: KnowledgeDocument) => {
-      const result = await window.api.knowledge.reindexDocument(document.id)
+      const result = await window.api.knowledge.refreshDocumentMetadata(document.id)
       if (!result.success) {
         throw new Error(result.error || 'Không thể trích xuất lại thông tin pháp lý.')
       }

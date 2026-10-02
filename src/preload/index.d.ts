@@ -257,6 +257,7 @@ declare global {
         } | null>
         deleteDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
         reindexDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
+        refreshDocumentMetadata: (documentId: string) => Promise<{ success: boolean; error?: string }>
 
         // 统计
         getStats: (notebookId: string) => Promise<KnowledgeStats>

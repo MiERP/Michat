@@ -4,8 +4,8 @@ import type { LicenseStatus } from '../../shared/types/license'
 // ============================================================
 // HARDCODED LICENSE — Thay đổi giá trị tại đây khi cần cập nhật
 // ============================================================
-const HARDCODED_LICENSE_NAME = 'michat-PCT70-DEMO-260831-fullversion'
-const HARDCODED_LICENSE_KEY = '260831' // Format YYMMDD → hết hạn 2026-08-31
+const HARDCODED_LICENSE_NAME = 'michat-fullversion'
+const HARDCODED_LICENSE_KEY = '991231' // Format YYMMDD → hết hạn 2099-12-31
 // ============================================================
 
 const EXPECTED_LICENSE_NAME_PREFIX = 'michat'

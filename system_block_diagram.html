@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sơ Đồ Khối Kiến Trúc Hệ Thống MiChat</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    }
+    .diagram-card {
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .diagram-card:hover {
+      transform: translateY(-2px);
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen p-4 md:p-8">
+
+  <!-- Header & Action Bar -->
+  <div class="max-w-[1300px] mx-auto mb-6 bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div>
+      <div class="flex items-center gap-3">
+        <span class="px-3 py-1 bg-blue-100 text-blue-700 font-semibold text-xs rounded-full uppercase tracking-wider">Kiến trúc hệ thống</span>
+        <span class="px-3 py-1 bg-emerald-100 text-emerald-700 font-semibold text-xs rounded-full">Electron + Local AI</span>
+        <span class="px-3 py-1 bg-purple-100 text-purple-700 font-semibold text-xs rounded-full">Nền trắng chuẩn xuất bản</span>
+      </div>
+      <h1 class="text-2xl font-bold text-slate-900 mt-2">Sơ Đồ Khối Chức Năng Hệ Thống Toàn Diện</h1>
+      <p class="text-sm text-slate-500 mt-1">Hệ thống xử lý RAG & suy luận AI cục bộ, hỗ trợ nạp tài liệu đa định dạng, MindMap và Quiz</p>
+    </div>
+
+    <!-- Download & Export Buttons -->
+    <div class="flex items-center gap-2.5 flex-wrap">
+      <button onclick="downloadPNG()" class="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl shadow-sm transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        Tải ảnh PNG (2K)
+      </button>
+      <button onclick="downloadSVG()" class="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm rounded-xl shadow-sm transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/></svg>
+        Tải file SVG
+      </button>
+      <button onclick="window.print()" class="inline-flex items-center gap-2 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-sm rounded-xl transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+        In / PDF
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Canvas Container (White Background) -->
+  <div class="max-w-[1300px] mx-auto bg-white rounded-2xl p-4 md:p-8 shadow-md border border-slate-200 overflow-x-auto">
+    <div id="diagram-wrapper" class="min-w-[1140px] flex justify-center bg-white p-2">
+      <!-- Embedded Standalone SVG Diagram -->
+      <svg id="diagram-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 970" width="1200" height="970" class="w-full h-auto select-none bg-white">
+        <defs>
+          <style>
+            text {
+              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            }
+          </style>
+          <!-- Gradients -->
+          <linearGradient id="grad-renderer" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0284c7" />
+            <stop offset="100%" stop-color="#2563eb" />
+          </linearGradient>
+
+          <linearGradient id="grad-preload" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#f59e0b" />
+            <stop offset="100%" stop-color="#d97706" />
+          </linearGradient>
+
+          <linearGradient id="grad-main" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#059669" />
+            <stop offset="100%" stop-color="#047857" />
+          </linearGradient>
+
+          <linearGradient id="grad-rag" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#e11d48" />
+            <stop offset="100%" stop-color="#be123c" />
+          </linearGradient>
+
+          <linearGradient id="grad-ai" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#7c3aed" />
+            <stop offset="100%" stop-color="#6d28d9" />
+          </linearGradient>
+
+          <linearGradient id="grad-training" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0d9488" />
+            <stop offset="100%" stop-color="#0f766e" />
+          </linearGradient>
+
+          <linearGradient id="grad-os" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#334155" />
+            <stop offset="100%" stop-color="#1e293b" />
+          </linearGradient>
+
+          <!-- Drop Shadows -->
+          <filter id="shadow-card" x="-4%" y="-4%" width="108%" height="110%" filterUnits="userSpaceOnUse">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.06"/>
+          </filter>
+          <filter id="shadow-hover" x="-5%" y="-5%" width="110%" height="112%" filterUnits="userSpaceOnUse">
+            <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.09"/>
+          </filter>
+
+          <!-- Marker Arrows -->
+          <marker id="arrow-down-blue" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0284c7" />
+          </marker>
+          <marker id="arrow-down-orange" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#d97706" />
+          </marker>
+          <marker id="arrow-down-green" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#059669" />
+          </marker>
+          <marker id="arrow-bidirectional" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#64748b" />
+          </marker>
+          <marker id="arrow-purple" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#7c3aed" />
+          </marker>
+
+          <!-- Grid Background Pattern -->
+          <pattern id="dot-grid" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+            <circle cx="2" cy="2" r="1" fill="#e2e8f0" />
+          </pattern>
+        </defs>
+
+        <!-- White Background with subtle grid -->
+        <rect width="1200" height="970" fill="#ffffff" />
+        <rect width="1200" height="970" fill="url(#dot-grid)" opacity="0.75" />
+
+        <!-- ==================== DIAGRAM HEADER ==================== -->
+        <g id="header-group">
+          <text x="600" y="42" text-anchor="middle" font-size="22" font-weight="800" fill="#0f172a" letter-spacing="-0.5">SƠ ĐỒ KHỐI KIẾN TRÚC TỔNG THỂ HỆ THỐNG MICHAT</text>
+          <text x="600" y="66" text-anchor="middle" font-size="13" font-weight="500" fill="#64748b">Kiến trúc đa tiến trình (Multi-process Architecture), Tích hợp RAG Cục bộ & Lõi Suy luận AI llama.cpp</text>
+          <line x1="100" y1="80" x2="1100" y2="80" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="4 4" />
+        </g>
+
+        <!-- ==================== 1. RENDERER UI LAYER ==================== -->
+        <g id="layer-renderer" class="diagram-card" filter="url(#shadow-card)">
+          <!-- Outer Card Background -->
+          <rect x="50" y="95" width="1100" height="120" rx="14" fill="#ffffff" stroke="#bae6fd" stroke-width="1.5" />
+          
+          <!-- Banner Header -->
+          <path d="M 50 109 A 14 14 0 0 1 64 95 L 1136 95 A 14 14 0 0 1 1150 109 L 1150 132 L 50 132 Z" fill="url(#grad-renderer)" />
+          <text x="70" y="120" font-size="14" font-weight="700" fill="#ffffff">KHỐI 1: GIAO DIỆN TƯƠNG TÁC NGƯỜI DÙNG (RENDERER UI PROCESS)</text>
+          <text x="1130" y="120" text-anchor="end" font-size="12" font-weight="600" fill="#e0f2fe">Công nghệ: React 19 • Tailwind CSS v4 • Zustand 5</text>
+
+          <!-- Inner Sub-modules -->
+          <!-- Mod 1.1: Chat & Assistant UI -->
+          <rect x="68" y="145" width="250" height="56" rx="8" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1" />
+          <text x="82" y="167" font-size="12" font-weight="700" fill="#0369a1">💬 Giao diện Hội thoại AI</text>
+          <text x="82" y="187" font-size="10.5" font-weight="500" fill="#475569">Streaming Text, Quản lý Lịch sử Chat</text>
+
+          <!-- Mod 1.2: Training & Knowledge Viewers -->
+          <rect x="330" y="145" width="270" height="56" rx="8" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1" />
+          <text x="344" y="167" font-size="12" font-weight="700" fill="#0369a1">🧠 Trình hiển thị MindMap & Quiz</text>
+          <text x="344" y="187" font-size="10.5" font-weight="500" fill="#475569">Vẽ Cây tư duy & Giao diện thi trắc nghiệm</text>
+
+          <!-- Mod 1.3: Document & Knowledge Hub -->
+          <rect x="612" y="145" width="260" height="56" rx="8" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1" />
+          <text x="626" y="167" font-size="12" font-weight="700" fill="#0369a1">📂 Kho Tài liệu & Tri thức (RAG)</text>
+          <text x="626" y="187" font-size="10.5" font-weight="500" fill="#475569">Tải lên PDF/Docx/XLSX, Quản lý File</text>
+
+          <!-- Mod 1.4: State & System Settings -->
+          <rect x="884" y="145" width="250" height="56" rx="8" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1" />
+          <text x="898" y="167" font-size="12" font-weight="700" fill="#0369a1">⚙️ Thiết lập & Quản lý Trạng thái</text>
+          <text x="898" y="187" font-size="10.5" font-weight="500" fill="#475569">Zustand Stores, Cấu hình Model AI</text>
+        </g>
+
+        <!-- Connector: Renderer -> Preload IPC -->
+        <g id="conn-renderer-preload">
+          <line x1="450" y1="215" x2="450" y2="248" stroke="#0284c7" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arrow-down-blue)" />
+          <line x1="750" y1="248" x2="750" y2="215" stroke="#0284c7" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arrow-down-blue)" />
+          <rect x="525" y="222" width="150" height="20" rx="10" fill="#e0f2fe" stroke="#38bdf8" stroke-width="1"/>
+          <text x="600" y="236" text-anchor="middle" font-size="10" font-weight="700" fill="#0369a1">IPC Invoke & Events ⇄</text>
+        </g>
+
+        <!-- ==================== 2. PRELOAD IPC BRIDGE ==================== -->
+        <g id="layer-preload" class="diagram-card" filter="url(#shadow-card)">
+          <rect x="160" y="250" width="880" height="68" rx="12" fill="#fffbeb" stroke="#fcd34d" stroke-width="1.5" />
+          <!-- Accent left bar -->
+          <path d="M 160 262 A 12 12 0 0 1 172 250 L 180 250 L 180 318 L 172 318 A 12 12 0 0 1 160 306 Z" fill="url(#grad-preload)" />
+          
+          <text x="195" y="276" font-size="14" font-weight="700" fill="#92400e">KHỐI 2: CẦU NỐI AN TOÀN LIÊN TIẾN TRÌNH (PRELOAD CONTEXTBRIDGE IPC)</text>
+          <text x="195" y="298" font-size="11.5" font-weight="500" fill="#78350f">
+            • Cách ly Context Isolation an toàn • Whitelist Typed IPC Channels • Trao đổi luồng sự kiện 2 chiều
+          </text>
+          
+          <rect x="885" y="265" width="140" height="38" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" />
+          <text x="955" y="282" text-anchor="middle" font-size="10.5" font-weight="700" fill="#b45309">30+ Kênh IPC</text>
+          <text x="955" y="295" text-anchor="middle" font-size="9.5" font-weight="600" fill="#92400e">Two-Way Handshake</text>
+        </g>
+
+        <!-- Connector: Preload IPC -> Main Process -->
+        <g id="conn-preload-main">
+          <line x1="450" y1="318" x2="450" y2="348" stroke="#d97706" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arrow-down-orange)" />
+          <line x1="750" y1="348" x2="750" y2="318" stroke="#d97706" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arrow-down-orange)" />
+          <rect x="525" y="324" width="150" height="20" rx="10" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+          <text x="600" y="338" text-anchor="middle" font-size="10" font-weight="700" fill="#b45309">Native IPC Main Handler</text>
+        </g>
+
+        <!-- ==================== 3. ELECTRON MAIN PROCESS ==================== -->
+        <g id="layer-main" class="diagram-card" filter="url(#shadow-card)">
+          <rect x="50" y="350" width="1100" height="98" rx="14" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.5" />
+          <path d="M 50 364 A 14 14 0 0 1 64 350 L 1136 350 A 14 14 0 0 1 1150 364 L 1150 384 L 50 384 Z" fill="url(#grad-main)" />
+          <text x="70" y="373" font-size="13.5" font-weight="700" fill="#ffffff">KHỐI 3: BỘ XỬ LÝ TRUNG TÂM & QUẢN LÝ VÒNG ĐỜI ỨNG DỤNG (ELECTRON MAIN PROCESS)</text>
+          <text x="1130" y="373" text-anchor="end" font-size="11.5" font-weight="600" fill="#d1fae5">Runtime: Node.js 22+ • Electron 39 Core</text>
+
+          <!-- Core capabilities -->
+          <rect x="68" y="394" width="250" height="42" rx="6" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+          <text x="80" y="411" font-size="11" font-weight="700" fill="#047857">🪟 App Lifecycle & Windows</text>
+          <text x="80" y="427" font-size="9.5" font-weight="500" fill="#334155">Khởi tạo cửa sổ, Tray, Menu hệ thống</text>
+
+          <rect x="330" y="394" width="270" height="42" rx="6" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+          <text x="342" y="411" font-size="11" font-weight="700" fill="#047857">🛡️ Native System & Security</text>
+          <text x="342" y="427" font-size="9.5" font-weight="500" fill="#334155">Cấp quyền File System, hộp thoại Dialog</text>
+
+          <rect x="612" y="394" width="260" height="42" rx="6" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+          <text x="624" y="411" font-size="11" font-weight="700" fill="#047857">🔄 Điều phối luồng dữ liệu trung tâm</text>
+          <text x="624" y="427" font-size="9.5" font-weight="500" fill="#334155">Giao tiếp DB, File Parser, AI Inference</text>
+
+          <rect x="884" y="394" width="250" height="42" rx="6" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+          <text x="896" y="411" font-size="11" font-weight="700" fill="#047857">⚡ Quản lý tiến trình con & Bộ nhớ</text>
+          <text x="896" y="427" font-size="9.5" font-weight="500" fill="#334155">Giám sát tải CPU/RAM, Worker Threads</text>
+        </g>
+
+        <!-- Dispatcher Branches: Main Process to 3 Functional Pillars -->
+        <g id="conn-main-to-pillars">
+          <!-- Left line to RAG -->
+          <path d="M 300 448 L 300 475 L 220 475 L 220 490" fill="none" stroke="#059669" stroke-width="2" stroke-dasharray="3 3" marker-end="url(#arrow-down-green)" />
+          <!-- Middle line to AI -->
+          <path d="M 600 448 L 600 490" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#arrow-down-green)" />
+          <!-- Right line to Training -->
+          <path d="M 900 448 L 900 475 L 980 475 L 980 490" fill="none" stroke="#059669" stroke-width="2" stroke-dasharray="3 3" marker-end="url(#arrow-down-green)" />
+        </g>
+
+        <!-- ==================== 4. THREE MAIN FUNCTIONAL SUBSYSTEMS ==================== -->
+
+        <!-- COLUMN A: FILE LOADERS & VECTOR DATABASE (RAG) -->
+        <g id="col-rag" class="diagram-card" filter="url(#shadow-card)">
+          <rect x="50" y="495" width="345" height="300" rx="14" fill="#ffffff" stroke="#fecdd3" stroke-width="1.5" />
+          <path d="M 50 509 A 14 14 0 0 1 64 495 L 381 495 A 14 14 0 0 1 395 509 L 395 533 L 50 533 Z" fill="url(#grad-rag)" />
+          <text x="65" y="520" font-size="12.5" font-weight="700" fill="#ffffff">KHỐI TÀI LIỆU & CƠ SỞ DỮ LIỆU VÉC-TƠ</text>
+          
+          <!-- Sub-block A1: Multi-format File Loaders -->
+          <g transform="translate(64, 545)">
+            <rect width="317" height="66" rx="8" fill="#fff1f2" stroke="#fda4af" stroke-width="1"/>
+            <text x="12" y="20" font-size="11.5" font-weight="700" fill="#9f1239">📄 File Loaders (Nạp & Bóc tách đa định dạng)</text>
+            <text x="12" y="38" font-size="10" font-weight="500" fill="#475569">Trích xuất văn bản, bảng biểu, cấu trúc văn bản:</text>
+            <!-- Badges format -->
+            <g transform="translate(12, 44)">
+              <rect x="0" y="0" width="40" height="16" rx="4" fill="#e11d48" />
+              <text x="20" y="12" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">PDF</text>
+              <rect x="46" y="0" width="48" height="16" rx="4" fill="#2563eb" />
+              <text x="70" y="12" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">DOCX</text>
+              <rect x="100" y="0" width="48" height="16" rx="4" fill="#059669" />
+              <text x="124" y="12" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">EXCEL</text>
+              <rect x="154" y="0" width="48" height="16" rx="4" fill="#ea580c" />
+              <text x="178" y="12" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">PPTX</text>
+              <rect x="208" y="0" width="85" height="16" rx="4" fill="#475569" />
+              <text x="250.5" y="12" text-anchor="middle" font-size="9" font-weight="600" fill="#fff">TXT/MD/JSON</text>
+            </g>
+          </g>
+
+          <!-- Flow Arrow down inside Col A -->
+          <line x1="222" y1="615" x2="222" y2="628" stroke="#e11d48" stroke-width="2" marker-end="url(#arrow-down-blue)" />
+
+          <!-- Sub-block A2: Text Chunking -->
+          <g transform="translate(64, 632)">
+            <rect width="317" height="50" rx="8" fill="#fff1f2" stroke="#fda4af" stroke-width="1"/>
+            <text x="12" y="19" font-size="11.5" font-weight="700" fill="#9f1239">✂️ Khối Chia Đoạn Thông Minh (Chunking)</text>
+            <text x="12" y="36" font-size="9.5" font-weight="500" fill="#475569">Phân mảnh văn bản theo ngữ nghĩa, tokens & overlap</text>
+          </g>
+
+          <!-- Flow Arrow down inside Col A -->
+          <line x1="222" y1="686" x2="222" y2="699" stroke="#e11d48" stroke-width="2" marker-end="url(#arrow-down-blue)" />
+
+          <!-- Sub-block A3: sqlite-vec Local Database -->
+          <g transform="translate(64, 703)">
+            <rect width="317" height="78" rx="8" fill="#fff1f2" stroke="#fda4af" stroke-width="1.5"/>
+            <text x="12" y="20" font-size="12" font-weight="700" fill="#9f1239">🗄️ CSDL Véc-tơ Cục bộ (sqlite-vec)</text>
+            <text x="12" y="38" font-size="10" font-weight="600" fill="#0f172a">• SQLite nhúng cục bộ + extension sqlite-vec</text>
+            <text x="12" y="54" font-size="9.5" font-weight="500" fill="#475569">• Drizzle ORM quản lý Schema & Quan hệ dữ liệu</text>
+            <text x="12" y="69" font-size="9.5" font-weight="500" fill="#475569">• Truy vấn tương đồng ngữ nghĩa (Cosine Similarity)</text>
+          </g>
+        </g>
+
+        <!-- COLUMN B: LOCAL AI INFERENCE ENGINE -->
+        <g id="col-ai" class="diagram-card" filter="url(#shadow-card)">
+          <rect x="427" y="495" width="346" height="300" rx="14" fill="#ffffff" stroke="#ddd6fe" stroke-width="1.5" />
+          <path d="M 427 509 A 14 14 0 0 1 441 495 L 759 495 A 14 14 0 0 1 773 509 L 773 533 L 427 533 Z" fill="url(#grad-ai)" />
+          <text x="442" y="520" font-size="12.5" font-weight="700" fill="#ffffff">ĐIỀU PHỐI & SUY LUẬN AI CỤC BỘ</text>
+
+          <!-- Sub-block B1: LlamaService / ProviderManager -->
+          <g transform="translate(442, 545)">
+            <rect width="316" height="66" rx="8" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+            <text x="12" y="20" font-size="11.5" font-weight="700" fill="#5b21b6">⚙️ LlamaService / ProviderManager</text>
+            <text x="12" y="38" font-size="9.5" font-weight="500" fill="#475569">• Điều phối nhà cung cấp mô hình (Local / Remote)</text>
+            <text x="12" y="53" font-size="9.5" font-weight="500" fill="#475569">• Vercel AI SDK v5 integration • Quản lý Session Context</text>
+          </g>
+
+          <!-- Flow Arrow down inside Col B -->
+          <line x1="600" y1="615" x2="600" y2="628" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrow-purple)" />
+
+          <!-- Sub-block B2: llama.cpp Core Execution -->
+          <g transform="translate(442, 632)">
+            <rect width="316" height="74" rx="8" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+            <text x="12" y="20" font-size="12" font-weight="800" fill="#5b21b6">🚀 Lõi thực thi llama.cpp (Local Engine)</text>
+            <text x="12" y="38" font-size="10" font-weight="600" fill="#0f172a">• Tối ưu hóa tính toán ma trận, định dạng GGUF</text>
+            <text x="12" y="54" font-size="9.5" font-weight="500" fill="#475569">• Tăng tốc phần cứng GPU (CUDA / ROCm / Vulkan)</text>
+            <text x="12" y="68" font-size="9.5" font-weight="500" fill="#475569">• Chạy hoàn toàn Offline, không phụ thuộc Internet</text>
+          </g>
+
+          <!-- Flow Arrow down inside Col B -->
+          <line x1="600" y1="710" x2="600" y2="723" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrow-purple)" />
+
+          <!-- Sub-block B3: Embeddings & Generation Worker -->
+          <g transform="translate(442, 727)">
+            <rect width="316" height="54" rx="8" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+            <text x="12" y="19" font-size="11" font-weight="700" fill="#5b21b6">✨ Embedding & Streaming Generation</text>
+            <text x="12" y="36" font-size="9.5" font-weight="500" fill="#475569">Tạo Vector nhúng & phản hồi dạng dòng (Tokens stream)</text>
+          </g>
+        </g>
+
+        <!-- COLUMN C: SPECIALIZED TRAINING SUBSYSTEMS (MINDMAP & QUIZ) -->
+        <g id="col-training" class="diagram-card" filter="url(#shadow-card)">
+          <rect x="805" y="495" width="345" height="300" rx="14" fill="#ffffff" stroke="#99f6e4" stroke-width="1.5" />
+          <path d="M 805 509 A 14 14 0 0 1 819 495 L 1136 495 A 14 14 0 0 1 1150 509 L 1150 533 L 805 533 Z" fill="url(#grad-training)" />
+          <text x="820" y="520" font-size="12.5" font-weight="700" fill="#ffffff">PHÂN HỆ HUẤN LUYỆN CHUYÊN SÂU</text>
+
+          <!-- Sub-block C1: MindMap Generator Subsystem -->
+          <g transform="translate(820, 545)">
+            <rect width="315" height="110" rx="8" fill="#f0fdfa" stroke="#5eead4" stroke-width="1.5"/>
+            <text x="12" y="22" font-size="12" font-weight="800" fill="#115e59">🗺️ Phân hệ Sơ đồ tư duy (MindMap)</text>
+            <text x="12" y="42" font-size="10" font-weight="600" fill="#0f172a">• Tự động phân tích tài liệu & bóc tách thực thể</text>
+            <text x="12" y="59" font-size="9.5" font-weight="500" fill="#475569">• Tạo phân cấp cây tri thức (Hierarchical Tree/Graph)</text>
+            <text x="12" y="76" font-size="9.5" font-weight="500" fill="#475569">• Xuất định dạng chuẩn Markdown / Markmap / SVG</text>
+            <text x="12" y="94" font-size="9.5" font-weight="700" fill="#0d9488">➜ Giúp nắm bắt kiến thức trực quan, đa tầng</text>
+          </g>
+
+          <!-- Flow connection inside training -->
+          <line x1="977" y1="659" x2="977" y2="671" stroke="#0d9488" stroke-width="1.5" stroke-dasharray="2 2" />
+
+          <!-- Sub-block C2: Quiz Generator Subsystem -->
+          <g transform="translate(820, 674)">
+            <rect width="315" height="107" rx="8" fill="#f0fdfa" stroke="#5eead4" stroke-width="1.5"/>
+            <text x="12" y="22" font-size="12" font-weight="800" fill="#115e59">📝 Phân hệ Đề trắc nghiệm (Quiz)</text>
+            <text x="12" y="42" font-size="10" font-weight="600" fill="#0f172a">• Tự động tạo bộ câu hỏi kiểm tra từ nội dung</text>
+            <text x="12" y="59" font-size="9.5" font-weight="500" fill="#475569">• Đa dạng: Trắc nghiệm 4 lựa chọn, Đúng/Sai, Điền từ</text>
+            <text x="12" y="76" font-size="9.5" font-weight="500" fill="#475569">• Tạo đáp án chuẩn kèm lời giải thích ngữ cảnh chi tiết</text>
+            <text x="12" y="94" font-size="9.5" font-weight="700" fill="#0d9488">➜ Hỗ trợ ôn luyện, tự đánh giá năng lực</text>
+          </g>
+        </g>
+
+        <!-- Horizontal Inter-subsystem Data Flow Lines -->
+        <g id="inter-subsystem-flows">
+          <!-- RAG <-> AI Engine (Context Injection & Embedding Generation) -->
+          <path d="M 395 720 L 427 720" stroke="#7c3aed" stroke-width="2" stroke-dasharray="3 3" marker-end="url(#arrow-bidirectional)" />
+          <text x="411" y="712" text-anchor="middle" font-size="8.5" font-weight="700" fill="#7c3aed">RAG Context</text>
+
+          <!-- AI Engine <-> Training Subsystem (Prompt & Generation Pipelines) -->
+          <path d="M 773 600 L 805 600" stroke="#0d9488" stroke-width="2" stroke-dasharray="3 3" marker-end="url(#arrow-bidirectional)" />
+          <text x="789" y="592" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0d9488">AI Prompts</text>
+        </g>
+
+        <!-- Connectors down to Foundation Platform -->
+        <g id="conn-to-foundation">
+          <line x1="222" y1="795" x2="222" y2="820" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3 3" />
+          <line x1="600" y1="795" x2="600" y2="820" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3 3" />
+          <line x1="977" y1="795" x2="977" y2="820" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3 3" />
+        </g>
+
+        <!-- ==================== 5. PLATFORM & ENVIRONMENT FOUNDATION ==================== -->
+        <g id="layer-platform" class="diagram-card" filter="url(#shadow-card)">
+          <rect x="50" y="820" width="1100" height="82" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
+          <path d="M 50 834 A 14 14 0 0 1 64 820 L 1136 820 A 14 14 0 0 1 1150 834 L 1150 848 L 50 848 Z" fill="url(#grad-os)" />
+          <text x="70" y="839" font-size="12" font-weight="700" fill="#ffffff">NỀN TẢNG CÔNG NGHỆ, AN TOÀN BỘ NHỚ & MÔI TRƯỜNG VẬN HÀNH ĐỘC LẬP</text>
+
+          <!-- Item 1: TypeScript -->
+          <g transform="translate(70, 855)">
+            <rect width="336" height="36" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
+            <text x="14" y="23" font-size="11.5" font-weight="700" fill="#0f172a">🔷 Ngôn ngữ TypeScript / JS</text>
+            <rect x="216" y="8" width="108" height="20" rx="4" fill="#e0f2fe" stroke="#38bdf8" stroke-width="0.8"/>
+            <text x="270" y="22" text-anchor="middle" font-size="9.5" font-weight="700" fill="#0369a1">Strict Type Safety</text>
+          </g>
+
+          <!-- Item 2: Memory & Privacy -->
+          <g transform="translate(432, 855)">
+            <rect width="336" height="36" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
+            <text x="14" y="23" font-size="11.5" font-weight="700" fill="#0f172a">🔒 An toàn bộ nhớ & Bảo mật</text>
+            <rect x="226" y="8" width="98" height="20" rx="4" fill="#ecfdf5" stroke="#34d399" stroke-width="0.8"/>
+            <text x="275" y="22" text-anchor="middle" font-size="9.5" font-weight="700" fill="#047857">100% Local-First</text>
+          </g>
+
+          <!-- Item 3: Windows OS Packaged -->
+          <g transform="translate(794, 855)">
+            <rect width="336" height="36" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
+            <text x="14" y="23" font-size="11.5" font-weight="700" fill="#0f172a">🪟 Đóng gói độc lập Windows</text>
+            <rect x="226" y="8" width="98" height="20" rx="4" fill="#fff7ed" stroke="#fb923c" stroke-width="0.8"/>
+            <text x="275" y="22" text-anchor="middle" font-size="9.5" font-weight="700" fill="#c2410c">Portable / Setup</text>
+          </g>
+        </g>
+
+        <!-- ==================== 6. LEGEND / CHÚ THÍCH ==================== -->
+        <g id="diagram-legend" transform="translate(50, 915)">
+          <rect width="1100" height="42" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1" />
+          <text x="20" y="26" font-size="11" font-weight="700" fill="#475569">CHÚ THÍCH:</text>
+          
+          <circle cx="110" cy="22" r="6" fill="#0284c7" />
+          <text x="122" y="26" font-size="10.5" font-weight="500" fill="#334155">Giao diện (Renderer)</text>
+
+          <circle cx="270" cy="22" r="6" fill="#d97706" />
+          <text x="282" y="26" font-size="10.5" font-weight="500" fill="#334155">Cầu nối IPC</text>
+
+          <circle cx="390" cy="22" r="6" fill="#059669" />
+          <text x="402" y="26" font-size="10.5" font-weight="500" fill="#334155">Main Process</text>
+
+          <circle cx="510" cy="22" r="6" fill="#e11d48" />
+          <text x="522" y="26" font-size="10.5" font-weight="500" fill="#334155">File Loaders & RAG</text>
+
+          <circle cx="670" cy="22" r="6" fill="#7c3aed" />
+          <text x="682" y="26" font-size="10.5" font-weight="500" fill="#334155">llama.cpp AI Engine</text>
+
+          <circle cx="825" cy="22" r="6" fill="#0d9488" />
+          <text x="837" y="26" font-size="10.5" font-weight="500" fill="#334155">MindMap & Quiz</text>
+
+          <line x1="965" y1="22" x2="995" y2="22" stroke="#64748b" stroke-width="2" stroke-dasharray="3 3" />
+          <text x="1005" y="26" font-size="10.5" font-weight="500" fill="#334155">Luồng dữ liệu liên khối</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Download Scripts -->
+  <script>
+    // Export high-res PNG (2x scale for sharp print and presentation)
+    function downloadPNG() {
+      const svg = document.getElementById('diagram-svg');
+      const svgData = new XMLSerializer().serializeToString(svg);
+      
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      // 2x scaling for ultra sharp rasterization
+      const scale = 2;
+      const width = 1200;
+      const height = 970;
+      
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobURL = URL.createObjectURL(svgBlob);
+      
+      img.onload = function() {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const pngUrl = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.href = pngUrl;
+        downloadLink.download = 'so_do_khoi_kien_truc_michat.png';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(blobURL);
+      };
+      
+      img.src = blobURL;
+    }
+
+    // Export pure vector SVG
+    function downloadSVG() {
+      const svg = document.getElementById('diagram-svg');
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const svgUrl = URL.createObjectURL(svgBlob);
+      
+      const downloadLink = document.createElement('a');
+      downloadLink.href = svgUrl;
+      downloadLink.download = 'so_do_khoi_kien_truc_michat.svg';
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      URL.revokeObjectURL(svgUrl);
+    }
+  </script>
+</body>
+</html>

@@ -5,11 +5,44 @@
 
 import { readFile } from 'fs/promises'
 import { extname } from 'path'
-// Dùng bản legacy build cho môi trường Node.js
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import type { PDFDocumentProxy, TextItem } from 'pdfjs-dist/types/src/display/api'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, PageInfo } from './types'
+
+type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs')
+
+let pdfjsPromise: Promise<PdfJsModule> | undefined
+
+function ensurePdfDomGlobals(): void {
+  if (typeof globalThis.DOMMatrix === 'undefined') {
+    globalThis.DOMMatrix = class DOMMatrix {
+      readonly a = 1
+      readonly b = 0
+      readonly c = 0
+      readonly d = 1
+      readonly e = 0
+      readonly f = 0
+    } as typeof DOMMatrix
+  }
+}
+
+async function getPdfJs(): Promise<PdfJsModule> {
+  ensurePdfDomGlobals()
+
+  if (!pdfjsPromise) {
+    pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then(async (pdfjsLib) => {
+      try {
+        await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+      } catch {
+        Logger.warn('PdfLoader', 'Không thể tải PDF.js worker, chuyển sang chế độ inline')
+      }
+
+      return pdfjsLib
+    })
+  }
+
+  return pdfjsPromise
+}
 
 /**
  * Bộ nạp tài liệu PDF
@@ -18,26 +51,6 @@ import type { IDocumentLoader, DocumentLoadResult, LoadOptions, PageInfo } from 
 export class PdfLoader implements IDocumentLoader {
   readonly supportedMimeTypes = ['application/pdf']
   readonly supportedExtensions = ['pdf']
-
-  constructor() {
-    // Cấu hình PDF.js worker (dùng legacy build)
-    // Trong môi trường Electron/Node.js cần dùng phiên bản legacy
-    try {
-      // Dùng dynamic import thay cho require
-      import('pdfjs-dist/legacy/build/pdf.worker.mjs')
-        .then((pdfjsWorker) => {
-          if (pdfjsWorker) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-          }
-        })
-        .catch(() => {
-          Logger.warn('PdfLoader', 'Không thể tải PDF.js worker, chuyển sang chế độ inline')
-        })
-    } catch {
-      // Nếu không tải được worker, dùng chế độ inline
-      Logger.warn('PdfLoader', 'Không thể tải PDF.js worker, chuyển sang chế độ inline')
-    }
-  }
 
   canLoad(filePathOrMimeType: string): boolean {
     const lower = filePathOrMimeType.toLowerCase()
@@ -56,6 +69,8 @@ export class PdfLoader implements IDocumentLoader {
     const opts = { preserveStructure: true, ...options }
 
     try {
+      const pdfjsLib = await getPdfJs()
+
       // Nạp tài liệu PDF
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(buffer),
@@ -86,8 +101,8 @@ export class PdfLoader implements IDocumentLoader {
         // Trích xuất nội dung văn bản của trang
         const pageText = textContent.items
           .filter((item): item is TextItem => 'str' in item)
-          .map((item) => item.str)
-          .join(' ')
+          .map((item) => item.str + (item.hasEOL ? '\n' : ''))
+          .join('')
 
         // Làm sạch văn bản
         const cleanedText = this.cleanPDFText(pageText)
@@ -152,8 +167,6 @@ export class PdfLoader implements IDocumentLoader {
       text
         // Loại bỏ khoảng trắng dư thừa
         .replace(/[ \t]+/g, ' ')
-        // Sửa lỗi xuống dòng (nhiều dòng thực ra có thể cùng một đoạn)
-        .replace(/([^\n])\n([^\n])/g, '$1 $2')
         // Chuẩn hóa nhiều dòng trống thành 2 dòng
         .replace(/\n{3,}/g, '\n\n')
         // Loại bỏ khoảng trắng đầu/cuối

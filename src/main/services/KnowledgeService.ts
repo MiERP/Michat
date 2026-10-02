@@ -21,6 +21,7 @@ import { FileParserService } from './FileParserService'
 import {
   extractDocumentMetadata,
   inspectorFromMetadata,
+  isOriginalLegalDocument,
   mergeDocumentMetadataInspector,
   metadataFromInspector,
   type DocumentMetadata,
@@ -335,24 +336,24 @@ export class KnowledgeService {
     if (document) {
       const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
       const extracted = extractDocumentMetadata({ title: document.title, content })
-      const inspector = mergeDocumentMetadataInspector(
-        extracted.inspector,
-        rootMetadata.documentMetadataInspector as DocumentMetadataInspector | undefined
-      )
+      const inspector = isOriginalLegalDocument(content)
+        ? mergeDocumentMetadataInspector(
+            extracted.inspector,
+            rootMetadata.documentMetadataInspector as DocumentMetadataInspector | undefined
+          )
+        : extracted.inspector
 
-      if (Object.values(inspector.fields).some(Boolean)) {
-        db.update(documents)
-          .set({
-            metadata: {
-              ...rootMetadata,
-              documentMetadata: metadataFromInspector(inspector),
-              documentMetadataInspector: inspector
-            },
-            updatedAt: now
-          })
-          .where(eq(documents.id, documentId))
-          .run()
-      }
+      db.update(documents)
+        .set({
+          metadata: {
+            ...rootMetadata,
+            documentMetadata: metadataFromInspector(inspector),
+            documentMetadataInspector: inspector
+          },
+          updatedAt: now
+        })
+        .where(eq(documents.id, documentId))
+        .run()
     }
 
     // 1. Chunk
@@ -967,6 +968,35 @@ export class KnowledgeService {
     return this.getDocument(documentId)!
   }
 
+  refreshDocumentMetadata(documentId: string): Document {
+    const db = getDatabase()
+    const document = this.getDocument(documentId)
+    if (!document) throw new Error(`Document ${documentId} not found`)
+
+    const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
+    const extracted = extractDocumentMetadata({ title: document.title, content: document.content || '' })
+    const inspector = isOriginalLegalDocument(document.content || '')
+      ? mergeDocumentMetadataInspector(
+          extracted.inspector,
+          rootMetadata.documentMetadataInspector as DocumentMetadataInspector | undefined
+        )
+      : extracted.inspector
+
+    db.update(documents)
+      .set({
+        metadata: {
+          ...rootMetadata,
+          documentMetadata: metadataFromInspector(inspector),
+          documentMetadataInspector: inspector
+        },
+        updatedAt: new Date()
+      })
+      .where(eq(documents.id, documentId))
+      .run()
+
+    return this.getDocument(documentId)!
+  }
+
   getDocumentPageContent(
     documentId: string,
     pageNumber: number,
@@ -1053,6 +1083,13 @@ export class KnowledgeService {
     const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()
     if (!doc || !doc.content) throw new Error(`Document ${documentId} not found or has no content`)
 
+    const localFile =
+      doc.localFilePath && this.isManagedLocalFilePath(doc.localFilePath)
+        ? await stat(doc.localFilePath).catch(() => undefined)
+        : undefined
+    const parsed = localFile ? await this.fileParserService.parseFile(doc.localFilePath!) : undefined
+    const content = parsed?.content ?? doc.content
+
     // 1. Delete old chunks from vector store
     const oldChunks = db
       .select({ id: chunks.id })
@@ -1080,13 +1117,32 @@ export class KnowledgeService {
     }
 
     // 3. Reset status on EXISTING document record (no new record created!)
+    const metadata = { ...((doc.metadata as Record<string, unknown> | null) || {}) }
+    if (parsed) {
+      delete metadata.structure
+      Object.assign(metadata, parsed.metadata, this.buildCompactStructureMetadata(parsed.structure))
+    }
     db.update(documents)
-      .set({ status: 'processing', updatedAt: new Date() })
+      .set({
+        status: 'processing',
+        content,
+        contentHash: createHash('md5').update(content).digest('hex'),
+        mimeType: parsed?.mimeType ?? doc.mimeType,
+        fileSize: localFile?.size ?? doc.fileSize,
+        metadata,
+        updatedAt: new Date()
+      })
       .where(eq(documents.id, documentId))
       .run()
 
     // 4. Re-index using existing documentId via shared _indexContent
-    await this._indexContent(documentId, doc.notebookId, doc.content, undefined, onProgress)
+    await this._indexContent(
+      documentId,
+      doc.notebookId,
+      content,
+      parsed ? this.buildChunkOptionsForMimeType(parsed.mimeType) : undefined,
+      onProgress
+    )
   }
 
   /**

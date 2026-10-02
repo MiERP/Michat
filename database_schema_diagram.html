@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lược Đồ Cơ Sở Dữ Liệu Quan Hệ & Véc-Tơ MiChat</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    }
+    .mono-font {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .table-card {
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .table-card:hover {
+      transform: translateY(-2px);
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen p-4 md:p-8">
+
+  <!-- Header & Export Action Bar -->
+  <div class="max-w-[1340px] mx-auto mb-6 bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div>
+      <div class="flex items-center gap-3">
+        <span class="px-3 py-1 bg-purple-100 text-purple-700 font-bold text-xs rounded-full uppercase tracking-wider flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+          Hybrid Relational + Vector DB
+        </span>
+        <span class="px-3 py-1 bg-blue-100 text-blue-700 font-semibold text-xs rounded-full">SQLite + sqlite-vec</span>
+        <span class="px-3 py-1 bg-emerald-100 text-emerald-700 font-semibold text-xs rounded-full">Drizzle ORM Strictly Typed</span>
+      </div>
+      <h1 class="text-2xl font-bold text-slate-900 mt-2">Lược Đồ Cơ Sở Dữ Liệu Quan Hệ Kết Hợp Véc-tơ (ERD)</h1>
+      <p class="text-sm text-slate-500 mt-1">Quản lý sổ tay huấn luyện, tệp tài liệu bóc tách, véc-tơ ngữ nghĩa, hội thoại trích dẫn, MindMap và Quiz</p>
+    </div>
+
+    <!-- Export Buttons -->
+    <div class="flex items-center gap-2.5 flex-wrap">
+      <button onclick="downloadPNG()" class="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl shadow-sm transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        Tải ảnh PNG (2K)
+      </button>
+      <button onclick="downloadSVG()" class="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm rounded-xl shadow-sm transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/></svg>
+        Tải file SVG
+      </button>
+      <button onclick="window.print()" class="inline-flex items-center gap-2 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-sm rounded-xl transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+        In / PDF
+      </button>
+    </div>
+  </div>
+
+  <!-- Canvas Container -->
+  <div class="max-w-[1340px] mx-auto bg-white rounded-2xl p-4 md:p-8 shadow-md border border-slate-200 overflow-x-auto">
+    <div id="diagram-wrapper" class="min-w-[1240px] flex justify-center bg-white p-2">
+      <!-- Standalone SVG ERD Diagram -->
+      <svg id="diagram-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 1060" width="1260" height="1060" class="w-full h-auto select-none bg-white">
+        <defs>
+          <style>
+            text {
+              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            }
+            .code-text {
+              font-family: 'JetBrains Mono', monospace;
+            }
+          </style>
+
+          <!-- Table Header Gradients -->
+          <linearGradient id="hdr-notebook" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#4f46e5" /><stop offset="100%" stop-color="#4338ca" />
+          </linearGradient>
+          <linearGradient id="hdr-item" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#e11d48" /><stop offset="100%" stop-color="#be123c" />
+          </linearGradient>
+          <linearGradient id="hdr-chunk" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#ea580c" /><stop offset="100%" stop-color="#c2410c" />
+          </linearGradient>
+          <linearGradient id="hdr-vec" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#7c3aed" /><stop offset="100%" stop-color="#6d28d9" />
+          </linearGradient>
+          <linearGradient id="hdr-chat" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#0284c7" /><stop offset="100%" stop-color="#0369a1" />
+          </linearGradient>
+          <linearGradient id="hdr-quiz" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#059669" /><stop offset="100%" stop-color="#047857" />
+          </linearGradient>
+          <linearGradient id="hdr-mindmap" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#0d9488" /><stop offset="100%" stop-color="#0f766e" />
+          </linearGradient>
+
+          <!-- Drop Shadow -->
+          <filter id="shadow-card" x="-3%" y="-3%" width="106%" height="108%" filterUnits="userSpaceOnUse">
+            <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.06"/>
+          </filter>
+
+          <!-- Relationship Markers -->
+          <marker id="marker-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 2 L 8 5 L 0 8 z" fill="#64748b" />
+          </marker>
+          <marker id="marker-dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
+            <circle cx="5" cy="5" r="3" fill="#64748b" />
+          </marker>
+
+          <!-- Dot Background Pattern -->
+          <pattern id="dot-grid" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+            <circle cx="2" cy="2" r="1" fill="#f1f5f9" />
+          </pattern>
+        </defs>
+
+        <!-- Base Background -->
+        <rect width="1260" height="1060" fill="#ffffff" />
+        <rect width="1260" height="1060" fill="url(#dot-grid)" />
+
+        <!-- Title Block -->
+        <g id="title-block">
+          <text x="630" y="36" text-anchor="middle" font-size="20" font-weight="800" fill="#0f172a">LƯỢC ĐỒ CƠ SỞ DỮ LIỆU QUAN HỆ KẾT HỢP VÉC-TƠ (HYBRID ERD)</text>
+          <text x="630" y="58" text-anchor="middle" font-size="12.5" font-weight="500" fill="#64748b">Cấu trúc thực thể chuẩn hóa & Bảng ảo sqlite-vec phục vụ suy luận RAG và huấn luyện chuyên ngành</text>
+          <line x1="80" y1="72" x2="1180" y2="72" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="4 4" />
+        </g>
+
+        <!-- ==================== RELATIONSHIP CONNECTOR PATHS (DRAWN BEHIND) ==================== -->
+        <g id="relations" stroke="#94a3b8" stroke-width="1.8" fill="none">
+          <!-- Notebooks -> Items (1:N) -->
+          <path d="M 450 160 L 380 160" marker-end="marker-arrow" marker-start="marker-dot" />
+          <text x="415" y="152" text-anchor="middle" font-size="9.5" font-weight="700" fill="#64748b">1 : N</text>
+
+          <!-- Items -> Chunks (1:N) -->
+          <path d="M 215 310 L 215 350" marker-end="marker-arrow" marker-start="marker-dot" />
+          <text x="232" y="333" text-anchor="start" font-size="9.5" font-weight="700" fill="#64748b">1 : N</text>
+
+          <!-- Chunks -> Chunks_Vec (1:1 Virtual Link) -->
+          <path d="M 215 580 L 215 620" stroke="#7c3aed" stroke-dasharray="4 3" marker-end="marker-arrow" marker-start="marker-dot" />
+          <text x="232" y="603" text-anchor="start" font-size="9.5" font-weight="800" fill="#7c3aed">1 : 1 (vec0)</text>
+
+          <!-- Notebooks -> Chats (1:N) -->
+          <path d="M 810 160 L 880 160" marker-end="marker-arrow" marker-start="marker-dot" />
+          <text x="845" y="152" text-anchor="middle" font-size="9.5" font-weight="700" fill="#64748b">1 : N</text>
+
+          <!-- Chats -> Messages (1:N) -->
+          <path d="M 1045 280 L 1045 320" marker-end="marker-arrow" marker-start="marker-dot" />
+          <text x="1060" y="303" text-anchor="start" font-size="9.5" font-weight="700" fill="#64748b">1 : N</text>
+
+          <!-- Notebooks -> MindMaps (1:N) -->
+          <path d="M 630 260 L 630 350" marker-end="marker-arrow" marker-start="marker-dot" />
+          <text x="645" y="310" text-anchor="start" font-size="9.5" font-weight="700" fill="#64748b">1 : N</text>
+
+          <!-- Notebooks -> Quizzes (1:N) -->
+          <path d="M 450 220 Q 400 220 400 520 T 450 710" stroke="#059669" stroke-dasharray="3 3" marker-end="marker-arrow" />
+          <text x="390" y="470" text-anchor="middle" font-size="9" font-weight="700" fill="#059669">1 : N</text>
+
+          <!-- Quizzes -> Quiz_Sessions (1:N) -->
+          <path d="M 810 715 L 880 715" marker-end="marker-arrow" marker-start="marker-dot" />
+          <text x="845" y="707" text-anchor="middle" font-size="9.5" font-weight="700" fill="#64748b">1 : N</text>
+
+          <!-- Cross Citation Reference: Messages.citations -> Chunks.id -->
+          <path d="M 880 430 Q 760 430 380 470" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="4 3" marker-end="marker-arrow" />
+          <rect x="580" y="438" width="105" height="18" rx="4" fill="#e0f2fe" stroke="#38bdf8" stroke-width="0.8"/>
+          <text x="632.5" y="450" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0369a1">Citations JSON ➔</text>
+        </g>
+
+        <!-- ==================== 1. CENTRAL TABLE: NOTEBOOKS ==================== -->
+        <g id="tbl-notebooks" class="table-card" filter="url(#shadow-card)" transform="translate(450, 90)">
+          <rect width="360" height="170" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 350 0 A 10 10 0 0 1 360 10 L 360 36 L 0 36 Z" fill="url(#hdr-notebook)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">📘 notebooks</text>
+          <text x="345" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#e0e7ff">SỔ TAY TRI THỨC</text>
+
+          <!-- Columns -->
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="120" y="0" font-size="10.5" font-weight="600" fill="#4f46e5">TEXT</text>
+            <rect x="275" y="-11" width="55" height="16" rx="3" fill="#e0e7ff"/><text x="302.5" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#4338ca">PK</text>
+          </g>
+          <line x1="10" y1="68" x2="350" y2="68" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 82)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">title</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT NOT NULL</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Tên chuyên ngành</text>
+          </g>
+          <line x1="10" y1="96" x2="350" y2="96" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 110)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">description</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Mô tả giáo trình</text>
+          </g>
+          <line x1="10" y1="124" x2="350" y2="124" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 138)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">avatar_url</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Ảnh đại diện sổ tay</text>
+          </g>
+          <line x1="10" y1="150" x2="350" y2="150" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 162)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">created_at</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">TIMESTAMP</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Thời gian khởi tạo</text>
+          </g>
+        </g>
+
+        <!-- ==================== 2. LEFT TABLE: ITEMS (DOCUMENTS) ==================== -->
+        <g id="tbl-items" class="table-card" filter="url(#shadow-card)" transform="translate(50, 90)">
+          <rect width="330" height="220" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 320 0 A 10 10 0 0 1 330 10 L 330 36 L 0 36 Z" fill="url(#hdr-item)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">📄 items</text>
+          <text x="315" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#ffe4e6">TỆP TÀI LIỆU NẠP VÀO</text>
+
+          <!-- Rows -->
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#e11d48">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#ffe4e6"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#be123c">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="320" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">notebook_id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#e11d48">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#fee2e2"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="320" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">file_name</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Tên gốc tài liệu</text>
+          </g>
+          <line x1="10" y1="118" x2="320" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 130)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">file_type</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="9.5" font-weight="700" fill="#e11d48">PDF, DOCX, PPTX</text>
+          </g>
+          <line x1="10" y1="144" x2="320" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 156)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">file_size</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Kích thước Bytes</text>
+          </g>
+          <line x1="10" y1="170" x2="320" y2="170" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 182)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">local_path</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Đường dẫn nội bộ</text>
+          </g>
+          <line x1="10" y1="196" x2="320" y2="196" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 208)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">status</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#059669">indexed | failed</text>
+          </g>
+        </g>
+
+        <!-- ==================== 3. LEFT TABLE: CHUNKS ==================== -->
+        <g id="tbl-chunks" class="table-card" filter="url(#shadow-card)" transform="translate(50, 350)">
+          <rect width="330" height="230" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 320 0 A 10 10 0 0 1 330 10 L 330 36 L 0 36 Z" fill="url(#hdr-chunk)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">✂️ chunks</text>
+          <text x="315" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#ffedd5">PHÂN MẢNH VĂN BẢN</text>
+
+          <!-- Rows -->
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#ea580c">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#ffedd5"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#c2410c">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="320" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">item_id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#ea580c">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#fee2e2"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="320" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">content</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Nội dung đoạn trích</text>
+          </g>
+          <line x1="10" y1="118" x2="320" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 130)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">page_number</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Trang tài liệu gốc</text>
+          </g>
+          <line x1="10" y1="144" x2="320" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 156)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">chunk_index</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Thứ tự trong file</text>
+          </g>
+          <line x1="10" y1="170" x2="320" y2="170" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 182)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">char_count</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Số lượng ký tự</text>
+          </g>
+          <line x1="10" y1="196" x2="320" y2="196" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 208)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">metadata</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">JSON</text>
+            <text x="300" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#ea580c">Offset, Headers, Box</text>
+          </g>
+        </g>
+
+        <!-- ==================== 4. VECTOR VIRTUAL TABLE: CHUNKS_VEC ==================== -->
+        <g id="tbl-chunks-vec" class="table-card" filter="url(#shadow-card)" transform="translate(50, 620)">
+          <rect width="330" height="200" rx="10" fill="#ffffff" stroke="#a78bfa" stroke-width="1.8"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 320 0 A 10 10 0 0 1 330 10 L 330 36 L 0 36 Z" fill="url(#hdr-vec)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">🔮 chunks_vec</text>
+          <text x="315" y="23" text-anchor="end" font-size="10" font-weight="700" fill="#ede9fe">SQLITE-VEC VIRTUAL TABLE</text>
+
+          <!-- Rows -->
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">rowid</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#7c3aed">INTEGER</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#ede9fe"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#6d28d9">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="320" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">chunk_id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#7c3aed">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#fee2e2"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="320" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">embedding</text>
+            <text x="110" y="0" font-size="10.5" font-weight="700" fill="#7c3aed">FLOAT[384..1024]</text>
+            <rect x="245" y="-11" width="65" height="16" rx="3" fill="#ede9fe"/><text x="277.5" y="1" text-anchor="middle" font-size="8.5" font-weight="700" fill="#6d28d9">VEC INDEX</text>
+          </g>
+          <line x1="10" y1="118" x2="320" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 134)">
+            <rect width="302" height="52" rx="6" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+            <text x="10" y="18" font-size="10" font-weight="700" fill="#5b21b6">⚡ Tính năng truy vấn sqlite-vec:</text>
+            <text x="10" y="34" font-size="9.5" font-weight="500" fill="#475569">• Khoảng cách Cosine siêu tốc (vec_distance_cosine)</text>
+            <text x="10" y="47" font-size="9.5" font-weight="500" fill="#475569">• KNN Search trực tiếp trong câu lệnh SQL tiêu chuẩn</text>
+          </g>
+        </g>
+
+        <!-- ==================== 5. RIGHT TABLE 1: CHATS ==================== -->
+        <g id="tbl-chats" class="table-card" filter="url(#shadow-card)" transform="translate(880, 90)">
+          <rect width="330" height="190" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 320 0 A 10 10 0 0 1 330 10 L 330 36 L 0 36 Z" fill="url(#hdr-chat)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">💬 chats</text>
+          <text x="315" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#e0f2fe">PHIÊN HỘI THOẠI RAG</text>
+
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#0284c7">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#e0f2fe"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#0369a1">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="320" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">notebook_id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#0284c7">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#fee2e2"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="320" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">title</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Tiêu đề phiên chat</text>
+          </g>
+          <line x1="10" y1="118" x2="320" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 130)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">total_tokens</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Tổng Tokens dùng</text>
+          </g>
+          <line x1="10" y1="144" x2="320" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 156)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">created_at</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TIMESTAMP</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Thời gian mở chat</text>
+          </g>
+        </g>
+
+        <!-- ==================== 6. RIGHT TABLE 2: MESSAGES ==================== -->
+        <g id="tbl-messages" class="table-card" filter="url(#shadow-card)" transform="translate(880, 320)">
+          <rect width="330" height="230" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 320 0 A 10 10 0 0 1 330 10 L 330 36 L 0 36 Z" fill="url(#hdr-chat)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">✉️ messages</text>
+          <text x="315" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#e0f2fe">LỊCH SỬ TIN NHẮN & TRÍCH DẪN</text>
+
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#0284c7">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#e0f2fe"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#0369a1">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="320" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">chat_id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#0284c7">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#fee2e2"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="320" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">role</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">user | assistant</text>
+          </g>
+          <line x1="10" y1="118" x2="320" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 130)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">content</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Nội dung câu trả lời</text>
+          </g>
+          <line x1="10" y1="144" x2="320" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 156)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0369a1" class="code-text">citations</text>
+            <text x="110" y="0" font-size="10.5" font-weight="700" fill="#0284c7">JSON</text>
+            <rect x="235" y="-11" width="75" height="16" rx="3" fill="#e0f2fe"/><text x="272.5" y="1" text-anchor="middle" font-size="8.5" font-weight="700" fill="#0369a1">RAG CITATIONS</text>
+          </g>
+          <line x1="10" y1="170" x2="320" y2="170" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 182)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">reasoning</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Suy luận DeepSeek</text>
+          </g>
+          <line x1="10" y1="196" x2="320" y2="196" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 208)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">created_at</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TIMESTAMP</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Thời gian gửi tin</text>
+          </g>
+        </g>
+
+        <!-- ==================== 7. CENTER TABLE 2: MINDMAPS ==================== -->
+        <g id="tbl-mindmaps" class="table-card" filter="url(#shadow-card)" transform="translate(450, 350)">
+          <rect width="360" height="230" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 350 0 A 10 10 0 0 1 360 10 L 360 36 L 0 36 Z" fill="url(#hdr-mindmap)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">🧠 mindmaps</text>
+          <text x="345" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#ccfbf1">SƠ ĐỒ TƯ DUY PHÂN CẤP</text>
+
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="120" y="0" font-size="10.5" font-weight="600" fill="#0d9488">TEXT</text>
+            <rect x="275" y="-11" width="55" height="16" rx="3" fill="#ccfbf1"/><text x="302.5" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#0f766e">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="350" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">notebook_id</text>
+            <text x="120" y="0" font-size="10.5" font-weight="600" fill="#0d9488">TEXT</text>
+            <rect x="275" y="-11" width="55" height="16" rx="3" fill="#fee2e2"/><text x="302.5" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="350" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">title</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Tên chủ đề MindMap</text>
+          </g>
+          <line x1="10" y1="118" x2="350" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 130)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f766e" class="code-text">nodes_data</text>
+            <text x="120" y="0" font-size="10.5" font-weight="700" fill="#0d9488">JSON</text>
+            <text x="330" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#0f766e">React Flow Nodes []</text>
+          </g>
+          <line x1="10" y1="144" x2="350" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 156)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f766e" class="code-text">edges_data</text>
+            <text x="120" y="0" font-size="10.5" font-weight="700" fill="#0d9488">JSON</text>
+            <text x="330" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#0f766e">React Flow Edges []</text>
+          </g>
+          <line x1="10" y1="170" x2="350" y2="170" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 182)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f766e" class="code-text">chunk_mapping</text>
+            <text x="120" y="0" font-size="10.5" font-weight="700" fill="#0d9488">JSON</text>
+            <text x="330" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#0f766e">nodeId ➔ chunkIds</text>
+          </g>
+          <line x1="10" y1="196" x2="350" y2="196" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 208)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">version</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Phiên bản tạo tự động</text>
+          </g>
+        </g>
+
+        <!-- ==================== 8. CENTER TABLE 3: QUIZZES ==================== -->
+        <g id="tbl-quizzes" class="table-card" filter="url(#shadow-card)" transform="translate(450, 620)">
+          <rect width="360" height="230" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 350 0 A 10 10 0 0 1 360 10 L 360 36 L 0 36 Z" fill="url(#hdr-quiz)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">📝 quizzes</text>
+          <text x="345" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#d1fae5">NGÂN HÀNG ĐỀ TRẮC NGHIỆM</text>
+
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="120" y="0" font-size="10.5" font-weight="600" fill="#059669">TEXT</text>
+            <rect x="275" y="-11" width="55" height="16" rx="3" fill="#d1fae5"/><text x="302.5" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#047857">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="350" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">notebook_id</text>
+            <text x="120" y="0" font-size="10.5" font-weight="600" fill="#059669">TEXT</text>
+            <rect x="275" y="-11" width="55" height="16" rx="3" fill="#fee2e2"/><text x="302.5" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="350" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">title</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Tiêu đề bộ đề thi</text>
+          </g>
+          <line x1="10" y1="118" x2="350" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 130)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#047857" class="code-text">questions</text>
+            <text x="120" y="0" font-size="10.5" font-weight="700" fill="#059669">JSON</text>
+            <text x="330" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#047857">4 Options, Ans, Expl</text>
+          </g>
+          <line x1="10" y1="144" x2="350" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 156)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#047857" class="code-text">chunk_mapping</text>
+            <text x="120" y="0" font-size="10.5" font-weight="700" fill="#059669">JSON</text>
+            <text x="330" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#047857">questionId ➔ chunkIds</text>
+          </g>
+          <line x1="10" y1="170" x2="350" y2="170" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 182)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">version</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="330" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Phiên bản đề thi</text>
+          </g>
+          <line x1="10" y1="196" x2="350" y2="196" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 208)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">status</text>
+            <text x="120" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="330" y="0" text-anchor="end" font-size="9.5" font-weight="600" fill="#059669">completed | failed</text>
+          </g>
+        </g>
+
+        <!-- ==================== 9. RIGHT TABLE 3: QUIZ_SESSIONS ==================== -->
+        <g id="tbl-quiz-sessions" class="table-card" filter="url(#shadow-card)" transform="translate(880, 620)">
+          <rect width="330" height="230" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M 0 10 A 10 10 0 0 1 10 0 L 320 0 A 10 10 0 0 1 330 10 L 330 36 L 0 36 Z" fill="url(#hdr-quiz)"/>
+          <text x="14" y="23" font-size="13" font-weight="800" fill="#ffffff">🎖️ quiz_sessions</text>
+          <text x="315" y="23" text-anchor="end" font-size="10.5" font-weight="600" fill="#d1fae5">KẾT QUẢ THI QUÂN NHÂN</text>
+
+          <g transform="translate(14, 52)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#059669">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#d1fae5"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#047857">PK</text>
+          </g>
+          <line x1="10" y1="66" x2="320" y2="66" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 78)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#0f172a" class="code-text">quiz_id</text>
+            <text x="110" y="0" font-size="10.5" font-weight="600" fill="#059669">TEXT</text>
+            <rect x="255" y="-11" width="50" height="16" rx="3" fill="#fee2e2"/><text x="280" y="1" text-anchor="middle" font-size="9" font-weight="700" fill="#991b1b">FK</text>
+          </g>
+          <line x1="10" y1="92" x2="320" y2="92" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 104)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#047857" class="code-text">soldier_name</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TEXT</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Họ tên quân nhân</text>
+          </g>
+          <line x1="10" y1="118" x2="320" y2="118" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 130)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">answers</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">JSON</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Lựa chọn của thí sinh</text>
+          </g>
+          <line x1="10" y1="144" x2="320" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 156)">
+            <text x="0" y="0" font-size="11" font-weight="700" fill="#047857" class="code-text">score</text>
+            <text x="110" y="0" font-size="10.5" font-weight="700" fill="#059669">INTEGER</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="700" fill="#047857">Điểm số đạt được</text>
+          </g>
+          <line x1="10" y1="170" x2="320" y2="170" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 182)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">correct_count</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">INTEGER</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Số câu đúng / Tổng</text>
+          </g>
+          <line x1="10" y1="196" x2="320" y2="196" stroke="#f1f5f9" stroke-width="1"/>
+
+          <g transform="translate(14, 208)">
+            <text x="0" y="0" font-size="11" font-weight="600" fill="#0f172a" class="code-text">completed_at</text>
+            <text x="110" y="0" font-size="10.5" font-weight="500" fill="#64748b">TIMESTAMP</text>
+            <text x="300" y="0" text-anchor="end" font-size="10" font-weight="500" fill="#475569">Thời điểm nộp bài</text>
+          </g>
+        </g>
+
+        <!-- ==================== FOOTER / LEGEND ==================== -->
+        <g id="erd-legend" transform="translate(50, 875)">
+          <rect width="1160" height="70" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+          
+          <g transform="translate(20, 16)">
+            <text x="0" y="14" font-size="11.5" font-weight="800" fill="#1e293b">CHÚ THÍCH CẤU TRÚC LƯỢC ĐỒ (HYBRID ARCHITECTURE):</text>
+            <g transform="translate(0, 32)">
+              <rect x="0" y="-10" width="30" height="14" rx="3" fill="#e0e7ff"/>
+              <text x="15" y="0" text-anchor="middle" font-size="8.5" font-weight="700" fill="#4338ca">PK</text>
+              <text x="38" y="0" font-size="10" font-weight="500" fill="#475569">Khóa chính (Primary Key)</text>
+
+              <rect x="180" y="-10" width="30" height="14" rx="3" fill="#fee2e2"/>
+              <text x="195" y="0" text-anchor="middle" font-size="8.5" font-weight="700" fill="#991b1b">FK</text>
+              <text x="218" y="0" font-size="10" font-weight="500" fill="#475569">Khóa ngoại (Foreign Key, Cascade)</text>
+
+              <rect x="420" y="-10" width="55" height="14" rx="3" fill="#ede9fe"/>
+              <text x="447.5" y="0" text-anchor="middle" font-size="8.5" font-weight="700" fill="#6d28d9">VEC0</text>
+              <text x="482" y="0" font-size="10" font-weight="500" fill="#475569">Bảng ảo sqlite-vec (Vector Store nhúng cục bộ)</text>
+
+              <line x1="740" y1="-3" x2="770" y2="-3" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="3 3"/>
+              <text x="778" y="0" font-size="10" font-weight="500" fill="#475569">Liên kết trích dẫn ngữ cảnh RAG (JSON Citations)</text>
+            </g>
+          </g>
+
+          <g transform="translate(980, 20)">
+            <rect width="160" height="30" rx="6" fill="#4f46e5"/>
+            <text x="80" y="19" text-anchor="middle" font-size="10.5" font-weight="700" fill="#ffffff">Drizzle ORM Strictly Typed</text>
+          </g>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Download Scripts -->
+  <script>
+    // Export PNG 2K
+    function downloadPNG() {
+      const svg = document.getElementById('diagram-svg');
+      const svgData = new XMLSerializer().serializeToString(svg);
+      
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      const scale = 2;
+      const width = 1260;
+      const height = 1060;
+      
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobURL = URL.createObjectURL(svgBlob);
+      
+      img.onload = function() {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const pngUrl = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.href = pngUrl;
+        downloadLink.download = 'luoc_do_csdl_quan_he_vec_to_michat.png';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(blobURL);
+      };
+      
+      img.src = blobURL;
+    }
+
+    // Export SVG Vector
+    function downloadSVG() {
+      const svg = document.getElementById('diagram-svg');
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const svgUrl = URL.createObjectURL(svgBlob);
+      
+      const downloadLink = document.createElement('a');
+      downloadLink.href = svgUrl;
+      downloadLink.download = 'luoc_do_csdl_quan_he_vec_to_michat.svg';
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      URL.revokeObjectURL(svgUrl);
+    }
+  </script>
+</body>
+</html>

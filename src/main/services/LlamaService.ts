@@ -4,6 +4,7 @@ import { join, basename } from 'path'
 import fs from 'fs'
 import Logger from '../../shared/utils/logger'
 import { settingsManager } from '../config'
+import { shouldOffloadChatModelToGpu } from './llama/runtimeProfile'
 
 type ServerKind = 'chat' | 'embedding'
 type Backend = string
@@ -47,6 +48,31 @@ function inferModelTypeFromFilename(filename: string): 'chat' | 'embedding' | 'u
     return 'chat'
   }
   return 'unknown'
+}
+
+function detectModelContextWindow(filename: string): number | null {
+  const id = filename.toLowerCase()
+
+  if (id.includes('gemma-4')) {
+    if (id.includes('e2b') || id.includes('e4b')) {
+      return 131072
+    }
+    return 262144
+  }
+  if (id.includes('qwen3.5')) {
+    return 262144
+  }
+  if (id.includes('qwen3')) {
+    return 32768
+  }
+  if (id.includes('mixtral') || id.includes('mistral')) {
+    return 32768
+  }
+  if (id.includes('llama-4')) {
+    return 262144
+  }
+
+  return null
 }
 
 export type MachineInfo = {
@@ -228,15 +254,27 @@ export class LlamaService {
     const isMidSpec =
       envProfile === 'mid' || (!isLowSpec && (info.ramMB === 0 || info.ramMB <= 16384))
 
-    const threads = Number(
-      process.env.KN_LLAMA_THREADS || Math.max(2, Math.min(8, info.cpuThreads || 4))
-    )
+    const modelSizeMB = this.getDefaultChatModelSizeMB()
+    const useGpu = shouldOffloadChatModelToGpu(info, modelSizeMB)
+    const defaultThreads = useGpu
+      ? Math.min(8, info.cpuThreads || 4)
+      : info.cpuCores || Math.min(18, info.cpuThreads || 4)
+    const threads = Number(process.env.KN_LLAMA_THREADS || Math.max(2, defaultThreads))
 
-    const useGpu = (info.gpuVendor === 'NVIDIA' || info.gpuVendor === 'AMD') && info.hasDGPU
+    const modelContext = this.getDetectedModelContext()
+
+    let chatCtxSize: number
+    if (modelContext && !isLowSpec) {
+      chatCtxSize = Math.min(modelContext, isMidSpec ? 16384 : 131072)
+    } else if (modelContext && isLowSpec) {
+      chatCtxSize = Math.min(modelContext, 8192)
+    } else {
+      chatCtxSize = isLowSpec ? 2048 : isMidSpec ? 4096 : 8192
+    }
 
     const profile: RuntimeProfile = {
       backend,
-      chatCtxSize: isLowSpec ? 2048 : isMidSpec ? 4096 : 8192,
+      chatCtxSize,
       embeddingCtxSize: 1024,
       threads,
       batchSize: isLowSpec ? 128 : 512,
@@ -247,10 +285,32 @@ export class LlamaService {
     this.runtimeProfile = profile
     Logger.info(
       'LlamaService',
-      `RUNTIME PROFILE backend=${profile.backend} ctx(chat=${profile.chatCtxSize},embed=${profile.embeddingCtxSize}) threads=${profile.threads} batch=${profile.batchSize}/${profile.ubatchSize} ngl=${profile.nGpuLayers}`
+      `RUNTIME PROFILE backend=${profile.backend} ctx(chat=${profile.chatCtxSize},embed=${profile.embeddingCtxSize}) threads=${profile.threads} batch=${profile.batchSize}/${profile.ubatchSize} ngl=${profile.nGpuLayers} model=${modelSizeMB}MB vram=${info.gpuVramMB}MB`
     )
 
     return profile
+  }
+
+  private getDefaultChatModelSizeMB(): number {
+    try {
+      const chatModel = this.getDefaultModelFile('chat')
+      return chatModel ? Math.ceil(fs.statSync(chatModel).size / (1024 * 1024)) : 0
+    } catch {
+      return 0
+    }
+  }
+
+  private getDetectedModelContext(): number | null {
+    const modelsDir = this.getModelsDir()
+    if (!modelsDir) return null
+
+    try {
+      const chatModel = this.getDefaultModelFile('chat')
+      if (!chatModel) return null
+      return detectModelContextWindow(chatModel)
+    } catch {
+      return null
+    }
   }
 
   /**

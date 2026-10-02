@@ -59,12 +59,27 @@ const DOCUMENT_TYPES: Array<[RegExp, string]> = [
 
 const ISSUERS: Array<[RegExp, string]> = [
   [/QUỐC\s+HỘI/iu, 'Quốc hội'],
+  [/BỘ\s+CHÍNH\s+TRỊ/iu, 'Bộ Chính trị'],
   [/CHÍNH\s+PHỦ/iu, 'Chính phủ'],
   [/ỦY\s+BAN\s+THƯỜNG\s+VỤ\s+QUỐC\s+HỘI/iu, 'Ủy ban Thường vụ Quốc hội'],
   [/THỦ\s+TƯỚNG\s+CHÍNH\s+PHỦ/iu, 'Thủ tướng Chính phủ']
 ]
 
 const HEADER_LENGTH = 5000
+
+export function isOriginalLegalDocument(content: string): boolean {
+  const opening = content.slice(0, 1500)
+  if (/^\s*(?:BÁO\s+CÁO|PHÂN\s+TÍCH|NGHIÊN\s+CỨU)/iu.test(opening)) return false
+  if (/^.{0,180}:\s*Phân\s+tích\s+(?:toàn\s+diện|chuyên\s+sâu)/iu.test(opening)) {
+    return false
+  }
+  const hasOfficialHeader =
+    /CỘNG\s+HÒA\s+XÃ\s+HỘI\s+CHỦ\s+NGHĨA\s+VIỆT\s+NAM/iu.test(opening) ||
+    /ĐẢNG\s+CỘNG\s+SẢN\s+VIỆT\s+NAM/iu.test(opening)
+  const hasDocumentNumber =
+    /(?:Số|Luật\s+số)\s*:?\s*\d{1,4}\s*[-/]\s*[\p{L}\d]+/iu.test(opening)
+  return hasOfficialHeader && hasDocumentNumber
+}
 
 function getHeaderLines(content: string): HeaderLine[] {
   const header = content.slice(0, HEADER_LENGTH)
@@ -104,8 +119,8 @@ function fieldFromRange(
 
 function extractDocumentNumber(lines: HeaderLine[]): DocumentMetadataField | undefined {
   const candidates = lines.flatMap((line) =>
-    [...line.value.matchAll(/\d{1,4}\s*\/\s*\d{4}\s*\/\s*[\p{L}\d]+(?:\s*-\s*[\p{L}\d]+)*/gu)].map(
-      (match) => ({ line, value: match[0].replace(/\s*([/-])\s*/g, '$1') })
+    [...line.value.matchAll(/(?:Số|Luật\s+số)\s*:?\s*(\d{1,4}\s*(?:\/\s*\d{4})?\s*[-/]\s*[\p{L}\d]+(?:\s*[-/]\s*[\p{L}\d]+)*)/giu)].map(
+      (match) => ({ line, value: match[1].replace(/\s*([/-])\s*/g, '$1') })
     )
   )
   const candidate = candidates.sort((left, right) => right.value.length - left.value.length)[0]
@@ -299,6 +314,15 @@ export function extractDocumentMetadata({ content }: DocumentMetadataExtractionI
   metadata: DocumentMetadata
   inspector: DocumentMetadataInspector
 } {
+  if (!isOriginalLegalDocument(content)) {
+    const inspector: DocumentMetadataInspector = {
+      version: 1,
+      extractedAt: new Date().toISOString(),
+      fields: {}
+    }
+    return { metadata: {}, inspector }
+  }
+
   const lines = getHeaderLines(content)
   const documentType = extractDocumentType(lines, content)
   const inspector: DocumentMetadataInspector = {

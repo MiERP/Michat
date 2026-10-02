@@ -43,3 +43,7 @@ desktop.ini
 *.bak
 *.swp
 *~
+
+# Internal tooling / cache
+.commandcode/
+src/renderer/.dev-check-vite-cache/

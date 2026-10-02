@@ -34,21 +34,15 @@ export class UpdateService {
     }
 
     // 生产环境配置
-    autoUpdater.autoDownload = false // 不自动下载，让用户选择
-    autoUpdater.autoInstallOnAppQuit = true // 退出时自动安装
+    autoUpdater.autoDownload = false 
+    autoUpdater.autoInstallOnAppQuit = true 
 
-    // 设置更新源（已在 electron-builder.yml 中配置）
     Logger.info('UpdateService', 'Auto-updater configured')
 
-    // 监听更新事件
     this.registerUpdateListeners()
   }
 
-  /**
-   * 注册更新事件监听器
-   */
   private registerUpdateListeners(): void {
-    // 检查更新出错
     autoUpdater.on('error', (error) => {
       Logger.error('UpdateService', 'Update error:', error)
       this.updateState({
@@ -57,13 +51,11 @@ export class UpdateService {
       })
     })
 
-    // 开始检查更新
     autoUpdater.on('checking-for-update', () => {
       Logger.info('UpdateService', 'Checking for updates...')
       this.updateState({ status: UpdateStatus.CHECKING })
     })
 
-    // 发现新版本
     autoUpdater.on('update-available', (info: UpdateInfo) => {
       Logger.info('UpdateService', 'Update available:', info.version)
       this.updateState({
@@ -72,7 +64,6 @@ export class UpdateService {
       })
     })
 
-    // 当前已是最新版本
     autoUpdater.on('update-not-available', (info: UpdateInfo) => {
       Logger.info('UpdateService', 'Update not available, current version is latest')
       this.updateState({
@@ -81,7 +72,6 @@ export class UpdateService {
       })
     })
 
-    // 下载进度
     autoUpdater.on('download-progress', (progressObj) => {
       Logger.debug('UpdateService', `Download progress: ${progressObj.percent.toFixed(2)}%`)
       this.updateState({
@@ -94,7 +84,6 @@ export class UpdateService {
       })
     })
 
-    // 下载完成
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
       Logger.info('UpdateService', 'Update downloaded:', info.version)
       this.updateState({
@@ -102,7 +91,6 @@ export class UpdateService {
         info
       })
 
-      // 自动安装更新
       Logger.info('UpdateService', 'Auto-installing update...')
       setTimeout(() => {
         this.quitAndInstall()
@@ -110,21 +98,16 @@ export class UpdateService {
     })
   }
 
-  /**
-   * 更新状态并通知渲染进程
-   */
+
   private updateState(newState: Partial<UpdateState>): void {
     this.currentState = { ...this.currentState, ...newState }
 
-    // 通知渲染进程
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send('update:state-changed', this.currentState)
     }
   }
 
-  /**
-   * 检查更新
-   */
+
   async checkForUpdates(): Promise<UpdateState> {
     if (process.env.NODE_ENV === 'development') {
       Logger.warn('UpdateService', 'Auto-update is disabled in development mode')
@@ -148,9 +131,6 @@ export class UpdateService {
     }
   }
 
-  /**
-   * 下载更新
-   */
   async downloadUpdate(): Promise<void> {
     if (this.currentState.status !== UpdateStatus.AVAILABLE) {
       throw new Error('No update available to download')
@@ -169,36 +149,25 @@ export class UpdateService {
     }
   }
 
-  /**
-   * 退出并安装更新
-   */
   quitAndInstall(): void {
     if (this.currentState.status !== UpdateStatus.DOWNLOADED) {
       throw new Error('No update downloaded to install')
     }
 
     Logger.info('UpdateService', 'Quitting and installing update...')
-    // isSilent: 静默安装，不弹出安装程序窗口
-    // isForceRunAfter: 安装后强制运行应用
+
     autoUpdater.quitAndInstall(false, true)
   }
 
-  /**
-   * 获取当前更新状态
-   */
   getState(): UpdateState {
     return { ...this.currentState }
   }
 
-  /**
-   * 应用启动时自动检查更新（可选）
-   */
   async checkForUpdatesOnStartup(): Promise<void> {
     if (process.env.NODE_ENV === 'development') {
       return
     }
 
-    // 延迟 5 秒后检查更新，避免影响应用启动速度
     setTimeout(() => {
       this.checkForUpdates().catch((error) => {
         Logger.error('UpdateService', 'Startup update check failed:', error)

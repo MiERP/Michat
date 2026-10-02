@@ -283,6 +283,9 @@ export const KnowledgeSchemas = {
   reindexDocument: z.object({
     documentId: z.string().min(1, 'Document ID cannot be empty')
   }),
+  refreshDocumentMetadata: z.object({
+    documentId: z.string().min(1, 'Document ID cannot be empty')
+  }),
 
   getStats: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty')

@@ -1,0 +1,17 @@
+packages:
+  - "packages/*"
+
+catalog:
+  "@earendil-works/pi-agent-core": "^0.74.0"
+  "@earendil-works/pi-ai": "^0.74.0"
+
+allowBuilds:
+  esbuild: true
+  "@microsoft/m365agentstoolkit-cli": false
+  "@mongodb-js/zstd": false
+  keytar: false
+  less: false
+  node-liblzma: false
+  protobufjs: false
+  sharp: false
+  workerd: false
