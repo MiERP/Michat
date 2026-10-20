@@ -86,7 +86,7 @@ export default function SettingsDialog(): ReactElement {
       icon: MessageSquare,
       label: t('promptSettings'),
       title: t('promptSettings'),
-      description: t('mindMapPromptDesc')
+      description: t('quizPrompt')
     },
     {
       id: 'shortcuts',

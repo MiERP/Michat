@@ -1,7 +1,6 @@
 import type { BaseProvider } from './capabilities/BaseProvider'
 import type { ChatProvider } from './types'
 import type { EmbeddingProvider } from './types'
-import type { RerankProvider } from './types'
 import type { ProviderDescriptor } from './registry/ProviderDescriptor'
 import { ProviderRegistry } from './registry/ProviderRegistry'
 import { BUILTIN_PROVIDERS } from './registry/builtinProviders'
@@ -182,55 +181,6 @@ export class ProviderManager {
       return null
     } catch (error) {
       Logger.error('ProviderManager', 'Failed to get active embedding provider:', error)
-      return null
-    }
-  }
-
-  /**
-   * 获取活跃的重排序 provider
-   * 优先使用 model 参数，其次使用 settings.defaultRerankModel
-   */
-  async getActiveRerankProvider(model?: string): Promise<RerankProvider | null> {
-    try {
-      const settings = await settingsManager.getAllSettings()
-      const targetModel = model || settings.defaultRerankModel
-
-      if (!targetModel || !targetModel.includes(':')) {
-        Logger.warn('ProviderManager', 'No default rerank model configured')
-        return null
-      }
-
-      const [providerName, ...modelIdParts] = targetModel.split(':')
-      const modelId = modelIdParts.join(':')
-      const provider = await this.getConfiguredProvider(providerName)
-
-      if (!provider) {
-        Logger.error(
-          'ProviderManager',
-          `Provider for default rerank model "${providerName}" is not available or not enabled`
-        )
-        return null
-      }
-
-      const descriptor = this.registry.getDescriptor(providerName)
-      const supportsRerankByDescriptor = descriptor?.capabilities?.rerank === true
-      const rerankProvider = provider as unknown as RerankProvider
-      const supportsRerankByMethod = typeof rerankProvider.rerank === 'function'
-
-      if (!supportsRerankByDescriptor && !supportsRerankByMethod) {
-        Logger.error(
-          'ProviderManager',
-          `Provider ${providerName} does not support rerank capability`
-        )
-        return null
-      }
-
-      // Keep compatibility with providers that use model in shared config.
-      rerankProvider.configure({ model: modelId })
-      Logger.info('ProviderManager', `Using default rerank model: ${providerName} - ${modelId}`)
-      return rerankProvider
-    } catch (error) {
-      Logger.error('ProviderManager', 'Failed to get active rerank provider:', error)
       return null
     }
   }

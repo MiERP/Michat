@@ -5,12 +5,15 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
-  PanelRightOpen
+  PanelRightOpen,
+  Filter,
+  X
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useChatStore } from '../../store/chatStore'
 import { useNotebookStore } from '../../store/notebookStore'
 import MessageList from './chat/MessageList'
+import NotebookSummaryCard from './chat/NotebookSummaryCard'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
@@ -41,9 +44,32 @@ export default function ProcessPanel({
     valid: false,
     message: 'License not checked yet'
   })
-  const { currentSession, messages, isNotebookStreaming, sendMessage, abortMessage } =
-    useChatStore()
+  const {
+    currentSession,
+    messages,
+    isNotebookStreaming,
+    sendMessage,
+    abortMessage,
+    ragScope,
+    setRagScope
+  } = useChatStore()
   const { currentNotebook, updateNotebook } = useNotebookStore()
+
+  const ragScopeLabel = ragScope
+    ? [
+        ragScope.sectionPath?.length ? `Mục: ${ragScope.sectionPath.join(' › ')}` : '',
+        ragScope.pageRange
+          ? ragScope.pageRange.from === ragScope.pageRange.to
+            ? `Trang ${ragScope.pageRange.from}`
+            : `Trang ${ragScope.pageRange.from}-${ragScope.pageRange.to}`
+          : '',
+        !ragScope.sectionPath?.length && !ragScope.pageRange && ragScope.documentIds?.length
+          ? `Tài liệu đã chọn (${ragScope.documentIds.length})`
+          : ''
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : ''
 
   const [editingTitle, setEditingTitle] = useState('')
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -334,9 +360,13 @@ export default function ProcessPanel({
         }
       />
 
-      {/* 对话消息区域 - 使用 absolute 定位占满剩余空间 */}
-      <div className="absolute top-14 bottom-0 left-0 right-0 overflow-hidden">
-        <MessageList messages={messages} />
+      {/* 对话消息区域 - 使用 absolute 定位占满剩余空间；顶部 nhúng thẻ tóm tắt
+          notebook để đọc trước khi chat */}
+      <div className="absolute top-14 bottom-0 left-0 right-0 overflow-hidden flex flex-col">
+        <NotebookSummaryCard />
+        <div className="flex-1 min-h-0">
+          <MessageList messages={messages} />
+        </div>
       </div>
 
       {/* 底部渐变遮罩 - 独立于消息区域，避免堆叠上下文问题 */}
@@ -351,6 +381,25 @@ export default function ProcessPanel({
       {/* 底部输入区域 - 绝对定位浮动在底部 */}
       <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none shrink-0 z-20">
         <div className="relative bg-muted/95 backdrop-blur-md rounded-lg border border-border focus-within:ring-2 focus-within:ring-ring shadow-lg pointer-events-auto">
+          {/* Phạm vi tri thức đang áp dụng cho lượt hỏi kế tiếp */}
+          {ragScopeLabel && (
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-xs">
+                <Filter className="w-3 h-3" />
+                {ragScopeLabel}
+              </span>
+              <Button
+                onClick={() => setRagScope(null)}
+                variant="ghost"
+                size="icon"
+                className="w-5 h-5 text-muted-foreground"
+                title="Bỏ phạm vi — hỏi trên toàn bộ sổ tay"
+              >
+                <X className="w-3 h-3" />
+              </Button>
+            </div>
+          )}
+
           {/* 多行输入框 */}
           <Textarea
             ref={textareaRef}
@@ -367,13 +416,13 @@ export default function ProcessPanel({
                 ? t('selectSession')
                 : !licenseChecked
                   ? 'Đang kiểm tra bản quyền...'
-                : !licenseStatus.valid
-                  ? licenseHint
-                : !hasProvider
-                  ? t('noProviderConfigured')
-                  : !defaultChatModel
-                    ? t('noDefaultModel')
-                    : t('inputMessage')
+                  : !licenseStatus.valid
+                    ? licenseHint
+                    : !hasProvider
+                      ? t('noProviderConfigured')
+                      : !defaultChatModel
+                        ? t('noDefaultModel')
+                        : t('inputMessage')
             }
             disabled={
               !currentSession ||
@@ -409,12 +458,12 @@ export default function ProcessPanel({
                 !licenseChecked
                   ? 'Đang kiểm tra bản quyền...'
                   : !licenseStatus.valid
-                  ? licenseHint
-                  : !hasProvider
-                    ? t('noProviderConfigured')
-                    : !currentSession
-                      ? t('selectSession')
-                      : ''
+                    ? licenseHint
+                    : !hasProvider
+                      ? t('noProviderConfigured')
+                      : !currentSession
+                        ? t('selectSession')
+                        : ''
               }
               size="icon"
               className="absolute right-2 bottom-3 w-8 h-8 rounded-full"

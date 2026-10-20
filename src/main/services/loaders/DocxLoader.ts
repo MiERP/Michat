@@ -1,3 +1,4 @@
+/* eslint-disable no-irregular-whitespace */
 /**
  * DocxLoader
  * Ã¤Â½Â¿Ã§â€Â¨ mammoth Ã¨Â§Â£Ã¦Å¾Â Word Ã¦â€“â€¡Ã¦Â¡Â£Ã¯Â¼Å’Ã¥Â¹Â¶Ã¦ÂÂÃ¥Ââ€“Ã§Â»â€œÃ¦Å¾â€žÃ¤Â¿Â¡Ã¦ÂÂ¯
@@ -7,13 +8,13 @@ import { readFile } from 'fs/promises'
 import { extname } from 'path'
 import WordExtractor from 'word-extractor'
 import { OfficeParser } from 'officeparser'
-import * as cheerio from 'cheerio'
+import TurndownService from 'turndown'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
 
 /**
- * Word Ã¦â€“â€¡Ã¦Â¡Â£Ã¥Å Â Ã¨Â½Â½Ã¥â„¢Â¨
- * Ã¥Å¸ÂºÃ¤ÂºÅ½ mammothÃ¯Â¼Å’Ã¦â€Â¯Ã¦Å’Â DOCX Ã¥â€™Å’ DOC
+ * Word Ã¦â€"â€¡Ã¦Â¡Â£Ã¥Å Â Ã¨Â½Â½Ã¥â„¢Â¨
+ * Ã¥Å¸ÂºÃ¤ÂºÅ½ mammothÃ¯Â¼Å'Ã¦â€Â¯Ã¦Å'Â DOCX Ã¥â€™Å' DOC
  */
 export class DocxLoader implements IDocumentLoader {
   readonly supportedMimeTypes = [
@@ -45,25 +46,35 @@ export class DocxLoader implements IDocumentLoader {
     const opts = { preserveStructure: true, ...options }
 
     try {
-      // Ã¦ÂÂÃ¥Ââ€“Ã§ÂºÂ¯Ã¦â€“â€¡Ã¦Å“Â¬
       const document = await OfficeParser.parseOffice(buffer)
-      const content = document.toText().trim()
 
-      // Ã¦ÂÂÃ¥Ââ€“Ã§Â»â€œÃ¦Å¾â€žÃ¤Â¿Â¡Ã¦ÂÂ¯Ã¯Â¼Ë†Ã¥Â°â€ Ã¦â€“â€¡Ã¦Â¡Â£Ã¨Â½Â¬Ã¦ÂÂ¢Ã¤Â¸Âº HTMLÃ¯Â¼Å’Ã¤Â»Å½Ã¤Â¸Â­Ã¦ÂÂÃ¥Ââ€“Ã¦Â â€¡Ã©Â¢ËœÃ¯Â¼â€°
+      let content: string
       let sections: SectionInfo[] | undefined
       let title: string | undefined
 
       if (opts.preserveStructure) {
+        // Parse DOCX -> HTML rồi chuyển sang markdown để giữ cấu trúc heading/bảng.
         const htmlResult = await document.to('html')
         const html = typeof htmlResult.value === 'string' ? htmlResult.value : ''
-        const $ = cheerio.load(html)
+        if (html) {
+          const turndownService = new TurndownService({
+            headingStyle: 'atx',
+            codeBlockStyle: 'fenced'
+          })
+          content = turndownService.turndown(html).trim()
 
-        // Ã¦ÂÂÃ¥Ââ€“Ã§Â¬Â¬Ã¤Â¸â‚¬Ã¤Â¸ÂªÃ¦Â â€¡Ã©Â¢ËœÃ¤Â½Å“Ã¤Â¸ÂºÃ¦â€“â€¡Ã¦Â¡Â£Ã¦Â â€¡Ã©Â¢Ëœ
-        const firstH1 = $('h1').first().text().trim()
-        title = firstH1 || undefined
+          const firstH1 = content.match(/^#\s+(.+)$/m)
+          title = firstH1 ? firstH1[1].trim() : undefined
+          sections = this.extractSectionsFromMarkdown(content)
+        } else {
+          content = document.toText().trim()
+        }
+      } else {
+        content = document.toText().trim()
+      }
 
-        // Ã¦ÂÂÃ¥Ââ€“Ã§Â«Â Ã¨Å â€šÃ§Â»â€œÃ¦Å¾â€ž
-        sections = this.extractSectionsFromHtml($, content)
+      if (!content) {
+        throw new Error('No readable text content found in Word document')
       }
 
       return {
@@ -89,74 +100,60 @@ export class DocxLoader implements IDocumentLoader {
   }
 
   /**
-   * Ã¤Â»Å½ HTML Ã¤Â¸Â­Ã¦ÂÂÃ¥Ââ€“Ã§Â«Â Ã¨Å â€šÃ§Â»â€œÃ¦Å¾â€ž
+   * Trích sections trực tiếp từ markdown (offsets luôn khớp với content).
    */
-  private extractSectionsFromHtml($: cheerio.CheerioAPI, fullContent: string): SectionInfo[] {
-    const sections: SectionInfo[] = []
-    const headings = $('h1, h2, h3, h4, h5, h6').toArray()
+  private extractSectionsFromMarkdown(content: string): SectionInfo[] {
+    const headingRegex = /^(#{1,6})\s+(.+?)\s*$/gm
+    const flat: SectionInfo[] = []
+    let cursor = 0
+    let match: RegExpExecArray | null
 
-    for (let i = 0; i < headings.length; i++) {
-      const heading = $(headings[i])
-      const tagName = heading.prop('tagName')?.toLowerCase()
-      const level = tagName ? parseInt(tagName.charAt(1)) : 1
-      const title = heading.text().trim()
+    while ((match = headingRegex.exec(content)) !== null) {
+      const level = match[1].length
+      const title = match[2].trim()
+      const startOffset = match.index
+      if (startOffset < cursor) continue
+      cursor = startOffset + match[0].length
 
-      if (!title) continue
-
-      // Ã¥Â°ÂÃ¨Â¯â€¢Ã¥Å“Â¨Ã¥â€¦Â¨Ã¦â€“â€¡Ã¤Â¸Â­Ã¥Â®Å¡Ã¤Â½ÂÃ¨Â¿â„¢Ã¤Â¸ÂªÃ¦Â â€¡Ã©Â¢Ëœ
-      const startOffset = fullContent.indexOf(title)
-      if (startOffset === -1) continue
-
-      // Ã¨Â®Â¡Ã§Â®â€”Ã¥Ë†Â°Ã¤Â¸â€¹Ã¤Â¸â‚¬Ã¤Â¸ÂªÃ¥ÂÅ’Ã§ÂºÂ§Ã¦Ë†â€“Ã¦â€ºÂ´Ã©Â«ËœÃ§ÂºÂ§Ã¦Â â€¡Ã©Â¢ËœÃ§Å¡â€žÃ¥â€ â€¦Ã¥Â®Â¹
-      let endOffset = fullContent.length
-      for (let j = i + 1; j < headings.length; j++) {
-        const nextHeading = $(headings[j])
-        const nextTagName = nextHeading.prop('tagName')?.toLowerCase()
-        const nextLevel = nextTagName ? parseInt(nextTagName.charAt(1)) : 1
-
-        if (nextLevel <= level) {
-          const nextTitle = nextHeading.text().trim()
-          const nextStart = fullContent.indexOf(nextTitle, startOffset + title.length)
-          if (nextStart !== -1) {
-            endOffset = nextStart
-            break
-          }
-        }
-      }
-
-      const sectionContent = fullContent.substring(startOffset, endOffset).trim()
-
-      sections.push({
+      flat.push({
         level,
         title,
-        content: sectionContent,
+        content: '',
         startOffset,
-        endOffset
+        endOffset: content.length
       })
     }
 
-    // Ã¦Å¾â€žÃ¥Â»ÂºÃ¥Â±â€šÃ§ÂºÂ§Ã¥â€¦Â³Ã§Â³Â»
-    return this.buildHierarchy(sections)
+    if (flat.length === 0) return []
+
+    // Tính endOffset theo heading kế tiếp (bất kỳ cấp nào)
+    for (let i = 0; i < flat.length - 1; i++) {
+      flat[i].endOffset = flat[i + 1].startOffset
+      flat[i].content = content.slice(flat[i].startOffset, flat[i].endOffset).trim()
+    }
+    flat[flat.length - 1].content = content.slice(flat[flat.length - 1].startOffset).trim()
+
+    return this.buildHierarchy(flat)
   }
 
   /**
-   * Ã¦Å¾â€žÃ¥Â»ÂºÃ§Â«Â Ã¨Å â€šÃ¥Â±â€šÃ§ÂºÂ§Ã¥â€¦Â³Ã§Â³Â»
+   * Ã¦Å¾â€žÃ¥Â»ÂºÃ§Â«Â Ã¨Å â€šÃ¥Â±â€šÃ§ÂºÂ§Ã¥â€¦Â³Ã§Â³Â»
    */
   private buildHierarchy(flatSections: SectionInfo[]): SectionInfo[] {
     const root: SectionInfo[] = []
     const stack: SectionInfo[] = []
 
     for (const section of flatSections) {
-      // Ã¥Â¼Â¹Ã¥â€¡ÂºÃ¦Â¯â€Ã¥Â½â€œÃ¥â€°ÂÃ§Â«Â Ã¨Å â€šÃ§ÂºÂ§Ã¥Ë†Â«Ã©Â«ËœÃ§Å¡â€žÃ¨Å â€šÃ§â€šÂ¹
+      // Ã¥Â¼Â¹Ã¥â€¡ÂºÃ¦Â¯â€Ã¥Â½â€œÃ¥â€°ÂÃ§Â«Â Ã¨Å â€šÃ§ÂºÂ§Ã¥Ë†Â«Ã©Â«ËœÃ§Å¡â€žÃ¨Å â€šÃ§â€šÂ¹
       while (stack.length > 0 && stack[stack.length - 1].level >= section.level) {
         stack.pop()
       }
 
       if (stack.length === 0) {
-        // Ã©Â¡Â¶Ã§ÂºÂ§Ã§Â«Â Ã¨Å â€š
+        // Ã©Â¡Â¶Ã§ÂºÂ§Ã§Â«Â Ã¨Å â€š
         root.push(section)
       } else {
-        // Ã¥Â­ÂÃ§Â«Â Ã¨Å â€š
+        // Ã¥Â­ÂÃ§Â«Â Ã¨Å â€š
         const parent = stack[stack.length - 1]
         if (!parent.children) {
           parent.children = []

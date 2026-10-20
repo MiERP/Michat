@@ -2,6 +2,22 @@
 import { KnowledgeSchemas, ProviderSchemas, SettingsSchemas } from '../src/main/ipc/validation'
 
 describe('ipc validation schemas', () => {
+  it('rejects impossible metadata dates and accepts leap days', () => {
+    for (const issuedAt of ['2025-02-29', '2025-02-31', '2025-13-01']) {
+      expect(
+        KnowledgeSchemas.updateDocumentMetadata.safeParse({
+          documentId: 'doc-1',
+          metadata: { issuedAt }
+        }).success
+      ).toBe(false)
+    }
+    expect(
+      KnowledgeSchemas.updateDocumentMetadata.safeParse({
+        documentId: 'doc-1',
+        metadata: { issuedAt: '2024-02-29' }
+      }).success
+    ).toBe(true)
+  })
   it('accepts known settings keys with correctly typed values', () => {
     expect(SettingsSchemas.set.parse({ key: 'language', value: 'vi-VN' }).key).toBe('language')
     expect(

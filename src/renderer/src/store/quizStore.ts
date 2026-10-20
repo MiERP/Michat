@@ -40,6 +40,7 @@ interface QuizStore {
       questionCount?: number
       difficulty?: 'easy' | 'medium' | 'hard'
       customPrompt?: string
+      documentIds?: string[]
     }
   ) => Promise<void>
   submitQuiz: () => Promise<QuizSession | null>
@@ -125,6 +126,7 @@ export const useQuizStore = create<QuizStore>()((set, get) => ({
       questionCount?: number
       difficulty?: 'easy' | 'medium' | 'hard'
       customPrompt?: string
+      documentIds?: string[]
     }
   ) => {
     set({ isGenerating: true, generationProgress: { stage: 'starting', progress: 0 } })

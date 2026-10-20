@@ -42,6 +42,7 @@ const languages = [
 const ragTopKOptions = [1, 2, 3, 4, 5, 6, 7, 8]
 const ragThresholdOptions = [0.4, 0.5, 0.55, 0.6, 0.62, 0.65, 0.7, 0.75]
 const ragShortQueryOptions = [6, 8, 10, 12, 16, 20]
+const ragDocTopKOptions = [3, 5, 8, 12, 20, 30]
 const rerankTopNOptions = [4, 6, 8, 10, 12, 16, 20, 24]
 
 function resolveModelType(
@@ -85,10 +86,9 @@ export default function GeneralSettings({
     void loadLocalModels()
   }, [])
 
-  const { availableChatModels, availableEmbeddingModels, availableRerankModels } = useMemo(() => {
+  const { availableChatModels, availableEmbeddingModels } = useMemo(() => {
     const chatModels: Array<{ id: string; provider: string; label: string }> = []
     const embeddingModels: Array<{ id: string; provider: string; label: string }> = []
-    const rerankModels: Array<{ id: string; provider: string; label: string }> = []
 
     providers.forEach((provider) => {
       if (provider.enabled && provider.config.models && Array.isArray(provider.config.models)) {
@@ -105,8 +105,6 @@ export default function GeneralSettings({
 
           if (modelType === 'embedding') {
             embeddingModels.push(modelObj)
-          } else if (modelType === 'reranker') {
-            rerankModels.push(modelObj)
           } else if (modelType === 'chat') {
             chatModels.push(modelObj)
           }
@@ -129,8 +127,7 @@ export default function GeneralSettings({
 
     return {
       availableChatModels: chatModels,
-      availableEmbeddingModels: embeddingModels,
-      availableRerankModels: rerankModels
+      availableEmbeddingModels: embeddingModels
     }
   }, [providers, localModels])
 
@@ -166,21 +163,11 @@ export default function GeneralSettings({
     if (!isEmbeddingModelAvailable && settings.defaultEmbeddingModel) {
       onSettingsChange({ defaultEmbeddingModel: '' })
     }
-
-    const isRerankModelAvailable = settings.defaultRerankModel
-      ? availableRerankModels.some((model) => model.id === settings.defaultRerankModel)
-      : true
-
-    if (!isRerankModelAvailable && settings.defaultRerankModel) {
-      onSettingsChange({ defaultRerankModel: '' })
-    }
   }, [
     settings.defaultChatModel,
     settings.defaultEmbeddingModel,
-    settings.defaultRerankModel,
     availableChatModels,
     availableEmbeddingModels,
-    availableRerankModels,
     onSettingsChange
   ])
 
@@ -363,44 +350,6 @@ export default function GeneralSettings({
 
         <Field orientation="horizontal">
           <FieldContent>
-            <FieldLabel htmlFor="rerank-model-select">{t('defaultRerankModel')}</FieldLabel>
-            <FieldDescription>
-              {availableRerankModels.length > 0
-                ? t('defaultRerankModelDesc')
-                : t('noAvailableModel')}
-            </FieldDescription>
-          </FieldContent>
-          {availableRerankModels.length > 0 && (
-            <Select
-              value={settings.defaultRerankModel || '__none__'}
-              onValueChange={(value) =>
-                onSettingsChange({ defaultRerankModel: value === '__none__' ? '' : value })
-              }
-            >
-              <SelectTrigger id="rerank-model-select" className="w-56">
-                <SelectValue placeholder={t('pleaseSelectModel')}>
-                  {settings.defaultRerankModel
-                    ? availableRerankModels.find((m) => m.id === settings.defaultRerankModel)?.label
-                    : t('none')}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">{t('none')}</SelectItem>
-                {availableRerankModels.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm font-medium">{model.label}</span>
-                      <span className="text-xs text-muted-foreground">{model.provider}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </Field>
-
-        <Field orientation="horizontal">
-          <FieldContent>
             <FieldLabel htmlFor="rerank-fallback-select">{t('rerankHeuristicFallback')}</FieldLabel>
             <FieldDescription>{t('rerankHeuristicFallbackDesc')}</FieldDescription>
           </FieldContent>
@@ -507,6 +456,51 @@ export default function GeneralSettings({
             <SelectContent>
               <SelectItem value="true">{t('enabled')}</SelectItem>
               <SelectItem value="false">{t('disabled')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="rag-hierarchical-select">{t('ragHierarchical')}</FieldLabel>
+            <FieldDescription>{t('ragHierarchicalDesc')}</FieldDescription>
+          </FieldContent>
+          <Select
+            value={String(settings.ragHierarchicalEnabled ?? true)}
+            onValueChange={(value) =>
+              onSettingsChange({ ragHierarchicalEnabled: value === 'true' })
+            }
+          >
+            <SelectTrigger id="rag-hierarchical-select" className="w-56">
+              <SelectValue>
+                {settings.ragHierarchicalEnabled !== false ? t('enabled') : t('disabled')}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="true">{t('enabled')}</SelectItem>
+              <SelectItem value="false">{t('disabled')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="rag-doctopk-select">{t('ragDocTopK')}</FieldLabel>
+            <FieldDescription>{t('ragDocTopKDesc')}</FieldDescription>
+          </FieldContent>
+          <Select
+            value={String(settings.ragDocTopK ?? 8)}
+            onValueChange={(value) => onSettingsChange({ ragDocTopK: Number(value) })}
+          >
+            <SelectTrigger id="rag-doctopk-select" className="w-56">
+              <SelectValue>{settings.ragDocTopK ?? 8}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {ragDocTopKOptions.map((value) => (
+                <SelectItem key={value} value={String(value)}>
+                  {value}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>

@@ -26,6 +26,26 @@ export type DocumentType = 'file' | 'note' | 'url' | 'text'
 export type DocumentStatus = 'pending' | 'processing' | 'indexed' | 'failed'
 
 /**
+ * Phạm vi truy hồi do người dùng chọn (Metadata-Aware Retrieval).
+ * Đây là "filter tầng": đúng tài liệu → đúng mục → đúng khoảng trang.
+ */
+export interface RetrievalScope {
+  documentIds?: string[]
+  sectionPath?: string[]
+  pageRange?: { from: number; to: number }
+}
+
+/**
+ * Bộ lọc metadata cho tìm kiếm.
+ */
+export interface SearchMetadataFilter extends RetrievalScope {
+  documentTypes?: Array<'file' | 'note' | 'url' | 'text' | 'memory'>
+  sourceUriContains?: string
+  /** So khớp documents.metadata.documentMetadata (vd documentNumber, documentType). */
+  documentMetadata?: Record<string, string>
+}
+
+/**
  * 搜索结果
  */
 export interface KnowledgeSearchResult {
@@ -35,6 +55,7 @@ export interface KnowledgeSearchResult {
   documentType: string
   sourceUri?: string
   pageNumber?: number
+  sectionPath?: string[]
   content: string
   score: number
   chunkIndex: number
@@ -81,15 +102,16 @@ export interface SearchOptions {
   topK?: number
   threshold?: number
   includeContent?: boolean
-  metadataFilter?: {
-    documentIds?: string[]
-    documentTypes?: DocumentType[]
-    sourceUriContains?: string
+  metadataFilter?: SearchMetadataFilter
+  /** Tầng 1 của Hierarchical Retrieval: chọn tài liệu trước, rồi tìm chunk. */
+  hierarchical?: {
+    enabled?: boolean
+    docTopK?: number
+    threshold?: number
   }
   rerank?: {
     enabled?: boolean
     topN?: number
-    model?: string
     heuristicFallback?: boolean
   }
 }

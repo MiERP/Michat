@@ -76,8 +76,7 @@ export function isOriginalLegalDocument(content: string): boolean {
   const hasOfficialHeader =
     /CỘNG\s+HÒA\s+XÃ\s+HỘI\s+CHỦ\s+NGHĨA\s+VIỆT\s+NAM/iu.test(opening) ||
     /ĐẢNG\s+CỘNG\s+SẢN\s+VIỆT\s+NAM/iu.test(opening)
-  const hasDocumentNumber =
-    /(?:Số|Luật\s+số)\s*:?\s*\d{1,4}\s*[-/]\s*[\p{L}\d]+/iu.test(opening)
+  const hasDocumentNumber = /(?:Số|Luật\s+số)\s*:?\s*\d{1,4}\s*[-/]\s*[\p{L}\d]+/iu.test(opening)
   return hasOfficialHeader && hasDocumentNumber
 }
 
@@ -119,11 +118,13 @@ function fieldFromRange(
 
 function extractDocumentNumber(lines: HeaderLine[]): DocumentMetadataField | undefined {
   const candidates = lines.flatMap((line) =>
-    [...line.value.matchAll(/(?:Số|Luật\s+số)\s*:?\s*(\d{1,4}\s*(?:\/\s*\d{4})?\s*[-/]\s*[\p{L}\d]+(?:\s*[-/]\s*[\p{L}\d]+)*)/giu)].map(
-      (match) => ({ line, value: match[1].replace(/\s*([/-])\s*/g, '$1') })
-    )
+    [
+      ...line.value.matchAll(
+        /(?:Số|Luật\s+số)\s*:?\s*(\d{1,4}\s*(?:\/\s*\d{4})?\s*[-/]\s*[\p{L}\d]+(?:\s*[-/]\s*[\p{L}\d]+)*)/giu
+      )
+    ].map((match) => ({ line, value: match[1].replace(/\s*([/-])\s*/g, '$1') }))
   )
-  const candidate = candidates.sort((left, right) => right.value.length - left.value.length)[0]
+  const candidate = candidates[0]
   return candidate ? field(candidate.value, 0.99, candidate.line) : undefined
 }
 
@@ -169,7 +170,8 @@ function extractIssuer(lines: HeaderLine[], content: string): DocumentMetadataFi
     const exact = ISSUERS.find(([pattern]) => line.value.match(pattern)?.[0] === line.value)
     if (exact) return field(exact[1], 0.98, line)
     if (/^(BỘ|TỔNG CỤC|CỤC|SỞ|ỦY BAN NHÂN DÂN)\s+/u.test(line.value)) {
-      return field(titleCase(line.value), 0.94, line)
+      const name = line.value.split(/\s+(?:-{2,}|CỘNG HÒA|Số\s*:)/iu)[0]
+      return field(titleCase(name), 0.94, line)
     }
   }
 
@@ -209,6 +211,8 @@ function extractIssuedAt(lines: HeaderLine[]): DocumentMetadataField | undefined
     const match = line.value.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})/iu)
     if (!match) continue
     const value = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+    const date = new Date(`${value}T00:00:00Z`)
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) continue
     return field(value, 0.97, line)
   }
   return undefined
@@ -298,14 +302,31 @@ export function mergeDocumentMetadataInspector(
   return { ...extracted, fields }
 }
 
-export function inspectorFromMetadata(metadata: DocumentMetadata): DocumentMetadataInspector {
+export function inspectorFromMetadata(
+  metadata: DocumentMetadata,
+  existing?: DocumentMetadataInspector
+): DocumentMetadataInspector {
+  const keys = new Set([...Object.keys(existing?.fields || {}), ...Object.keys(metadata)])
   return {
     version: 1,
-    extractedAt: new Date().toISOString(),
+    extractedAt: existing?.extractedAt || new Date().toISOString(),
     fields: Object.fromEntries(
-      Object.entries(metadata)
-        .filter((entry): entry is [keyof DocumentMetadata, string] => !!entry[1]?.trim())
-        .map(([key, value]) => [key, { value, status: 'user_corrected', confidence: 1 }])
+      [...keys]
+        .filter(
+          (key) =>
+            existing?.fields[key as keyof DocumentMetadata] ||
+            metadata[key as keyof DocumentMetadata]?.trim()
+        )
+        .map((key) => {
+          const value = metadata[key as keyof DocumentMetadata]?.trim() || ''
+          const previous = existing?.fields[key as keyof DocumentMetadata]
+          return [
+            key,
+            previous?.value === value
+              ? previous
+              : { value, status: 'user_corrected', confidence: 1 }
+          ]
+        })
     )
   }
 }
@@ -324,15 +345,18 @@ export function extractDocumentMetadata({ content }: DocumentMetadataExtractionI
   }
 
   const lines = getHeaderLines(content)
+  // Issuance details belong to the front matter, never to cited legal bases.
+  const bodyStart = content.search(/Căn\s+cứ|Theo\s+đề\s+nghị|Điều\s+\d+/iu)
+  const frontLines = getHeaderLines(bodyStart < 0 ? content : content.slice(0, bodyStart))
   const documentType = extractDocumentType(lines, content)
   const inspector: DocumentMetadataInspector = {
     version: 1,
     extractedAt: new Date().toISOString(),
     fields: {
-      documentNumber: extractDocumentNumber(lines),
+      documentNumber: extractDocumentNumber(frontLines),
       documentType,
       issuer: extractIssuer(lines, content),
-      issuedAt: extractIssuedAt(lines),
+      issuedAt: extractIssuedAt(frontLines),
       documentTitle: extractDocumentTitle(lines, documentType, content),
       legalBases: extractLegalBases(content)
     }

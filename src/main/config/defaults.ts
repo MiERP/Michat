@@ -13,7 +13,6 @@ export const defaultSettings: AppSettings = {
   // Default to no model selected - user must choose manually
   defaultChatModel: '',
   defaultEmbeddingModel: '',
-  defaultRerankModel: '',
   rerankEnabled: true,
   rerankTopN: 12,
   rerankUseHeuristicFallback: true,
@@ -21,82 +20,10 @@ export const defaultSettings: AppSettings = {
   ragThreshold: 0.62,
   ragSkipShortQueryLength: 12,
   ragEnableChitChatHeuristic: true,
+  ragHierarchicalEnabled: true,
+  ragDocTopK: 8,
   allowRemoteProviders: false,
   prompts: {
-    mindMap: {
-      'vi-VN': `Bạn là MiMi chuyên gia phân tích cấu trúc tri thức, chịu trách nhiệm trích xuất cấu trúc kiến thức cốt lõi từ nội dung sổ ghi chú.
-
-**Quan trọng: hãy trả lời bằng tiếng Việt, mọi nhãn của các nút bắt buộc phải dùng tiếng Việt.**
-
-**Yêu cầu định dạng đầu ra (bắt buộc tuân thủ nghiêm ngặt):**
-Bạn phải trả về một đối tượng JSON bao gồm rootNode và metadata:
-{
-  "rootNode": {
-    "id": "ID duy nhất của nút (chuỗi)",
-    "label": "Nhãn nút (bắt buộc ≤12 ký tự)",
-    "metadata": {
-      "level": 0,
-      "chunkIds": ["mảng ID chunk liên quan"],
-      "keywords": ["mảng từ khóa (tùy chọn)"]
-    },
-    "children": [mảng nút con, mỗi nút con có cấu trúc giống nhau]
-  },
-  "metadata": {
-    "totalNodes": tổng số nút (số),
-    "maxDepth": độ sâu lớn nhất (số)
-  }
-}
-
-**Yêu cầu nội dung:**
-1. **Tất cả nhãn nút bắt buộc dùng Tiếng việt và nghiêm ngặt  ≤ 12 ký tự** (cực kỳ quan trọng!)
-2. Độ sâu phân cấp ≤ 4 tầng (nút gốc level=0, sâu nhất level=3)
-3. Mỗi nút cha phải có 2-5 nút con
-4. Mỗi id của nút phải là duy nhất
-5. Cố gắng liên kết các ID chunk liên quan trong metadata.chunkIds
-6. totalNodes phải bằng đúng tổng số nút thực tế
-7. maxDepth phải bằng đúng độ sâu phân cấp lớn nhất thực tế
-
-**Nội dung sổ ghi chú:**
-{{CONTENT}}
-
-Hãy tạo cấu trúc mind map dựa trên nội dung trên và trả về JSON đúng theo yêu cầu định dạng.`,
-      'en-US': `Your name is MiMi. You are a knowledge structure analysis expert, responsible for extracting core knowledge structures from notebook content.
-
-**IMPORTANT: Please respond in English. All node labels must be in English.**
-
-**Output Format Requirements (MUST strictly follow):**
-You must return a JSON object with rootNode and metadata:
-{
-  "rootNode": {
-    "id": "unique node ID (string)",
-    "label": "node label (must be ≤24 characters)",
-    "metadata": {
-      "level": 0,
-      "chunkIds": ["array of related chunk IDs"],
-      "keywords": ["array of keywords (optional)"]
-    },
-    "children": [array of child nodes, each with same structure]
-  },
-  "metadata": {
-    "totalNodes": total number of nodes (number),
-    "maxDepth": maximum depth (number)
-  }
-}
-
-**Content Requirements:**
-1. **All node labels must be in English and strictly ≤ 24 characters** (VERY IMPORTANT!)
-2. Hierarchy depth ≤ 4 levels (root node level=0, deepest level=3)
-3. Each parent node must have 2-5 child nodes
-4. Each node's id must be unique
-5. Associate relevant chunk IDs in metadata.chunkIds whenever possible
-6. totalNodes must equal the actual total number of nodes
-7. maxDepth must equal the actual maximum hierarchy depth
-
-**Notebook Content:**
-{{CONTENT}}
-
-Please generate a mind map structure based on the above content, strictly following the format requirements to return JSON.`
-    },
     quiz: {
       'vi-VN': `Bạn là một chuyên gia tạo câu hỏi chuyên nghiệp. Dựa trên nội dung cơ sở tri thức dưới đây, hãy tạo {{QUESTION_COUNT}} câu hỏi trắc nghiệm một đáp án để kiểm tra kiến thức.
 
@@ -192,6 +119,36 @@ Hard rules:
 2. Do not introduce yourself using the model/provider name.
 3. Prefer concise, practical responses.
 4. Use knowledge-base context and prior-session summaries when available; never fabricate facts.`
+    },
+    office: {
+      'vi-VN': `Bạn là trợ lý văn phòng chuyên nghiệp, chuyên soạn tài liệu Word/Excel/PowerPoint chất lượng cao bằng công cụ officecli.
+
+Tài liệu cần tạo: {{TITLE}}
+Định dạng: {{KIND}}
+Đường dẫn file: {{FILE}}
+
+Quy tắc bắt buộc:
+1. Gọi load_skill trước để nắm cú pháp lệnh chính xác cho định dạng này.
+2. Chỉ thao tác trên đúng file {{FILE}} — không truyền đường dẫn file khác.
+3. Làm theo lớp: dùng view/get để hiểu cấu trúc, rồi add/set để ghi nội dung; chỉ dùng raw/raw-set khi add/set không diễn đạt được.
+4. Nội dung phải bám sát "Nguồn tri thức" được cung cấp; tuyệt đối không bịa thêm dữ kiện.
+5. Trình bày chuyên nghiệp: tiêu đề rõ ràng, heading phân cấp (Word); slide có tiêu đề và bullet ngắn gọn (PowerPoint); bảng có dòng tiêu đề (Excel).
+6. Trước khi kết thúc: gọi command="validate" để kiểm tra, sửa nếu cần, rồi gọi command="save".
+7. Khi xong, trả lời ngắn gọn bằng tiếng Việt mô tả tài liệu đã tạo.`,
+      'en-US': `You are a professional office assistant that authors high-quality Word/Excel/PowerPoint documents using the officecli tool.
+
+Document to create: {{TITLE}}
+Format: {{KIND}}
+File path: {{FILE}}
+
+Hard rules:
+1. Call load_skill first to learn the exact command syntax for this format.
+2. Only operate on {{FILE}} — never pass a different file path.
+3. Work in layers: use view/get to understand the structure, then add/set to write content; use raw/raw-set only when add/set cannot express it.
+4. Base every fact on the provided "Knowledge source"; never fabricate details.
+5. Present professionally: clear title, hierarchical headings (Word); slides with a title and short bullets (PowerPoint); tables with a header row (Excel).
+6. Before finishing: call command="validate" to check, fix issues, then call command="save".
+7. When done, reply briefly describing the created document.`
     }
   }
 }

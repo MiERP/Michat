@@ -1,5 +1,6 @@
 import * as queries from '../db/queries'
 import { ProviderManager } from '../providers/ProviderManager'
+import { KnowledgeService } from './KnowledgeService'
 import Logger from '../../shared/utils/logger'
 
 /**
@@ -7,13 +8,33 @@ import Logger from '../../shared/utils/logger'
  * Manages session token counting and automatic switching logic
  */
 export class SessionAutoSwitchService {
-  // Token threshold: 80% of GPT-4 context window (128k tokens)
-  private static readonly TOKEN_THRESHOLD = 100000
+  // Ngưỡng mặc định (fallback khi không có ctx của model local).
+  // Khi có ctx thực tế: dùng 80% ctx của model đang chạy (tránh tràn ctx llama-server).
+  private static readonly DEFAULT_TOKEN_THRESHOLD = 8000
+  private static readonly MAX_TOKEN_THRESHOLD = 100000
 
   private providerManager: ProviderManager
+  private knowledgeService: KnowledgeService | null
+  private tokenThreshold: number
 
-  constructor(providerManager: ProviderManager) {
+  constructor(
+    providerManager: ProviderManager,
+    knowledgeService?: KnowledgeService | null,
+    chatCtxSize?: number | null
+  ) {
     this.providerManager = providerManager
+    this.knowledgeService = knowledgeService ?? null
+    this.tokenThreshold =
+      chatCtxSize && chatCtxSize > 0
+        ? Math.min(
+            Math.max(Math.floor(chatCtxSize * 0.8), 2048),
+            SessionAutoSwitchService.MAX_TOKEN_THRESHOLD
+          )
+        : SessionAutoSwitchService.DEFAULT_TOKEN_THRESHOLD
+    Logger.info(
+      'SessionAutoSwitch',
+      `Token threshold set to ${this.tokenThreshold}${chatCtxSize ? ` (ctx=${chatCtxSize})` : ''}`
+    )
   }
 
   /**
@@ -30,10 +51,10 @@ export class SessionAutoSwitchService {
     Logger.debug('SessionAutoSwitch', `Session ${sessionId} current tokens: ${newTotal}`)
 
     // Check if switch is needed
-    if (newTotal && newTotal >= SessionAutoSwitchService.TOKEN_THRESHOLD) {
+    if (newTotal && newTotal >= this.tokenThreshold) {
       Logger.info(
         'SessionAutoSwitch',
-        `Token count reached threshold (${newTotal}/${SessionAutoSwitchService.TOKEN_THRESHOLD}), starting session switch...`
+        `Token count reached threshold (${newTotal}/${this.tokenThreshold}), starting session switch...`
       )
       return await this.switchSession(sessionId)
     }
@@ -59,14 +80,23 @@ export class SessionAutoSwitchService {
     queries.updateSessionSummary(oldSessionId, summary, 'archived')
     Logger.info('SessionAutoSwitch', 'Old session archived')
 
-    // 4. Create new session, set parent session ID
+    // 4. Store summary vào KB dạng memory (có embedding, search được)
+    if (this.knowledgeService) {
+      void this.knowledgeService
+        .storeSessionMemory(oldSession.notebookId, oldSessionId, summary, oldSession.title)
+        .catch((error) => {
+          Logger.error('SessionAutoSwitch', 'Failed to store session memory:', error)
+        })
+    }
+
+    // 5. Create new session, set parent session ID
     const newSession = queries.createSession(
       oldSession.notebookId,
       oldSession.title, // Keep same title
       oldSessionId // Set parent session ID to form chain
     )
 
-    // 5. Add lightweight system message in new session (optional)
+    // 6. Add lightweight system message in new session (optional)
     // Users shouldn't notice session switch, so simplify prompt
     queries.createMessage(
       newSession.id,

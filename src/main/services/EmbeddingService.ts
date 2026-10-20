@@ -3,6 +3,7 @@
  * Đóng gói logic tạo vector embedding, hỗ trợ xử lý theo lô và thử lại khi lỗi
  */
 
+import { createHash } from 'crypto'
 import { ProviderManager } from '../providers/ProviderManager'
 import type { EmbeddingResult, EmbeddingConfig } from '../providers/types'
 import Logger from '../../shared/utils/logger'
@@ -15,6 +16,8 @@ export interface EmbeddingServiceConfig {
   maxRetries?: number // Số lần thử lại tối đa, mặc định 3
   retryDelay?: number // Độ trễ giữa các lần thử (ms), mặc định 1000
   rateLimit?: number // Khoảng chờ giữa các request (ms), mặc định 100
+  cacheEnabled?: boolean // Bật/tắt cache embedding (mặc định true)
+  cacheMaxEntries?: number // Số entry tối đa của LRU cache, mặc định 4096
 }
 
 /**
@@ -24,6 +27,9 @@ export interface EmbeddingServiceConfig {
 export class EmbeddingService {
   private providerManager: ProviderManager
   private config: Required<EmbeddingServiceConfig>
+  private cache = new Map<string, EmbeddingResult>()
+  private cacheHits = 0
+  private cacheMisses = 0
 
   constructor(providerManager: ProviderManager, config?: EmbeddingServiceConfig) {
     this.providerManager = providerManager
@@ -31,8 +37,57 @@ export class EmbeddingService {
       batchSize: config?.batchSize ?? 20,
       maxRetries: config?.maxRetries ?? 3,
       retryDelay: config?.retryDelay ?? 1000,
-      rateLimit: config?.rateLimit ?? 100
+      rateLimit: config?.rateLimit ?? 100,
+      cacheEnabled: config?.cacheEnabled ?? true,
+      cacheMaxEntries: config?.cacheMaxEntries ?? 4096
     }
+  }
+
+  /**
+   * Xóa toàn bộ cache embedding (gọi khi đổi model hoặc muốn ép tính lại)
+   */
+  clearCache(): void {
+    const size = this.cache.size
+    this.cache.clear()
+    Logger.info('EmbeddingService', `Embedding cache cleared (${size} entries)`)
+  }
+
+  getCacheStats(): { entries: number; hits: number; misses: number } {
+    return { entries: this.cache.size, hits: this.cacheHits, misses: this.cacheMisses }
+  }
+
+  private normalizeText(text: string): string {
+    return text.trim().replace(/\s+/g, ' ')
+  }
+
+  private buildCacheKey(providerName: string, model: string, dims: string, text: string): string {
+    const hash = createHash('md5').update(this.normalizeText(text)).digest('hex')
+    return `${providerName}|${model}|${dims}|${hash}`
+  }
+
+  private cacheGet(key: string): EmbeddingResult | undefined {
+    if (!this.config.cacheEnabled) return undefined
+    const entry = this.cache.get(key)
+    if (!entry) return undefined
+
+    // LRU: đẩy entry vừa truy cập xuống cuối
+    this.cache.delete(key)
+    this.cache.set(key, entry)
+    this.cacheHits++
+    return entry
+  }
+
+  private cacheSet(key: string, result: EmbeddingResult): void {
+    if (!this.config.cacheEnabled) return
+    if (this.cache.size >= this.config.cacheMaxEntries) {
+      const oldestKey = this.cache.keys().next().value
+      if (oldestKey !== undefined) this.cache.delete(oldestKey)
+    }
+    this.cache.set(key, result)
+  }
+
+  private copyResult(result: EmbeddingResult): EmbeddingResult {
+    return { ...result, embedding: new Float32Array(result.embedding) }
   }
 
   /**
@@ -45,7 +100,19 @@ export class EmbeddingService {
       throw new Error('No embedding provider available')
     }
 
-    return await this.withRetry(() => provider.createEmbedding(text, config))
+    const model = provider.getDefaultEmbeddingModel()
+    const dims = String(config?.dimensions ?? '*')
+    const cacheKey = this.buildCacheKey(provider.name, model, dims, text)
+    const cached = this.cacheGet(cacheKey)
+    if (cached) {
+      Logger.debug('EmbeddingService', `Cache hit for query text (${text.length} chars)`)
+      return this.copyResult(cached)
+    }
+    this.cacheMisses++
+
+    const result = await this.withRetry(() => provider.createEmbedding(text, config))
+    this.cacheSet(cacheKey, result)
+    return this.copyResult(result)
   }
 
   /**
@@ -67,6 +134,66 @@ export class EmbeddingService {
       throw new Error('No embedding provider available')
     }
 
+    // 1. Kiểm tra cache cho từng text
+    const model = provider.getDefaultEmbeddingModel()
+    const dims = String(config?.dimensions ?? '*')
+    const results: (EmbeddingResult | undefined)[] = new Array(texts.length).fill(undefined)
+    const missIndexes: number[] = []
+
+    for (let i = 0; i < texts.length; i++) {
+      const cacheKey = this.buildCacheKey(provider.name, model, dims, texts[i])
+      const cached = this.cacheGet(cacheKey)
+      if (cached) {
+        results[i] = cached
+      } else {
+        this.cacheMisses++
+        missIndexes.push(i)
+      }
+    }
+
+    const totalMisses = missIndexes.length
+    if (totalMisses === 0) {
+      Logger.debug('EmbeddingService', `Batch cache: ${texts.length}/${texts.length} hits`)
+      onProgress?.(texts.length, texts.length)
+      return results.map((r) => this.copyResult(r!))
+    }
+
+    Logger.info(
+      'EmbeddingService',
+      `Batch cache: ${texts.length - totalMisses}/${texts.length} hits, embedding ${totalMisses} missing`
+    )
+
+    // 2. Chỉ embed những text chưa có trong cache
+    const missTexts = missIndexes.map((i) => texts[i])
+    const cachedCount = texts.length - totalMisses
+    const missProgress = onProgress
+      ? (completed: number) => {
+          onProgress(cachedCount + completed, texts.length)
+        }
+      : undefined
+    const missResults = await this.embedBatchUncached(provider, missTexts, config, missProgress)
+
+    for (let i = 0; i < missIndexes.length; i++) {
+      const originalIndex = missIndexes[i]
+      results[originalIndex] = missResults[i]
+      this.cacheSet(
+        this.buildCacheKey(provider.name, model, dims, texts[originalIndex]),
+        missResults[i]
+      )
+    }
+
+    return results.map((r) => this.copyResult(r!))
+  }
+
+  /**
+   * Embed lô text chưa có trong cache (giữ nguyên hành vi batch/retry cũ)
+   */
+  private async embedBatchUncached(
+    provider: NonNullable<Awaited<ReturnType<ProviderManager['getActiveEmbeddingProvider']>>>,
+    texts: string[],
+    config?: EmbeddingConfig,
+    onProgress?: (completed: number, total: number) => void
+  ): Promise<EmbeddingResult[]> {
     const results: EmbeddingResult[] = []
     const batches = this.chunk(texts, this.config.batchSize)
 

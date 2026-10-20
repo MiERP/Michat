@@ -13,9 +13,9 @@ const promptLanguageSchema = z.object({
 })
 
 const promptsSchema = z.object({
-  mindMap: promptLanguageSchema.optional(),
   quiz: promptLanguageSchema.optional(),
-  chat: promptLanguageSchema.optional()
+  chat: promptLanguageSchema.optional(),
+  office: promptLanguageSchema.optional()
 })
 
 const appSettingsUpdateSchema = z
@@ -26,7 +26,6 @@ const appSettingsUpdateSchema = z
     hasCompletedOnboarding: z.boolean().optional(),
     defaultChatModel: z.string().optional(),
     defaultEmbeddingModel: z.string().optional(),
-    defaultRerankModel: z.string().optional(),
     rerankEnabled: z.boolean().optional(),
     rerankTopN: z.number().int().min(1).max(100).optional(),
     rerankUseHeuristicFallback: z.boolean().optional(),
@@ -34,6 +33,8 @@ const appSettingsUpdateSchema = z
     ragThreshold: z.number().min(0).max(1).optional(),
     ragSkipShortQueryLength: z.number().int().min(0).max(200).optional(),
     ragEnableChitChatHeuristic: z.boolean().optional(),
+    ragHierarchicalEnabled: z.boolean().optional(),
+    ragDocTopK: z.number().int().min(1).max(50).optional(),
     allowRemoteProviders: z.boolean().optional(),
     prompts: promptsSchema.optional()
   })
@@ -46,7 +47,6 @@ const settingValueSchemas = {
   hasCompletedOnboarding: appSettingsUpdateSchema.shape.hasCompletedOnboarding.unwrap(),
   defaultChatModel: appSettingsUpdateSchema.shape.defaultChatModel.unwrap(),
   defaultEmbeddingModel: appSettingsUpdateSchema.shape.defaultEmbeddingModel.unwrap(),
-  defaultRerankModel: appSettingsUpdateSchema.shape.defaultRerankModel.unwrap(),
   rerankEnabled: appSettingsUpdateSchema.shape.rerankEnabled.unwrap(),
   rerankTopN: appSettingsUpdateSchema.shape.rerankTopN.unwrap(),
   rerankUseHeuristicFallback: appSettingsUpdateSchema.shape.rerankUseHeuristicFallback.unwrap(),
@@ -54,6 +54,8 @@ const settingValueSchemas = {
   ragThreshold: appSettingsUpdateSchema.shape.ragThreshold.unwrap(),
   ragSkipShortQueryLength: appSettingsUpdateSchema.shape.ragSkipShortQueryLength.unwrap(),
   ragEnableChitChatHeuristic: appSettingsUpdateSchema.shape.ragEnableChitChatHeuristic.unwrap(),
+  ragHierarchicalEnabled: appSettingsUpdateSchema.shape.ragHierarchicalEnabled.unwrap(),
+  ragDocTopK: appSettingsUpdateSchema.shape.ragDocTopK.unwrap(),
   allowRemoteProviders: appSettingsUpdateSchema.shape.allowRemoteProviders.unwrap(),
   prompts: appSettingsUpdateSchema.shape.prompts.unwrap()
 }
@@ -203,10 +205,7 @@ const documentMetadataSchema = z.object({
   documentNumber: z.string().trim().max(200).optional(),
   documentType: z.string().trim().max(200).optional(),
   issuer: z.string().trim().max(500).optional(),
-  issuedAt: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
+  issuedAt: z.iso.date().optional(),
   documentTitle: z.string().trim().max(2000).optional(),
   legalBases: z.string().trim().max(12000).optional()
 })
@@ -283,6 +282,13 @@ export const KnowledgeSchemas = {
   reindexDocument: z.object({
     documentId: z.string().min(1, 'Document ID cannot be empty')
   }),
+
+  enrichDocument: z.object({
+    documentId: z.string().min(1, 'Document ID cannot be empty')
+  }),
+  notebookSummary: z.object({
+    notebookId: z.string().min(1, 'Notebook ID cannot be empty')
+  }),
   refreshDocumentMetadata: z.object({
     documentId: z.string().min(1, 'Document ID cannot be empty')
   }),
@@ -292,6 +298,27 @@ export const KnowledgeSchemas = {
   }),
 
   openSource: z.object({
+    documentId: z.string().min(1, 'Document ID cannot be empty')
+  }),
+
+  recordFeedback: z.object({
+    notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
+    chunkId: z.string().min(1, 'Chunk ID cannot be empty'),
+    kind: z.enum(['citation_good', 'citation_bad', 'user_correction']),
+    note: z.string().optional()
+  }),
+
+  setDocumentLifecycle: z.object({
+    documentId: z.string().min(1, 'Document ID cannot be empty'),
+    state: z.enum(['draft', 'verified', 'outdated'])
+  }),
+
+  getLinks: z.object({
+    notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
+    documentId: z.string().min(1, 'Document ID cannot be empty')
+  }),
+
+  generateLinks: z.object({
     documentId: z.string().min(1, 'Document ID cannot be empty')
   }),
 
@@ -309,15 +336,32 @@ export const KnowledgeSchemas = {
         metadataFilter: z
           .object({
             documentIds: z.array(z.string().min(1)).optional(),
-            documentTypes: z.array(z.enum(['file', 'note', 'text'])).optional(),
-            sourceUriContains: z.string().min(1).max(500).optional()
+            documentTypes: z
+              .array(z.enum(['file', 'note', 'url', 'text', 'memory']))
+              .optional(),
+            sourceUriContains: z.string().min(1).max(500).optional(),
+            sectionPath: z.array(z.string().min(1).max(300)).max(10).optional(),
+            pageRange: z
+              .object({
+                from: z.number().int().min(1),
+                to: z.number().int().min(1)
+              })
+              .optional(),
+            documentMetadata: z.record(z.string().max(100), z.string().max(300)).optional()
+          })
+          .optional(),
+        hierarchical: z
+          .object({
+            enabled: z.boolean().optional(),
+            docTopK: z.number().int().min(1).max(50).optional(),
+            sectionTopK: z.number().int().min(1).max(50).optional(),
+            threshold: z.number().min(0).max(1).optional()
           })
           .optional(),
         rerank: z
           .object({
             enabled: z.boolean().optional(),
             topN: z.number().int().min(1).max(100).optional(),
-            model: z.string().min(1).max(300).optional(),
             heuristicFallback: z.boolean().optional()
           })
           .optional()
@@ -335,7 +379,20 @@ export const ChatSchemas = {
     content: z
       .string()
       .min(1, 'Message content cannot be empty')
-      .max(10000, 'Message content cannot exceed 10000 characters')
+      .max(10000, 'Message content cannot exceed 10000 characters'),
+    // Phạm vi tri thức cho lượt hỏi (đúng tài liệu → đúng mục → đúng khoảng trang)
+    scope: z
+      .object({
+        documentIds: z.array(z.string().min(1)).max(50).optional(),
+        sectionPath: z.array(z.string().min(1).max(300)).max(10).optional(),
+        pageRange: z
+          .object({
+            from: z.number().int().min(1),
+            to: z.number().int().min(1)
+          })
+          .optional()
+      })
+      .optional()
   }),
 
   createSession: z.object({

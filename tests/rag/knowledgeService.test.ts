@@ -264,6 +264,38 @@ describe('KnowledgeService RAG regression', () => {
     expect(results.find((result) => result.documentId === documentId)?.content).toContain('Query RAG')
   })
 
+  it('preserves extraction provenance for unchanged metadata and remembers explicit clearing', async () => {
+    const { service, notebookId } = context!
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Synthetic resolution', type: 'text',
+      content: 'CHÍNH PHỦ\nSố: 15/NQ-CP\nCỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nNGHỊ QUYẾT'
+    })
+    const original = service.getDocument(documentId)!.metadata as any
+    service.updateDocumentMetadata(documentId, {
+      ...original.documentMetadata, issuer: 'Cơ quan đã xác nhận', documentNumber: ''
+    })
+    const saved = service.getDocument(documentId)!.metadata as any
+    expect(saved.documentMetadataInspector.fields.documentType).toEqual(
+      original.documentMetadataInspector.fields.documentType
+    )
+    service.refreshDocumentMetadata(documentId)
+    const refreshed = service.getDocument(documentId)!.metadata as any
+    expect(refreshed.documentMetadata.documentNumber).toBeUndefined()
+    expect(refreshed.documentMetadata.issuer).toBe('Cơ quan đã xác nhận')
+    const matches = await service.search(notebookId, 'NGHỊ QUYẾT', {
+      threshold: 0,
+      metadataFilter: { documentMetadata: { issuer: '  cơ quan đã xác nhận  ' } }
+    })
+    expect(matches.some((result) => result.documentId === documentId)).toBe(true)
+    expect(await service.search(notebookId, 'NGHỊ QUYẾT', {
+      threshold: 0,
+      metadataFilter: { documentMetadata: { documentNumber: '15/NQ-CP' } }
+    })).toEqual([])
+    await service.reindexDocument(documentId)
+    expect((service.getDocument(documentId)!.metadata as any).documentMetadata.documentNumber)
+      .toBeUndefined()
+  })
+
   it('records corrupt file parse failures as failed documents', async () => {
     const { service, notebookId } = context!
     const filePath = join(userDataDir, 'corrupt.pdf')
@@ -315,6 +347,21 @@ describe('KnowledgeService RAG regression', () => {
     const retriedDocument = service.getDocument(failedDocument!.id)
     expect(retriedDocument?.status).toBe('indexed')
     expect(service.getDocumentChunks(failedDocument!.id).length).toBeGreaterThan(0)
+  })
+
+  it('deleting a notebook removes all levels of its vector index', async () => {
+    const { service, notebookId, dbModule } = context!
+    await service.addDocument(notebookId, {
+      title: 'Notebook deletion', type: 'text',
+      content: '# Local-first\n\n## Privacy\nLocal-first documents stay on the machine and support private embedding and retrieval.'
+    })
+    const sqlite = dbModule.getSqlite()!
+    expect(sqlite.prepare('SELECT * FROM vec_sections WHERE notebook_id = ?').all(notebookId).length).toBeGreaterThan(0)
+    const { deleteNotebook } = await import('../../src/main/db/queries')
+    await deleteNotebook(notebookId)
+    for (const table of ['vec_sections', 'vec_documents', 'vec_embeddings', 'fts_chunks']) {
+      expect(sqlite.prepare(`SELECT * FROM ${table} WHERE notebook_id = ?`).all(notebookId)).toEqual([])
+    }
   })
 
   it('delete and reindex clean chunks, embeddings, FTS, and vector records', async () => {

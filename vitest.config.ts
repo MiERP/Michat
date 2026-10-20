@@ -6,6 +6,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // Native SQLite and Office integration tests otherwise contend for CPU on Windows.
+    maxWorkers: 2,
     coverage: {
       provider: 'v8',
       include: ['src/main/**/*.ts', 'src/shared/**/*.ts'],

@@ -1,21 +1,26 @@
-import { ReactElement, useEffect, useState } from 'react'
+import { ReactElement, useEffect, useRef, useState } from 'react'
 import {
   Save,
   Trash2,
   ArrowLeft,
   FileText,
-  ClipboardCheck,
   BookOpenText,
   ExternalLink,
-  Loader2
+  Loader2,
+  ClipboardList,
+  Presentation,
+  ThumbsUp,
+  ThumbsDown,
+  PenLine,
+  Filter
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { useItemStore } from '../../store/itemStore'
 import { useCitationStore } from '../../store/citationStore'
+import { useChatStore } from '../../store/chatStore'
 import NoteEditor from './note/NoteEditor'
 import ItemList from './item/ItemList'
-import QuizStartDialog, { QuizStartParams } from './quiz/QuizStartDialog'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
@@ -139,7 +144,38 @@ export default function NotePanel(): ReactElement {
     setCurrentNote
   } = useItemStore()
   const { selected, isLoading, clearCitation } = useCitationStore()
-  const visibleItems = items.filter((item) => item.type !== 'mindmap')
+  const { setRagScope } = useChatStore()
+  const visibleItems = items
+
+  // Giới hạn phạm vi hỏi vào đúng MỤC (heading) chứa đoạn trích dẫn
+  const handleScopeToSection = (): void => {
+    if (!selected) return
+    setRagScope({
+      documentIds: [selected.citation.documentId],
+      sectionPath: selected.citation.sectionPath
+    })
+  }
+
+  // Giới hạn phạm vi hỏi vào đúng TRANG chứa đoạn trích dẫn
+  const handleScopeToPage = (): void => {
+    if (!selected?.pageNumber) return
+    setRagScope({
+      documentIds: [selected.citation.documentId],
+      pageRange: { from: selected.pageNumber, to: selected.pageNumber }
+    })
+  }
+
+  // Auto-scroll tới đoạn trích dẫn chính khi mở citation
+  const citationContentRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!selected) return
+    // Đợi render xong rồi cuộn tới mark (đoạn chính được LLM dùng)
+    const timer = setTimeout(() => {
+      const mark = citationContentRef.current?.querySelector('mark')
+      mark?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [selected])
 
   // 管理未保存状态
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
@@ -147,7 +183,6 @@ export default function NotePanel(): ReactElement {
   // Dialog 状态管理
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [showQuizStartDialog, setShowQuizStartDialog] = useState(false)
 
   // 监听Notebook切换，清空当前编辑状态
   useEffect(() => {
@@ -165,6 +200,17 @@ export default function NotePanel(): ReactElement {
     if (notebookId) {
       loadItems(notebookId)
     }
+  }, [notebookId, loadItems])
+
+  // Quiz được tạo xong ở cửa sổ popup → refresh danh sách để hiện bộ câu hỏi mới
+  useEffect(() => {
+    if (!notebookId) return
+    const cleanup = window.api.quiz.onGenerated((data) => {
+      if (data.notebookId === notebookId) {
+        void loadItems(notebookId)
+      }
+    })
+    return cleanup
   }, [notebookId, loadItems])
 
   // 创建新笔记
@@ -223,35 +269,23 @@ export default function NotePanel(): ReactElement {
     }
   }
 
-  // 打开答题启动对话框
-  const handleGenerateQuiz = () => {
-    setShowQuizStartDialog(true)
-  }
-
-  // 开始生成答题
-  const handleQuizStart = async (params: QuizStartParams) => {
+  // 打开答题窗口（tạo mới — chưa có quizId)
+  const handleOpenQuizWindow = async () => {
     if (!notebookId) return
     try {
-      // 立即开始生成（异步）
-      window.api.quiz
-        .generate(notebookId, {
-          questionCount: params.questionCount,
-          difficulty: params.difficulty,
-          customPrompt: params.customPrompt
-        })
-        .then((result) => {
-          if (result.success) {
-            // 生成完成后重新加载列表
-            loadItems(notebookId)
-          }
-        })
-
-      // 等待一小段时间后刷新列表，以显示"正在生成"的 item
-      setTimeout(() => {
-        loadItems(notebookId)
-      }, 500)
+      await window.api.quiz.openWindow(notebookId)
     } catch (error) {
-      console.error('[NotePanel] Failed to start quiz:', error)
+      console.error('[NotePanel] Failed to open quiz window:', error)
+    }
+  }
+
+  // Open the Office assistant window (Word / Excel / PowerPoint)
+  const handleOpenOfficeWindow = async () => {
+    if (!notebookId) return
+    try {
+      await window.api.office.openWindow(notebookId)
+    } catch (error) {
+      console.error('[NotePanel] Failed to open office window:', error)
     }
   }
 
@@ -264,6 +298,40 @@ export default function NotePanel(): ReactElement {
       }
     } catch (error) {
       console.error('[NotePanel] Failed to open citation source:', error)
+    }
+  }
+
+  // Feedback loop: ghi nhận đánh giá của người dùng lên citation
+  const [feedbackSent, setFeedbackSent] = useState<string | null>(null)
+  const handleRecordFeedback = async (
+    kind: 'citation_good' | 'citation_bad' | 'user_correction'
+  ) => {
+    if (!notebookId || !selected?.citation?.chunkId) return
+
+    let note: string | undefined
+    if (kind === 'user_correction') {
+      const correction = window.prompt(
+        'Nội dung đúng là gì? (sẽ được dùng để giảm trọng số chunk này)'
+      )
+      if (correction === null) return
+      note = correction
+    }
+
+    try {
+      const result = await window.api.knowledge.recordFeedback(
+        notebookId,
+        selected.citation.chunkId,
+        kind,
+        note
+      )
+      if (result?.success) {
+        setFeedbackSent(kind)
+        setTimeout(() => setFeedbackSent(null), 2000)
+      } else {
+        alert(result?.error || 'Không thể ghi nhận phản hồi')
+      }
+    } catch (error) {
+      console.error('[NotePanel] Failed to record feedback:', error)
     }
   }
 
@@ -291,16 +359,6 @@ export default function NotePanel(): ReactElement {
             right={
               <>
                 <Button
-                  onClick={handleGenerateQuiz}
-                  variant="ghost"
-                  size="icon"
-                  className="w-8 h-8"
-                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                  title={t('generateQuiz')}
-                >
-                  <ClipboardCheck className="w-4 h-4" />
-                </Button>
-                <Button
                   onClick={handleCreateNote}
                   variant="ghost"
                   size="icon"
@@ -309,6 +367,26 @@ export default function NotePanel(): ReactElement {
                   title={t('createNote')}
                 >
                   <FileText className="w-4 h-4" />
+                </Button>
+                <Button
+                  onClick={handleOpenQuizWindow}
+                  variant="ghost"
+                  size="icon"
+                  className="w-8 h-8"
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  title={t('generateQuiz')}
+                >
+                  <ClipboardList className="w-4 h-4" />
+                </Button>
+                <Button
+                  onClick={handleOpenOfficeWindow}
+                  variant="ghost"
+                  size="icon"
+                  className="w-8 h-8"
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  title="Office"
+                >
+                  <Presentation className="w-4 h-4" />
                 </Button>
               </>
             }
@@ -322,7 +400,6 @@ export default function NotePanel(): ReactElement {
                   items={visibleItems}
                   currentNote={currentNote}
                   onSelectNote={setCurrentNote}
-                  onOpenMindMap={() => {}}
                   onOpenQuiz={handleOpenQuiz}
                   onDeleteItem={(itemId) => deleteItem(itemId, true)}
                   onRefresh={() => notebookId && loadItems(notebookId)}
@@ -361,19 +438,62 @@ export default function NotePanel(): ReactElement {
                         [{selected.citation.index}] {selected.citation.documentTitle}
                         {selected.pageNumber ? ` (trang ${selected.pageNumber})` : ''}
                       </div>
+                      {selected.citation.sectionPath?.length ? (
+                        <div className="truncate" title={selected.citation.sectionPath.join(' › ')}>
+                          Mục: {selected.citation.sectionPath.join(' › ')}
+                        </div>
+                      ) : null}
                       <div>ID tài liệu: {selected.citation.documentId}</div>
                     </div>
                     <ScrollArea className="flex-1">
-                      <div className="p-4">
+                      <div className="p-4" ref={citationContentRef}>
                         <pre className="whitespace-pre-wrap text-xs leading-relaxed text-foreground font-sans">
-                          {renderHighlightedText(
-                            selected.documentContent || selected.citation.snippet,
-                            selected.highlightText
+                          {selected.prevContent && (
+                            <>
+                              <span className="text-muted-foreground select-none">
+                                — Văn cảnh trước —
+                              </span>
+                              {'\n'}
+                              <span className="text-muted-foreground/80">
+                                {selected.prevContent}
+                              </span>
+                              {'\n\n'}
+                            </>
                           )}
+                          {selected.chunkContent && (
+                            <>
+                              <span className="text-primary select-none">
+                                — Đoạn trích dẫn được LLM sử dụng —
+                              </span>
+                              {'\n'}
+                              <mark className="bg-yellow-300/60 text-foreground rounded-sm px-0.5">
+                                {selected.chunkContent}
+                              </mark>
+                              {'\n\n'}
+                            </>
+                          )}
+                          {selected.nextContent && (
+                            <>
+                              <span className="text-muted-foreground select-none">
+                                — Văn cảnh sau —
+                              </span>
+                              {'\n'}
+                              <span className="text-muted-foreground/80">
+                                {selected.nextContent}
+                              </span>
+                            </>
+                          )}
+                          {!selected.prevContent &&
+                            !selected.chunkContent &&
+                            !selected.nextContent &&
+                            renderHighlightedText(
+                              selected.documentContent || selected.citation.snippet,
+                              selected.highlightText
+                            )}
                         </pre>
                       </div>
                     </ScrollArea>
-                    <div className="px-4 py-2 border-t border-border">
+                    <div className="px-4 py-2 border-t border-border flex items-center gap-2">
                       <Button
                         onClick={handleOpenCitationSource}
                         variant="secondary"
@@ -383,6 +503,62 @@ export default function NotePanel(): ReactElement {
                       >
                         <ExternalLink className="w-3 h-3" />
                         Mở nguồn gốc
+                      </Button>
+                      {selected.citation.sectionPath?.length ? (
+                        <Button
+                          onClick={handleScopeToSection}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Chỉ hỏi trong mục này"
+                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                        >
+                          <Filter className="w-3 h-3" />
+                        </Button>
+                      ) : null}
+                      {selected.pageNumber ? (
+                        <Button
+                          onClick={handleScopeToPage}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Chỉ hỏi trong trang này"
+                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                        >
+                          <Filter className="w-3 h-3" />
+                        </Button>
+                      ) : null}
+                      <div className="flex-1" />
+                      <span className="text-xs text-muted-foreground">Đánh giá trích dẫn:</span>
+                      <Button
+                        onClick={() => handleRecordFeedback('citation_good')}
+                        variant="ghost"
+                        size="sm"
+                        className={`h-8 px-2 text-xs ${feedbackSent === 'citation_good' ? 'text-green-600' : ''}`}
+                        title="Trích dẫn chính xác"
+                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                      >
+                        <ThumbsUp className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        onClick={() => handleRecordFeedback('citation_bad')}
+                        variant="ghost"
+                        size="sm"
+                        className={`h-8 px-2 text-xs ${feedbackSent === 'citation_bad' ? 'text-destructive' : ''}`}
+                        title="Trích dẫn không liên quan/sai"
+                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                      >
+                        <ThumbsDown className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        onClick={() => handleRecordFeedback('user_correction')}
+                        variant="ghost"
+                        size="sm"
+                        className={`h-8 px-2 text-xs ${feedbackSent === 'user_correction' ? 'text-blue-600' : ''}`}
+                        title="Sửa nội dung sai"
+                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                      >
+                        <PenLine className="w-3 h-3" />
                       </Button>
                     </div>
                   </div>
@@ -410,15 +586,6 @@ export default function NotePanel(): ReactElement {
         onClose={() => setShowDeleteDialog(false)}
         onConfirm={confirmDelete}
       />
-
-      {/* 答题启动对话框 */}
-      {notebookId && (
-        <QuizStartDialog
-          isOpen={showQuizStartDialog}
-          onClose={() => setShowQuizStartDialog(false)}
-          onStart={handleQuizStart}
-        />
-      )}
     </div>
   )
 }
@@ -426,24 +593,45 @@ export default function NotePanel(): ReactElement {
 function renderHighlightedText(content: string, highlightText?: string) {
   if (!highlightText || !content) return content
 
-  const source = content
-  const target = highlightText.trim()
-  if (!target) return content
+  const target = stripEllipsis(highlightText.trim())
+  if (!target || target.length < 20) return content
 
-  const lowerSource = source.toLowerCase()
-  const lowerTarget = target.toLowerCase()
-  const start = lowerSource.indexOf(lowerTarget)
-  if (start < 0) return content
-
-  const end = start + target.length
+  const match = findFlexibleMatch(content, target)
+  if (!match) return content
 
   return (
     <>
-      {source.slice(0, start)}
+      {content.slice(0, match.start)}
       <mark className="bg-yellow-300/50 text-foreground px-0.5 rounded-sm">
-        {source.slice(start, end)}
+        {content.slice(match.start, match.end)}
       </mark>
-      {source.slice(end)}
+      {content.slice(match.end)}
     </>
   )
+}
+
+/**
+ * Tìm vị trí khớp linh hoạt: bỏ qua khác biệt whitespace (snippet đã bị
+ * collapse khoảng trắng trong khi nội dung preview giữ nguyên xuống dòng).
+ * Trả về index theo chuỗi gốc (cùng độ dài với bản lowercase).
+ */
+function findFlexibleMatch(source: string, target: string): { start: number; end: number } | null {
+  const lowerSource = source.toLowerCase()
+  const lowerTarget = target.toLowerCase()
+
+  const exact = lowerSource.indexOf(lowerTarget)
+  if (exact >= 0) {
+    return { start: exact, end: exact + lowerTarget.length }
+  }
+
+  const escaped = lowerTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const flexible = new RegExp(escaped.replace(/\s+/g, '\\s+'))
+  const match = flexible.exec(lowerSource)
+  if (!match) return null
+
+  return { start: match.index, end: match.index + match[0].length }
+}
+
+function stripEllipsis(text: string): string {
+  return text.replace(/\.\.\.+$/, '').trim()
 }

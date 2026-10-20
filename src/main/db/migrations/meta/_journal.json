@@ -85,6 +85,62 @@
       "when": 1768805329327,
       "tag": "0011_big_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1784041832000,
+      "tag": "0012_markdown_hashes",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1784041842000,
+      "tag": "0013_memory_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1784041852000,
+      "tag": "0014_links_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1784041862000,
+      "tag": "0015_background_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1784041864000,
+      "tag": "0016_remove_mindmaps",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1784041868000,
+      "tag": "0017_background_jobs_retry",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1784041870000,
+      "tag": "0018_section_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1784041872000,
+      "tag": "0019_notebook_metadata",
+      "breakpoints": true
     }
   ]
 }

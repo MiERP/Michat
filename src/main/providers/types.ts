@@ -17,12 +17,6 @@ export type {
   EmbeddingResult
 } from './capabilities/EmbeddingCapability'
 export type {
-  RerankCapability,
-  RerankConfig,
-  RerankDocument,
-  RerankResult
-} from './capabilities/RerankCapability'
-export type {
   ImageGenerationCapability,
   ImageGenerationConfig,
   ImageGenerationResult
@@ -32,7 +26,6 @@ export type {
 import type { BaseProvider } from './capabilities/BaseProvider'
 import type { ChatCapability } from './capabilities/ChatCapability'
 import type { EmbeddingCapability } from './capabilities/EmbeddingCapability'
-import type { RerankCapability } from './capabilities/RerankCapability'
 import type { ImageGenerationCapability } from './capabilities/ImageGenerationCapability'
 
 /**
@@ -52,12 +45,6 @@ export type EmbeddingProvider = BaseProvider & EmbeddingCapability
  * 同时支持对话和嵌入功能的 Provider
  */
 export type FullFeaturedProvider = BaseProvider & ChatCapability & EmbeddingCapability
-
-/**
- * 重排序 Provider (未来扩展)
- * 支持重排序功能的 Provider
- */
-export type RerankProvider = BaseProvider & RerankCapability
 
 /**
  * 图像生成 Provider (未来扩展)

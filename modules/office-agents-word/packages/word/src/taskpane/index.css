@@ -1,5 +1,0 @@
-@import "tailwindcss";
-@source "../**/*.{ts,html,svelte}";
-@source "../../../core/src/**/*.{ts,svelte}";
-
-@custom-variant dark (&:where([data-theme="dark"] *));

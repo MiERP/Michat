@@ -13,8 +13,7 @@ export default defineConfig(
       '**/out',
       '.claude/**',
       'resources/**',
-      'scripts/**/*.cjs',
-      'modules/office-agents-word/**'
+      'scripts/**/*.cjs'
     ]
   },
   tseslint.configs.recommended,

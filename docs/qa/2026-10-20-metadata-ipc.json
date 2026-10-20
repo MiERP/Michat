@@ -1,0 +1,94 @@
+{
+  "id": "doc_78689ecf-d9ec-48a7-ba3f-cb6f9ece19f7",
+  "before": {
+    "documentNumber": "15/NQ-CP",
+    "documentType": "Nghị quyết",
+    "issuer": "Bộ Quốc Phòng",
+    "issuedAt": "2025-05-06",
+    "documentTitle": "Về việc kiểm thử metadata",
+    "legalBases": "Căn cứ Nghị định số: 1234/2024/NĐ-CP ngày 01 tháng 01 năm 2024;"
+  },
+  "updated": true,
+  "refreshed": {
+    "success": true
+  },
+  "after": {
+    "documentType": "Nghị quyết",
+    "issuer": "Cơ quan QA",
+    "issuedAt": "2025-05-06",
+    "documentTitle": "Về việc kiểm thử metadata",
+    "legalBases": "Căn cứ Nghị định số: 1234/2024/NĐ-CP ngày 01 tháng 01 năm 2024;"
+  },
+  "inspector": {
+    "version": 1,
+    "extractedAt": "2026-10-20T00:28:57.120Z",
+    "fields": {
+      "documentNumber": {
+        "value": "",
+        "status": "user_corrected",
+        "confidence": 1
+      },
+      "documentType": {
+        "value": "Nghị quyết",
+        "status": "extracted",
+        "confidence": 0.96,
+        "evidence": {
+          "text": "NGHỊ QUYẾT",
+          "startOffset": 96,
+          "endOffset": 106
+        }
+      },
+      "issuer": {
+        "value": "Cơ quan QA",
+        "status": "user_corrected",
+        "confidence": 1
+      },
+      "issuedAt": {
+        "value": "2025-05-06",
+        "status": "extracted",
+        "confidence": 0.97,
+        "evidence": {
+          "text": "BỘ QUỐC PHÒNG Số: 15/NQ-CP CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM Hà Nội, ngày 06 tháng 05 năm 2025 NGHỊ QUYẾT Về việc kiểm thử metadata",
+          "startOffset": 0,
+          "endOffset": 133
+        }
+      },
+      "documentTitle": {
+        "value": "Về việc kiểm thử metadata",
+        "status": "extracted",
+        "confidence": 0.93,
+        "evidence": {
+          "text": "NGHỊ QUYẾT Về việc kiểm thử metadata",
+          "startOffset": 95,
+          "endOffset": 133
+        }
+      },
+      "legalBases": {
+        "value": "Căn cứ Nghị định số: 1234/2024/NĐ-CP ngày 01 tháng 01 năm 2024;",
+        "status": "extracted",
+        "confidence": 0.92,
+        "evidence": {
+          "text": "Căn cứ Nghị định số: 1234/2024/NĐ-CP ngày 01 tháng 01 năm 2024;",
+          "startOffset": 133,
+          "endOffset": 196
+        }
+      }
+    }
+  },
+  "found": {
+    "success": true,
+    "results": [
+      {
+        "chunkId": "chunk_6356d06e-18a6-4f34-afdb-0b346adc8259",
+        "documentId": "doc_78689ecf-d9ec-48a7-ba3f-cb6f9ece19f7",
+        "documentTitle": "QA metadata synthetic",
+        "documentType": "text",
+        "content": "BỘ QUỐC PHÒNG Số: 15/NQ-CP CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM Hà Nội, ngày 06 tháng 05 năm 2025 NGHỊ QUYẾT Về việc kiểm thử metadata Căn cứ Nghị định số: 1234/2024/NĐ-CP ngày 01 tháng 01 năm 2024; Điều 1. Dữ liệu kiểm thử cục bộ.",
+        "matchedContent": "BỘ QUỐC PHÒNG Số: 15/NQ-CP CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM Hà Nội, ngày 06 tháng 05 năm 2025 NGHỊ QUYẾT Về việc kiểm thử metadata Căn cứ Nghị định số: 1234/2024/NĐ-CP ngày 01 tháng 01 năm 2024; Điều 1. Dữ liệu kiểm thử cục bộ.",
+        "score": 0.03278688524590164,
+        "chunkIndex": 0
+      }
+    ]
+  },
+  "invalidDateRejected": true
+}

@@ -1,11 +1,12 @@
 import { ProviderManager } from '../providers/ProviderManager'
 import { SessionAutoSwitchService } from '../services/SessionAutoSwitchService'
 import { KnowledgeService } from '../services/KnowledgeService'
+import { BackgroundJobService } from '../services/BackgroundJobService'
 import { UpdateService } from '../services/UpdateService'
-import { MindMapService } from '../services/MindMapService'
 import { QuizService } from '../services/QuizService'
 import { ShortcutManager } from '../services/ShortcutManager'
 import { LlamaService } from '../services/LlamaService'
+import type { OfficeCliService } from '../services/officecli/OfficeCliService'
 import type Store from 'electron-store'
 import type { StoreSchema } from '../config/types'
 import { registerChatHandlers } from './chatHandlers'
@@ -14,14 +15,14 @@ import { registerSettingsHandlers } from './settingsHandlers'
 import { registerNotebookHandlers } from './notebookHandlers'
 import { registerNoteHandlers } from './noteHandlers'
 import { registerKnowledgeHandlers } from './knowledgeHandlers'
-import { registerMindMapHandlers } from './mindmapHandlers'
 import { registerQuizHandlers } from './quizHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import { registerItemHandlers } from './itemHandlers'
 import { registerShortcutHandlers } from './shortcutHandlers'
 import { registerLlamaHandlers } from './llamaHandlers'
 import { registerLicenseHandlers } from './licenseHandlers'
-import { registerTemplateHandlers } from './templateHandlers'
+import { registerOfficeHandlers } from './officeHandlers'
+import type { NotebookSummaryService } from '../services/NotebookSummaryService'
 
 /**
  * 注册所有 IPC Handlers
@@ -33,27 +34,33 @@ export function registerAllHandlers(
   updateService: UpdateService,
   shortcutManager: ShortcutManager,
   store: Store<StoreSchema>,
-  llamaService: LlamaService
+  llamaService: LlamaService,
+  backgroundJobService: BackgroundJobService,
+  officeCliService: OfficeCliService,
+  notebookSummaryService: NotebookSummaryService
 ) {
-  // 实例化 MindMapService
-  const mindMapService = new MindMapService(providerManager)
   // 实例化 QuizService
-  const quizService = new QuizService(providerManager)
+  const quizService = new QuizService(providerManager, knowledgeService)
 
   registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
   registerProviderHandlers(providerManager, llamaService)
   registerSettingsHandlers()
   registerNotebookHandlers()
-  registerNoteHandlers(providerManager)
-  registerKnowledgeHandlers(knowledgeService, llamaService)
-  registerMindMapHandlers(mindMapService)
+  registerNoteHandlers(providerManager, knowledgeService)
+  registerKnowledgeHandlers(
+    providerManager,
+    knowledgeService,
+    llamaService,
+    backgroundJobService,
+    notebookSummaryService
+  )
   registerQuizHandlers(quizService)
   registerUpdateHandlers(updateService)
-  registerItemHandlers()
+  registerItemHandlers(knowledgeService)
   registerShortcutHandlers(shortcutManager, store)
   registerLlamaHandlers(llamaService)
   registerLicenseHandlers()
-  registerTemplateHandlers()
+  registerOfficeHandlers(officeCliService, knowledgeService, providerManager)
   console.log('[IPC] All handlers registered')
 }
 
@@ -66,5 +73,5 @@ export {
   registerKnowledgeHandlers,
   registerQuizHandlers,
   registerLicenseHandlers,
-  registerTemplateHandlers
+  registerOfficeHandlers
 }

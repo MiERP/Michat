@@ -358,14 +358,22 @@ function ensureInlineCitationPlacement(content: string, citations: ChatCitation[
   return cleaned
 }
 
+/** Bỏ dấu tiếng Việt để khớp cả "thông tin" lẫn "thong tin". */
+function stripVietnameseDiacritics(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+}
+
 function removeCitationBoilerplateLines(content: string): string {
-  const patterns = [
-    /^\s*thÃƒÂ´ng tin nÃƒÂ y Ã„â€˜Ã†Â°Ã¡Â»Â£c tÃƒÂ¬m thÃ¡ÂºÂ¥y\b/i,
-    /^\s*thÃƒÂ´ng tin trÃƒÂªn Ã„â€˜Ã†Â°Ã¡Â»Â£c tÃƒÂ¬m thÃ¡ÂºÂ¥y\b/i,
-    /^\s*nguÃ¡Â»â€œn thÃƒÂ´ng tin nÃƒÂ y\b/i,
-    /^\s*this information was found\b/i,
-    /^\s*the information was found\b/i,
-    /^\s*source:\b/i
+  const boilerplatePrefixes = [
+    'thong tin nay duoc tim thay',
+    'thong tin tren duoc tim thay',
+    'nguon thong tin nay',
+    'this information was found',
+    'the information was found',
+    'source:'
   ]
 
   const filtered = content
@@ -373,7 +381,8 @@ function removeCitationBoilerplateLines(content: string): string {
     .filter((line) => {
       const trimmed = line.trim()
       if (!trimmed) return true
-      return !patterns.some((pattern) => pattern.test(trimmed))
+      const ascii = stripVietnameseDiacritics(trimmed.toLowerCase())
+      return !boilerplatePrefixes.some((prefix) => ascii.startsWith(prefix))
     })
     .join('\n')
 
@@ -389,7 +398,7 @@ function buildChatNoteTitle(content: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (!cleaned) return 'Ghi chÃƒÂº tÃ¡Â»Â« chat'
+  if (!cleaned) return 'Ghi chú từ chat'
   const max = 60
   return cleaned.length <= max ? cleaned : `${cleaned.slice(0, max).trim()}...`
 }

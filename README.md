@@ -108,15 +108,14 @@ Feedback and suggestions are very welcome.
 
 - AI LLM conversation with multiple providers
 - Structured note generation
-- One-click mind map generation
 - RAG-based document retrieval
 - Multi-format document import (PDF / Word / PPT / Web)
+- Quiz generation from documents
+- One-click document generation (Word / Excel / PowerPoint) via the Office assistant
 
 ### 🚧 In Development
 
 - Audio upload and transcription
-- Quiz generation from documents
-- One-click PPT generation from notes
 
 ### 📋 Planned
 

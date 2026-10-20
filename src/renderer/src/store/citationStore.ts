@@ -5,6 +5,9 @@ interface CitationContext {
   messageId: string
   citation: ChatCitation
   documentContent?: string
+  prevContent?: string
+  chunkContent?: string
+  nextContent?: string
   highlightText?: string
   pageNumber?: number
   sourceUri?: string
@@ -59,23 +62,24 @@ export const useCitationStore = create<CitationStore>((set) => ({
       )
       const currentIndex = chunks.findIndex((c) => c.id === citation.chunkId)
 
-      let content = citation.snippet
-      if (currentIndex >= 0) {
-        const parts: string[] = []
-        if (chunks[currentIndex - 1]?.content) parts.push(chunks[currentIndex - 1].content)
-        if (chunks[currentIndex]?.content) parts.push(chunks[currentIndex].content)
-        if (chunks[currentIndex + 1]?.content) parts.push(chunks[currentIndex + 1].content)
-        if (parts.length > 0) {
-          content = parts.join('\n...\n')
-        }
-      }
+      const prevContent = currentIndex >= 0 ? chunks[currentIndex - 1]?.content : undefined
+      const chunkContent = currentIndex >= 0 ? chunks[currentIndex]?.content : undefined
+      const nextContent = currentIndex >= 0 ? chunks[currentIndex + 1]?.content : undefined
+
+      const parts = [prevContent, chunkContent, nextContent].filter(
+        (part): part is string => !!part
+      )
+      const documentContent = parts.join('\n...\n')
 
       set({
         selected: {
           messageId,
           citation,
-          documentContent: content,
-          highlightText: citation.snippet,
+          documentContent,
+          prevContent,
+          chunkContent,
+          nextContent,
+          highlightText: chunkContent || citation.snippet,
           pageNumber: citation.pageNumber,
           sourceUri: citation.sourceUri
         },

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core'
 
 /**
  * 笔记本表
@@ -10,6 +10,8 @@ export const notebooks = sqliteTable(
     id: text('id').primaryKey(),
     title: text('title').notNull(),
     description: text('description'),
+    /** JSON: chứa notebookSummary (tóm tắt thống nhất notebook) và metadata khác. */
+    metadata: text('metadata', { mode: 'json' }).$type<Record<string, any>>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
   },
@@ -123,12 +125,14 @@ export const documents = sqliteTable(
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
-    type: text('type', { enum: ['file', 'note', 'url', 'text'] }).notNull(),
+    type: text('type', { enum: ['file', 'note', 'url', 'text', 'memory'] }).notNull(),
     sourceUri: text('source_uri'), // 原始文件路径或 URL
     localFilePath: text('local_file_path'), // 本地拷贝文件路径
     sourceNoteId: text('source_note_id').references(() => notes.id, { onDelete: 'set null' }),
+    memoryOfSessionId: text('memory_of_session_id'), // memory: session nguồn của ký ức
     content: text('content'), // 原始内容（可选存储）
     contentHash: text('content_hash'), // 内容哈希，用于检测变更
+    contentMdHash: text('content_md_hash'), // markdown chuẩn hóa (canonical) hash — phát hiện thay đổi do normalizer
     mimeType: text('mime_type'), // 文件类型
     fileSize: integer('file_size'), // 文件大小（字节）
     metadata: text('metadata', { mode: 'json' }).$type<Record<string, any>>(),
@@ -164,21 +168,59 @@ export const chunks = sqliteTable(
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
+    contentHash: text('content_hash'), // block hash (md5 nội dung chunk) — cho incremental reindex
     chunkIndex: integer('chunk_index').notNull(), // 在文档中的顺序
     startOffset: integer('start_offset'), // 原文起始位置
     endOffset: integer('end_offset'), // 原文结束位置
     metadata: text('metadata', { mode: 'json' }).$type<Record<string, any>>(),
     tokenCount: integer('token_count'), // token 估算值
+    sectionId: text('section_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
     documentIdx: index('idx_chunks_document').on(table.documentId),
-    notebookIdx: index('idx_chunks_notebook').on(table.notebookId)
+    notebookIdx: index('idx_chunks_notebook').on(table.notebookId),
+    sectionIdx: index('idx_chunks_section').on(table.sectionId)
   })
 )
 
 export type Chunk = typeof chunks.$inferSelect
 export type NewChunk = typeof chunks.$inferInsert
+
+/**
+ * Bảng mục (section) — tầng giữa của Hierarchical Retrieval.
+ * Mỗi hàng là một heading (kèm headingPath) trích từ structured Markdown/Word,
+ * giữ content nguyên văn của mục để embed và để mở rộng context kiểu
+ * document → section → chunk.
+ */
+export const sections = sqliteTable(
+  'sections',
+  {
+    id: text('id').primaryKey(),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    documentId: text('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    headingPath: text('heading_path', { mode: 'json' }).$type<string[]>().notNull(),
+    title: text('title').notNull(),
+    level: integer('level').notNull().default(1),
+    content: text('content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    startOffset: integer('start_offset').notNull(),
+    endOffset: integer('end_offset').notNull(),
+    chunkCount: integer('chunk_count').notNull().default(0),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    documentIdx: index('idx_sections_document').on(table.documentId)
+  })
+)
+
+export type Section = typeof sections.$inferSelect
+export type NewSection = typeof sections.$inferInsert
 
 /**
  * 向量嵌入表（元数据）
@@ -209,41 +251,119 @@ export type Embedding = typeof embeddings.$inferSelect
 export type NewEmbedding = typeof embeddings.$inferInsert
 
 /**
- * 思维导图表
- * 存储笔记本的派生知识结构
+ * Liên kết tri thức giữa các document/chunk (knowledge graph nhẹ)
+ * Được sinh tự động khi generate-links hoặc qua background queue.
  */
-export const mindMaps = sqliteTable(
-  'mind_maps',
+export const knowledgeLinks = sqliteTable(
+  'knowledge_links',
   {
     id: text('id').primaryKey(),
     notebookId: text('notebook_id')
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
-    title: text('title').notNull(),
-    version: integer('version').notNull().default(1), // 版本号
-    treeData: text('tree_data', { mode: 'json' }).notNull(), // 树结构
-    chunkMapping: text('chunk_mapping', { mode: 'json' }).notNull(), // 节点ID -> chunk IDs映射
-    metadata: text('metadata', { mode: 'json' }).$type<{
-      model: string
-      totalNodes: number
-      maxDepth: number
-      generationTime: number
-    }>(),
-    status: text('status', { enum: ['generating', 'completed', 'failed'] })
+    sourceDocumentId: text('source_document_id')
       .notNull()
-      .default('generating'),
-    errorMessage: text('error_message'),
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    targetDocumentId: text('target_document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    sourceChunkId: text('source_chunk_id').references(() => chunks.id, {
+      onDelete: 'cascade'
+    }),
+    targetChunkId: text('target_chunk_id').references(() => chunks.id, {
+      onDelete: 'cascade'
+    }),
+    relationType: text('relation_type', { enum: ['related', 'extends', 'contradicts'] })
+      .notNull()
+      .default('related'),
+    confidence: real('confidence').notNull().default(0.5),
+    evidence: text('evidence'), // keyword/entity dùng làm bằng chứng liên kết
+    status: text('status', { enum: ['active', 'decayed', 'removed'] })
+      .notNull()
+      .default('active'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
-    notebookIdx: index('idx_mindmaps_notebook').on(table.notebookId, table.updatedAt),
-    versionIdx: index('idx_mindmaps_version').on(table.notebookId, table.version)
+    notebookIdx: index('idx_links_notebook').on(table.notebookId, table.status),
+    sourceIdx: index('idx_links_source').on(table.sourceDocumentId),
+    targetIdx: index('idx_links_target').on(table.targetDocumentId)
   })
 )
 
-export type MindMap = typeof mindMaps.$inferSelect
-export type NewMindMap = typeof mindMaps.$inferInsert
+export type KnowledgeLink = typeof knowledgeLinks.$inferSelect
+export type NewKnowledgeLink = typeof knowledgeLinks.$inferInsert
+
+/**
+ * Phản hồi của người dùng lên chunk (feedback loop)
+ * Dùng để boost/penalty chunk khi retrieval.
+ */
+export const chunkFeedback = sqliteTable(
+  'chunk_feedback',
+  {
+    id: text('id').primaryKey(),
+    chunkId: text('chunk_id')
+      .notNull()
+      .references(() => chunks.id, { onDelete: 'cascade' }),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['citation_good', 'citation_bad', 'user_correction'] }).notNull(),
+    note: text('note'), // ghi chú/nội dung sửa của người dùng
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    chunkIdx: index('idx_feedback_chunk').on(table.chunkId),
+    notebookIdx: index('idx_feedback_notebook').on(table.notebookId)
+  })
+)
+
+export type ChunkFeedback = typeof chunkFeedback.$inferSelect
+export type NewChunkFeedback = typeof chunkFeedback.$inferInsert
+
+/**
+ * Hàng đợi job nền (background queue)
+ * Cho các tác vụ "học liên tục": auto-link, decay, reindex, consolidate...
+ * Chạy tuần tự khi app idle, task của user luôn ưu tiên.
+ */
+export const backgroundJobs = sqliteTable(
+  'background_jobs',
+  {
+    id: text('id').primaryKey(),
+    jobType: text('job_type', {
+      enum: [
+        'generate-links',
+        'decay-links',
+        'reindex-document',
+        'enrich-document',
+        'summarize-notebook',
+        'rebuild-vectors',
+        'backfill-knowledge',
+        'memory-consolidate'
+      ]
+    }).notNull(),
+    notebookId: text('notebook_id'),
+    documentId: text('document_id'),
+    payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
+    status: text('status', { enum: ['pending', 'running', 'done', 'failed'] })
+      .notNull()
+      .default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(2),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    retryAt: integer('retry_at', { mode: 'timestamp' })
+  },
+  (table) => ({
+    statusIdx: index('idx_jobs_status').on(table.status, table.createdAt)
+  })
+)
+
+export type BackgroundJob = typeof backgroundJobs.$inferSelect
+export type NewBackgroundJob = typeof backgroundJobs.$inferInsert
 
 /**
  * 题库表
@@ -313,7 +433,7 @@ export type NewQuizSession = typeof quizSessions.$inferInsert
 
 /**
  * Items 表
- * 统一管理笔记本下的所有内容项（笔记、思维导图、PPT、音频等）
+ * 统一管理笔记本下的所有内容项（笔记、题库、PPT、音频等）
  */
 export const items = sqliteTable(
   'items',
@@ -322,8 +442,8 @@ export const items = sqliteTable(
     notebookId: text('notebook_id')
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
-    type: text('type', { enum: ['note', 'mindmap', 'quiz', 'ppt', 'audio', 'video'] }).notNull(),
-    resourceId: text('resource_id').notNull(), // 指向实际资源的 ID (notes.id, mindMaps.id 等)
+    type: text('type', { enum: ['note', 'quiz', 'ppt', 'audio', 'video'] }).notNull(),
+    resourceId: text('resource_id').notNull(), // 指向实际资源的 ID (notes.id, quizzes.id 等)
     order: integer('order').notNull().default(0), // 排序，数值越小越靠前
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()

@@ -6,20 +6,28 @@
 import { ipcMain, IpcMainInvokeEvent, dialog, shell } from 'electron'
 import { stat } from 'fs/promises'
 import { KnowledgeService } from '../services/KnowledgeService'
+import { KnowledgeLinkService } from '../services/KnowledgeLinkService'
+import { BackgroundJobService } from '../services/BackgroundJobService'
+import { NotebookSummaryService } from '../services/NotebookSummaryService'
 import { LlamaService } from '../services/LlamaService'
+import { ProviderManager } from '../providers/ProviderManager'
 import Logger from '../../shared/utils/logger'
-import { KnowledgeSchemas, validate } from './validation'
-import { normalizeFsPath } from '../security/guards'
+import { KnowledgeSchemas, validate, validateWithEvent } from './validation'
+import { isAllowedExternalOpenUrl, normalizeFsPath } from '../security/guards'
 
 /**
  * 注册知识库相关 IPC Handlers
  */
 export function registerKnowledgeHandlers(
+  providerManager: ProviderManager,
   knowledgeService: KnowledgeService,
-  llamaService: LlamaService
+  llamaService: LlamaService,
+  backgroundJobService: BackgroundJobService,
+  notebookSummaryService: NotebookSummaryService
 ) {
   const approvedFilePaths = new Set<string>()
   const approvedFolderPaths = new Set<string>()
+  const linkService = new KnowledgeLinkService(providerManager)
 
   const ensureEmbeddingServiceReady = async (): Promise<string | null> => {
     try {
@@ -75,6 +83,9 @@ export function registerKnowledgeHandlers(
             })
           }
         )
+        // Auto-link: sinh liên kết tri thức nền cho document mới
+        backgroundJobService.enqueueGenerateLinks(documentId, params.notebookId)
+        backgroundJobService.enqueueEnrich(documentId, params.notebookId)
         return { success: true, documentId }
       } catch (error) {
         Logger.error('KnowledgeHandlers', 'Error adding document:', error)
@@ -122,6 +133,9 @@ export function registerKnowledgeHandlers(
               })
             }
           )
+          // Auto-link: sinh liên kết tri thức nền cho document mới
+          backgroundJobService.enqueueGenerateLinks(documentId, params.notebookId)
+          backgroundJobService.enqueueEnrich(documentId, params.notebookId)
           return { success: true, documentId }
         } catch (error) {
           Logger.error('KnowledgeHandlers', 'Error adding document from file:', error)
@@ -170,6 +184,12 @@ export function registerKnowledgeHandlers(
               })
             }
           )
+
+          // Mỗi tài liệu vừa index đều được xếp hàng làm giàu + sinh liên kết nền
+          for (const documentId of result.indexedDocumentIds) {
+            backgroundJobService.enqueueGenerateLinks(documentId, params.notebookId)
+            backgroundJobService.enqueueEnrich(documentId, params.notebookId)
+          }
 
           return { success: true, result }
         } catch (error) {
@@ -358,6 +378,9 @@ export function registerKnowledgeHandlers(
             progress
           })
         })
+        // Nội dung đã thay đổi → làm giàu lại + sinh lại liên kết (chạy nền)
+        backgroundJobService.enqueueEnrich(params.documentId)
+        backgroundJobService.enqueueGenerateLinks(params.documentId)
         return { success: true }
       } catch (error) {
         Logger.error('KnowledgeHandlers', 'Error reindexing document:', error)
@@ -368,6 +391,82 @@ export function registerKnowledgeHandlers(
     return validated
   })
 
+  // Làm giàu tài liệu thủ công (tóm tắt + mục + keyword/entity) — chạy ngay
+  ipcMain.handle(
+    'knowledge:enrich-document',
+    validateWithEvent(KnowledgeSchemas.enrichDocument, async (event, params) => {
+      Logger.debug('KnowledgeHandlers', 'enrich-document:', params.documentId)
+
+      try {
+        const chatProvider = await providerManager.getActiveChatProvider()
+        if (!chatProvider) {
+          return {
+            success: false,
+            error:
+              'Chưa cấu hình model chat. Hãy chọn model chat trong Cài đặt để làm giàu tài liệu.'
+          }
+        }
+
+        const enrichment = await backgroundJobService.runEnrichNow(params.documentId)
+        const doc = knowledgeService.getDocument(params.documentId)
+        event.sender.send('knowledge:documents-changed', {
+          documentId: params.documentId,
+          notebookId: doc?.notebookId
+        })
+
+        // Tóm tắt tài liệu mới → tổng hợp lại tóm tắt notebook (nền).
+        if (doc) backgroundJobService.enqueueSummarizeNotebook(doc.notebookId)
+
+        return { success: true, enrichment }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error enriching document:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
+  // Tóm tắt THỐNG NHẤT cấp notebook — hiển thị ngay khi mở notebook, không
+  // cần click vào từng tài liệu. Nếu thiếu/cũ thì tự xếp hàng tạo lại nền.
+  ipcMain.handle(
+    'knowledge:get-notebook-summary',
+    validate(KnowledgeSchemas.notebookSummary, async (params) => {
+      const stored = notebookSummaryService.getStored(params.notebookId)
+      const fresh = notebookSummaryService.isFresh(params.notebookId)
+
+      if (stored && fresh) {
+        return { success: true, summary: stored, pending: false }
+      }
+
+      backgroundJobService.enqueueSummarizeNotebook(params.notebookId)
+      return { success: true, summary: stored ?? null, pending: true }
+    })
+  )
+
+  // Tổng hợp lại tóm tắt notebook ngay lập tức (nút xoáy trong khung chat).
+  ipcMain.handle(
+    'knowledge:regenerate-notebook-summary',
+    validate(KnowledgeSchemas.notebookSummary, async (params) => {
+      try {
+        const chatProvider = await providerManager.getActiveChatProvider()
+        if (!chatProvider) {
+          return {
+            success: false,
+            error: 'Chưa cấu hình model chat để tổng hợp tóm tắt notebook.'
+          }
+        }
+
+        const summary = await backgroundJobService.runSummarizeNow(params.notebookId)
+        return {
+          success: true,
+          summary: { summary, generatedAt: new Date().toISOString() }
+        }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error summarizing notebook:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
   ipcMain.handle(
     'knowledge:refresh-document-metadata',
     validate(KnowledgeSchemas.refreshDocumentMetadata, async (params) => {
@@ -376,6 +475,74 @@ export function registerKnowledgeHandlers(
         return { success: true }
       } catch (error) {
         Logger.error('KnowledgeHandlers', 'Error refreshing document metadata:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
+  // Feedback loop: ghi nhận đánh giá/sửa của người dùng lên chunk
+  ipcMain.handle(
+    'knowledge:record-feedback',
+    validate(KnowledgeSchemas.recordFeedback, async (params) => {
+      Logger.debug('KnowledgeHandlers', 'record-feedback:', {
+        chunkId: params.chunkId,
+        kind: params.kind
+      })
+      try {
+        knowledgeService.recordChunkFeedback(
+          params.notebookId,
+          params.chunkId,
+          params.kind,
+          params.note
+        )
+        return { success: true }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error recording feedback:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
+  // Lifecycle: đánh dấu draft/verified/outdated
+  ipcMain.handle(
+    'knowledge:set-document-lifecycle',
+    validate(KnowledgeSchemas.setDocumentLifecycle, async (params) => {
+      Logger.debug('KnowledgeHandlers', 'set-document-lifecycle:', params)
+      try {
+        const document = knowledgeService.setDocumentLifecycle(params.documentId, params.state)
+        return { success: true, document }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error setting document lifecycle:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    })
+  )
+
+  // Knowledge links: xem liên kết của document
+  ipcMain.handle(
+    'knowledge:get-links',
+    validate(KnowledgeSchemas.getLinks, async (params) => {
+      Logger.debug('KnowledgeHandlers', 'get-links:', params.documentId)
+      try {
+        const links = linkService.getLinks(params.notebookId, params.documentId)
+        return { success: true, links }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error getting links:', error)
+        return { success: false, error: (error as Error).message, links: [] }
+      }
+    })
+  )
+
+  // Knowledge links: sinh liên kết cho document (LLM trích keyword + FTS)
+  ipcMain.handle(
+    'knowledge:generate-links',
+    validate(KnowledgeSchemas.generateLinks, async (params) => {
+      Logger.debug('KnowledgeHandlers', 'generate-links:', params.documentId)
+      try {
+        const count = await linkService.generateLinksForDocument(params.documentId)
+        return { success: true, linkCount: count }
+      } catch (error) {
+        Logger.error('KnowledgeHandlers', 'Error generating links:', error)
         return { success: false, error: (error as Error).message }
       }
     })
@@ -404,13 +571,14 @@ export function registerKnowledgeHandlers(
       filters: [
         {
           name: 'Documents',
-          extensions: ['pdf', 'docx', 'doc', 'xlsx', 'pptx', 'ppt', 'txt', 'md']
+          extensions: ['pdf', 'docx', 'doc', 'xlsx', 'pptx', 'txt', 'md', 'html', 'htm']
         },
         { name: 'PDF', extensions: ['pdf'] },
         { name: 'Word', extensions: ['docx', 'doc'] },
         { name: 'Excel', extensions: ['xlsx'] },
-        { name: 'PowerPoint', extensions: ['pptx', 'ppt'] },
+        { name: 'PowerPoint', extensions: ['pptx'] },
         { name: 'Text', extensions: ['txt', 'md'] },
+        { name: 'Web page', extensions: ['html', 'htm'] },
         { name: 'All Files', extensions: ['*'] }
       ]
     })
@@ -480,6 +648,17 @@ export function registerKnowledgeHandlers(
               success: false,
               error: openPathError
             }
+          }
+        } else if (doc.type === 'url' && doc.sourceUri) {
+          if (!isAllowedExternalOpenUrl(doc.sourceUri)) {
+            return { success: false, error: 'Refusing to open a non-public URL' }
+          }
+          await shell.openExternal(doc.sourceUri)
+        } else {
+          return {
+            success: false,
+            error:
+              'Source file is only available for imported files. Notes and text snippets have no file to open.'
           }
         }
 

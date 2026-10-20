@@ -14,12 +14,38 @@ let db: ReturnType<typeof drizzle> | null = null
 let checkpointTimer: NodeJS.Timeout | null = null
 let truncateTimer: NodeJS.Timeout | null = null
 let isClosing = false // ÃƒÂ©Ã‹Å“Ã‚Â²ÃƒÂ¦Ã‚Â­Ã‚Â¢ÃƒÂ©Ã¢â‚¬Â¡Ã‚ÂÃƒÂ¥Ã‚Â¤Ã‚ÂÃƒÂ¥Ã¢â‚¬Â¦Ã‚Â³ÃƒÂ©Ã¢â‚¬â€Ã‚Â­
+let vectorIndexRebuilt = false
+
+/**
+ * Kiểm tra bảng vec_embeddings hiện có cột document_id chưa.
+ * vec0 là virtual table nên không ALTER được: probe bằng SELECT là cách
+ * đáng tin nhất (PRAGMA table_info có thể không phản ánh đúng cột của module).
+ */
+function vectorTableHasDocumentColumn(connection: Database.Database): boolean {
+  try {
+    connection.prepare('SELECT document_id FROM vec_embeddings LIMIT 1').get()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * True khi lần chạy này đã phải tạo lại bảng vector (mất vector cũ).
+ * Caller (main) dùng cờ này để xếp hàng job 'rebuild-vectors'.
+ */
+export function wasVectorIndexRebuilt(): boolean {
+  return vectorIndexRebuilt
+}
 
 /**
  * ÃƒÂ¥Ã‹â€ Ã‚ÂÃƒÂ¥Ã‚Â§Ã¢â‚¬Â¹ÃƒÂ¥Ã…â€™Ã¢â‚¬â€œÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¨Ã‚Â¿Ã…Â¾ÃƒÂ¦Ã…Â½Ã‚Â¥
  * ÃƒÂ¥Ã…â€œÃ‚Â¨ Electron ÃƒÂ¤Ã‚Â¸Ã‚Â»ÃƒÂ¨Ã‚Â¿Ã¢â‚¬ÂºÃƒÂ§Ã‚Â¨Ã¢â‚¬Â¹ÃƒÂ§Ã…Â¡Ã¢â‚¬Å¾ app.whenReady() ÃƒÂ¤Ã‚Â¸Ã‚Â­ÃƒÂ¨Ã‚Â°Ã†â€™ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨
  */
 export function initDatabase() {
+  if (db && sqlite?.open) return db
+  isClosing = false
+  vectorIndexRebuilt = false
   // ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ¥Ã‚ÂºÃ¢â‚¬Å“ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ¤Ã‚Â»Ã‚Â¶ÃƒÂ¥Ã‚Â­Ã‹Å“ÃƒÂ¦Ã¢â‚¬ÂÃ‚Â¾ÃƒÂ¥Ã…â€œÃ‚Â¨ÃƒÂ§Ã¢â‚¬ÂÃ‚Â¨ÃƒÂ¦Ã‹â€ Ã‚Â·ÃƒÂ¦Ã¢â‚¬Â¢Ã‚Â°ÃƒÂ¦Ã‚ÂÃ‚Â®ÃƒÂ§Ã¢â‚¬ÂºÃ‚Â®ÃƒÂ¥Ã‚Â½Ã¢â‚¬Â¢
   const dbPath = join(app.getPath('userData'), 'michat.db')
 
@@ -115,6 +141,7 @@ function startPeriodicCheckpoint(dbPath: string) {
       if (!sqlite || isClosing) return
 
       const stats = await stat(walPath).catch(() => null)
+      if (!sqlite || isClosing) return
       if (stats && stats.size > 1024 * 1024) {
         // 1MB
         console.log(
@@ -174,7 +201,9 @@ export function runMigrations() {
   // ÃƒÂ¨Ã¢â€šÂ¬Ã…â€™ migrations ÃƒÂ¦Ã¢â‚¬â€œÃ¢â‚¬Â¡ÃƒÂ¤Ã‚Â»Ã‚Â¶ÃƒÂ¨Ã‚Â¢Ã‚Â«ÃƒÂ¥Ã‚Â¤Ã‚ÂÃƒÂ¥Ã‹â€ Ã‚Â¶ÃƒÂ¥Ã‹â€ Ã‚Â° out/main/db/migrations
   const builtMigrationsFolder = join(__dirname, 'db', 'migrations')
   const sourceMigrationsFolder = join(__dirname, 'migrations')
-  const migrationsFolder = existsSync(builtMigrationsFolder) ? builtMigrationsFolder : sourceMigrationsFolder
+  const migrationsFolder = existsSync(builtMigrationsFolder)
+    ? builtMigrationsFolder
+    : sourceMigrationsFolder
   console.log('[Database] Running migrations from:', migrationsFolder)
 
   try {
@@ -205,6 +234,50 @@ export function initExtensions() {
       CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
         embedding_id TEXT PRIMARY KEY,
         chunk_id TEXT,
+        document_id TEXT,
+        notebook_id TEXT,
+        embedding FLOAT[1024] distance_metric=cosine
+      );
+    `)
+
+    // Bảng cũ (thiếu document_id) phải được tạo lại vì vec0 không ALTER được.
+    // Vector cũ mất → job 'rebuild-vectors' sẽ embed lại từ chunks.content.
+    if (!vectorTableHasDocumentColumn(sqlite)) {
+      console.warn(
+        '[Database] vec_embeddings is legacy (no document_id) — recreating table; chunk vectors will be re-embedded in background'
+      )
+      sqlite.exec('DROP TABLE IF EXISTS vec_embeddings;')
+      sqlite.exec(`
+        CREATE VIRTUAL TABLE vec_embeddings USING vec0(
+          embedding_id TEXT PRIMARY KEY,
+          chunk_id TEXT,
+          document_id TEXT,
+          notebook_id TEXT,
+          embedding FLOAT[1024] distance_metric=cosine
+        );
+      `)
+      vectorIndexRebuilt = true
+    }
+
+    // 1b. Vector cấp TÀI LIỆU (document-level index) cho Hierarchical Retrieval:
+    // một vector cho mỗi document (summary/enrichment hoặc phần đầu nội dung).
+    // Dùng để chọn tài liệu trước, rồi mới tìm chunk bên trong.
+    sqlite.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
+        embedding_id TEXT PRIMARY KEY,
+        document_id TEXT,
+        notebook_id TEXT,
+        embedding FLOAT[1024] distance_metric=cosine
+      );
+    `)
+
+    // 1c. Vector cấp MỤC (section-level index): một vector cho mỗi heading của
+    // tài liệu có cấu trúc — tầng giữa của document → section → chunk retrieval.
+    sqlite.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_sections USING vec0(
+        embedding_id TEXT PRIMARY KEY,
+        section_id TEXT,
+        document_id TEXT,
         notebook_id TEXT,
         embedding FLOAT[1024] distance_metric=cosine
       );

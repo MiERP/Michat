@@ -3,7 +3,7 @@
  * 答题功能的 IPC 通信处理
  */
 
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import type { QuizService, QuizGenerationOptions } from '../services/QuizService'
 import { createQuizWindow } from '../windows/quizWindow'
 
@@ -17,24 +17,41 @@ export function registerQuizHandlers(quizService: QuizService) {
   ipcMain.handle(
     'quiz:generate',
     async (event, args: { notebookId: string; options?: QuizGenerationOptions }) => {
+      let quizId: string | undefined
       try {
-        const quizId = await quizService.generateQuiz(
-          args.notebookId,
-          args.options,
-          (stage, progress) => {
-            // 发送进度更新事件
-            if (!event.sender.isDestroyed()) {
-              event.sender.send('quiz:progress', {
-                notebookId: args.notebookId,
-                stage,
-                progress
-              })
+        const options = args.options
+          ? {
+              ...args.options,
+              documentIds: Array.isArray(args.options.documentIds)
+                ? args.options.documentIds
+                    .filter((id): id is string => typeof id === 'string')
+                    .slice(0, 50)
+                : undefined
             }
+          : undefined
+
+        quizId = await quizService.generateQuiz(args.notebookId, options, (stage, progress) => {
+          // 发送进度更新事件
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('quiz:progress', {
+              notebookId: args.notebookId,
+              stage,
+              progress
+            })
           }
-        )
+        })
         return { success: true, quizId }
       } catch (error) {
         return { success: false, error: (error as Error).message }
+      } finally {
+        // Báo cho mọi cửa sổ (đặc biệt cửa sổ chính) refresh danh sách bộ câu hỏi
+        if (args?.notebookId) {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) {
+              win.webContents.send('quiz:generated', { notebookId: args.notebookId, quizId })
+            }
+          }
+        }
       }
     }
   )
@@ -92,6 +109,21 @@ export function registerQuizHandlers(quizService: QuizService) {
       return null
     }
   })
+
+  /**
+   * 获取 câu hỏi liên kết với chunk nguồn nào (hiển thị nguồn tri thức)
+   */
+  ipcMain.handle(
+    'quiz:get-question-chunks',
+    async (_, args: { quizId: string; questionId: string }) => {
+      try {
+        return quizService.getQuestionChunks(args.quizId, args.questionId)
+      } catch (error) {
+        console.error('Error getting question chunks:', error)
+        return []
+      }
+    }
+  )
 
   /**
    * 更新题库

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { itemService } from '../services/ItemService'
+import type { KnowledgeService } from '../services/KnowledgeService'
 import Logger from '../../shared/utils/logger'
 import { z } from 'zod'
 import { validate } from './validation'
@@ -27,7 +28,7 @@ const ItemSchemas = {
 /**
  * 注册 item 相关 IPC handlers
  */
-export function registerItemHandlers() {
+export function registerItemHandlers(knowledgeService: KnowledgeService) {
   // 获取笔记本下的所有 items
   ipcMain.handle(
     'items:get',
@@ -83,6 +84,13 @@ export function registerItemHandlers() {
       Logger.debug('ItemHandlers', 'items:delete:', args)
       try {
         if (args.deleteResource) {
+          // Phải dọn KB document TRƯỚC khi xoá note: FK documents.sourceNoteId
+          // là ON DELETE SET NULL, nên xoá note sẽ làm mất liên kết và bước dọn
+          // sau đó không còn tìm thấy document nào (bug trước đây).
+          const item = await itemService.getItemById(args.itemId)
+          if (item?.type === 'note') {
+            await knowledgeService.deleteDocumentsBySourceNote(item.resourceId)
+          }
           await itemService.deleteItemWithResource(args.itemId)
         } else {
           await itemService.deleteItem(args.itemId)

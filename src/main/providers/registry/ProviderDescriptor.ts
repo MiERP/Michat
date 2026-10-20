@@ -11,7 +11,6 @@ import type { BaseProvider } from '../capabilities/BaseProvider'
 export interface ProviderCapabilities {
   chat: boolean // 是否支持对话
   embedding: boolean // 是否支持嵌入
-  rerank?: boolean // 是否支持重排序(未来扩展)
   imageGeneration?: boolean // 是否支持图像生成(未来扩展)
 }
 
@@ -30,7 +29,6 @@ export interface ProviderDescriptor {
   defaultBaseUrl: string // 默认 API 地址
   defaultChatModel?: string // 默认对话模型
   defaultEmbeddingModel?: string // 默认嵌入模型
-  defaultRerankModel?: string // 默认重排序模型(未来扩展)
   defaultImageModel?: string // 默认图像生成模型(未来扩展)
 
   // 能力声明

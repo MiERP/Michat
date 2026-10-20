@@ -91,7 +91,7 @@ const api = {
   updateNote: (id: string, updates: any) => ipcRenderer.invoke('update-note', { id, updates }),
   deleteNote: (id: string) => ipcRenderer.invoke('delete-note', { id }),
 
-  // Items 相关（统一管理笔记、思维导图等）
+  // Items 相关（统一管理笔记、题库等）
   items: {
     getAll: (notebookId: string) => ipcRenderer.invoke('items:get', { notebookId }),
     updateOrder: (itemId: string, order: number) =>
@@ -114,8 +114,8 @@ const api = {
 
   // Chat Message 相关
   getMessages: (sessionId: string) => invokeWithTimeout('get-messages', 10000, { sessionId }),
-  sendMessage: (sessionId: string, content: string) =>
-    invokeWithTimeout('send-message', 60000, { sessionId, content }), // 60秒超时（流式消息可能较长）
+  sendMessage: (sessionId: string, content: string, scope?: unknown) =>
+    invokeWithTimeout('send-message', 60000, { sessionId, content, scope }), // 60秒超时（流式消息可能较长）
   abortMessage: (messageId: string) => invokeWithTimeout('abort-message', 5000, { messageId }),
 
   // 流式消息监听
@@ -201,6 +201,16 @@ const api = {
       ipcRenderer.invoke('knowledge:delete-document', { documentId }),
     reindexDocument: (documentId: string) =>
       ipcRenderer.invoke('knowledge:reindex-document', { documentId }),
+
+    enrichDocument: (documentId: string) =>
+      ipcRenderer.invoke('knowledge:enrich-document', { documentId }),
+
+    // Tóm tắt thống nhất cấp notebook (hiển thị trong khung chat)
+    getNotebookSummary: (notebookId: string) =>
+      ipcRenderer.invoke('knowledge:get-notebook-summary', { notebookId }),
+    regenerateNotebookSummary: (notebookId: string) =>
+      invokeWithTimeout('knowledge:regenerate-notebook-summary', 300000, { notebookId }),
+
     refreshDocumentMetadata: (documentId: string) =>
       ipcRenderer.invoke('knowledge:refresh-document-metadata', { documentId }),
 
@@ -219,48 +229,71 @@ const api = {
       const listener = (_event: any, data: any) => callback(data)
       ipcRenderer.on('knowledge:index-progress', listener)
       return () => ipcRenderer.removeListener('knowledge:index-progress', listener)
-    }
+    },
+
+    // 自动同步监听（watcher 触发的增量 reindex）
+    onAutoSynced: (callback: (data: any) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('knowledge:auto-synced', listener)
+      return () => ipcRenderer.removeListener('knowledge:auto-synced', listener)
+    },
+
+    // 监听 tài liệu mới được nạp vào KB (vd: office export tự import lại)
+    onDocumentsChanged: (callback: (data: { notebookId: string }) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('knowledge:documents-changed', listener)
+      return () => ipcRenderer.removeListener('knowledge:documents-changed', listener)
+    },
+
+    // Feedback loop + lifecycle + knowledge links
+    recordFeedback: (notebookId: string, chunkId: string, kind: string, note?: string) =>
+      ipcRenderer.invoke('knowledge:record-feedback', { notebookId, chunkId, kind, note }),
+    setDocumentLifecycle: (documentId: string, state: string) =>
+      ipcRenderer.invoke('knowledge:set-document-lifecycle', { documentId, state }),
+    getLinks: (notebookId: string, documentId: string) =>
+      ipcRenderer.invoke('knowledge:get-links', { notebookId, documentId }),
+    generateLinks: (documentId: string) =>
+      ipcRenderer.invoke('knowledge:generate-links', { documentId })
   },
 
-  // Tài liệu theo mẫu (Word / Excel)
-  templates: {
-    selectTemplate: (kind: 'word' | 'excel') =>
-      ipcRenderer.invoke('templates:select-template', { kind }),
-    selectOutput: (kind: 'word' | 'excel') =>
-      ipcRenderer.invoke('templates:select-output', { kind }),
-    generateWord: (templatePath: string, outputPath: string, data: Record<string, unknown>) =>
-      ipcRenderer.invoke('templates:generate-word', { templatePath, outputPath, data }),
-    generateExcel: (templatePath: string, outputPath: string, data: Record<string, unknown>) =>
-      ipcRenderer.invoke('templates:generate-excel', { templatePath, outputPath, data })
-  },
-
-  // MindMap 思维导图相关
-  mindmap: {
-    // 生成思维导图
-    generate: (notebookId: string) => ipcRenderer.invoke('mindmap:generate', { notebookId }),
-    // 获取最新思维导图
-    getLatest: (notebookId: string) => ipcRenderer.invoke('mindmap:get-latest', { notebookId }),
-    // 获取思维导图详情
-    get: (mindMapId: string) => ipcRenderer.invoke('mindmap:get', { mindMapId }),
-    // 获取节点关联的chunks
-    getNodeChunks: (mindMapId: string, nodeId: string) =>
-      ipcRenderer.invoke('mindmap:get-node-chunks', { mindMapId, nodeId }),
-    // 更新思维导图
-    update: (mindMapId: string, updates: any) =>
-      ipcRenderer.invoke('mindmap:update', { mindMapId, updates }),
-    // 删除思维导图
-    delete: (mindMapId: string) => ipcRenderer.invoke('mindmap:delete', { mindMapId }),
-    // 打开思维导图窗口
-    openWindow: (notebookId: string, mindMapId?: string) =>
-      ipcRenderer.invoke('mindmap:open-window', { notebookId, mindMapId }),
-    // 监听生成进度
-    onProgress: (
-      callback: (data: { notebookId: string; stage: string; progress: number }) => void
+  // Office document engine (officecli: Word / Excel / PowerPoint)
+  office: {
+    status: () => ipcRenderer.invoke('office:status'),
+    workspaceDir: () => ipcRenderer.invoke('office:workspace-dir'),
+    defaultOutputPath: (kind: 'docx' | 'xlsx' | 'pptx', name: string) =>
+      ipcRenderer.invoke('office:default-output-path', { kind, name }),
+    selectOutput: (kind: 'docx' | 'xlsx' | 'pptx', defaultName: string) =>
+      ipcRenderer.invoke('office:select-output', { kind, defaultName }),
+    exportDocument: (payload: {
+      kind: 'docx' | 'xlsx' | 'pptx'
+      title: string
+      markdown: string
+      outputPath: string
+      notebookId: string
+    }) => invokeWithTimeout('office:export', 300000, payload),
+    generate: (payload: {
+      kind: 'docx' | 'xlsx' | 'pptx'
+      title: string
+      skill?: string
+      instruction?: string
+      markdown: string
+      outputPath: string
+      notebookId: string
+      templatePath?: string
+    }) => invokeWithTimeout('office:generate', 900000, payload),
+    onGenerateProgress: (
+      callback: (data: { outputPath: string; stage: string; progress: number }) => void
     ) => {
       const listener = (_event: any, data: any) => callback(data)
-      ipcRenderer.on('mindmap:progress', listener)
-      return () => ipcRenderer.removeListener('mindmap:progress', listener)
-    }
+      ipcRenderer.on('office:generate-progress', listener)
+      return () => ipcRenderer.removeListener('office:generate-progress', listener)
+    },
+    renderPreview: (filePath: string) =>
+      invokeWithTimeout('office:render-preview', 180000, { filePath }),
+    validate: (filePath: string) => invokeWithTimeout('office:validate', 120000, { filePath }),
+    issues: (filePath: string) => invokeWithTimeout('office:issues', 120000, { filePath }),
+    openFile: (filePath: string) => ipcRenderer.invoke('office:open-file', { filePath }),
+    openWindow: (notebookId: string) => ipcRenderer.invoke('office:open-window', { notebookId })
   },
 
   // Quiz 答题相关
@@ -277,6 +310,9 @@ const api = {
       ipcRenderer.invoke('quiz:submit-session', { quizId, answers }),
     // 获取答题会话
     getSession: (sessionId: string) => ipcRenderer.invoke('quiz:get-session', { sessionId }),
+    // 获取 nguồn chunk của một câu hỏi
+    getQuestionChunks: (quizId: string, questionId: string) =>
+      ipcRenderer.invoke('quiz:get-question-chunks', { quizId, questionId }),
     // 更新题库
     update: (quizId: string, updates: { title?: string }) =>
       ipcRenderer.invoke('quiz:update', { quizId, updates }),
@@ -292,6 +328,12 @@ const api = {
       const listener = (_event: any, data: any) => callback(data)
       ipcRenderer.on('quiz:progress', listener)
       return () => ipcRenderer.removeListener('quiz:progress', listener)
+    },
+    // 监听生成 kết thúc (thành công hoặc thất bại) để refresh danh sách
+    onGenerated: (callback: (data: { notebookId: string; quizId?: string }) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('quiz:generated', listener)
+      return () => ipcRenderer.removeListener('quiz:generated', listener)
     }
   },
 

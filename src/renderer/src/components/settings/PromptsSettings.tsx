@@ -19,20 +19,8 @@ export default function PromptsSettings({
 
   const currentLanguage = settings.language
   // 后端的 mergeSettings 已经确保所有字段都有默认值，前端直接使用
-  const currentMindMapPrompt = settings.prompts?.mindMap?.[currentLanguage] || ''
   const currentQuizPrompt = settings.prompts?.quiz?.[currentLanguage] || ''
-
-  const handleMindMapPromptChange = (value: string) => {
-    onSettingsChange({
-      prompts: {
-        ...settings.prompts,
-        mindMap: {
-          ...settings.prompts?.mindMap,
-          [currentLanguage]: value
-        }
-      }
-    })
-  }
+  const currentOfficePrompt = settings.prompts?.office?.[currentLanguage] || ''
 
   const handleQuizPromptChange = (value: string) => {
     onSettingsChange({
@@ -40,6 +28,18 @@ export default function PromptsSettings({
         ...settings.prompts,
         quiz: {
           ...settings.prompts?.quiz,
+          [currentLanguage]: value
+        }
+      }
+    })
+  }
+
+  const handleOfficePromptChange = (value: string) => {
+    onSettingsChange({
+      prompts: {
+        ...settings.prompts,
+        office: {
+          ...settings.prompts?.office,
           [currentLanguage]: value
         }
       }
@@ -57,7 +57,7 @@ export default function PromptsSettings({
   return (
     <div className="max-w-2xl flex flex-col gap-4">
       <SettingItem
-        title={t('mindMapPrompt')}
+        title={t('officePrompt')}
         description=""
         layout="vertical"
         action={
@@ -69,8 +69,8 @@ export default function PromptsSettings({
       >
         <div className="relative">
           <Textarea
-            value={currentMindMapPrompt}
-            onChange={(e) => handleMindMapPromptChange(e.target.value)}
+            value={currentOfficePrompt}
+            onChange={(e) => handleOfficePromptChange(e.target.value)}
             placeholder={t('promptPlaceholder')}
             className="w-full h-[400px] max-h-[400px] resize-none bg-input border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring font-mono text-sm leading-relaxed overflow-y-auto"
           />

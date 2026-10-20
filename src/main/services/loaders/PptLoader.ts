@@ -1,23 +1,26 @@
 /**
  * PptLoader
- * 使用 officeparser 解析 PPT，按页提取
+ * Dùng officeparser 7 để bóc tách PowerPoint (.pptx), giữ cấu trúc theo slide.
  */
 
-import { readFile } from 'fs/promises'
 import { extname } from 'path'
-import officeParser from 'officeparser'
+import { OfficeParser, type OfficeContentNode, type SlideMetadata } from 'officeparser'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, PageInfo } from './types'
 
+/** officeparser chỉ hỗ trợ .pptx (OOXML); .ppt nhị phân cũ không nằm trong SupportedFileType. */
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+
+interface ExtractedSlide {
+  slideNumber: number
+  text: string
+}
+
 /**
  * PowerPoint 文档加载器
- * 基于 officeparser，支持 PPTX
  */
 export class PptLoader implements IDocumentLoader {
-  readonly supportedMimeTypes = [
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'application/vnd.ms-powerpoint'
-  ]
+  readonly supportedMimeTypes = [PPTX_MIME, 'application/vnd.ms-powerpoint']
   readonly supportedExtensions = ['pptx', 'ppt']
 
   canLoad(filePathOrMimeType: string): boolean {
@@ -29,66 +32,119 @@ export class PptLoader implements IDocumentLoader {
   }
 
   async loadFromPath(filePath: string, options?: LoadOptions): Promise<DocumentLoadResult> {
-    const buffer = await readFile(filePath)
-    return this.loadFromBuffer(buffer, options)
+    if (extname(filePath).toLowerCase() === '.ppt') {
+      throw new Error(
+        'Legacy .ppt files are not supported by the PowerPoint parser. Save the file as .pptx and import it again.'
+      )
+    }
+
+    // Parse từ đường dẫn để officeparser dùng được cả magic bytes lẫn phần mở rộng;
+    // fileType được khai báo tường minh vì .pptx/.docx/.xlsx đều là ZIP.
+    return this.parse(filePath, options)
   }
 
   async loadFromBuffer(buffer: Buffer, options?: LoadOptions): Promise<DocumentLoadResult> {
+    return this.parse(buffer, options)
+  }
+
+  private async parse(source: string | Buffer, options?: LoadOptions): Promise<DocumentLoadResult> {
     const opts = { preserveStructure: true, ...options }
 
     try {
-      // 使用 officeparser 提取文本
-      const text = await (officeParser as unknown as { parseOfficeAsync: (input: Buffer) => Promise<string> }).parseOfficeAsync(buffer)
-      const content = text.trim()
+      const document = await OfficeParser.parseOffice(source, { fileType: 'pptx' })
+      const content = document.toText().trim()
 
-      // 按启发式规则分隔幻灯片
-      // officeparser 不直接提供页面分隔，我们使用多个连续换行作为分隔符
-      const pages: PageInfo[] = []
-      let currentOffset = 0
-
-      if (opts.preserveStructure) {
-        // 按连续 3 个或更多换行分隔（通常是幻灯片之间的分隔）
-        const slideTexts = content.split(/\n{3,}/)
-
-        for (let i = 0; i < slideTexts.length; i++) {
-          const slideText = slideTexts[i].trim()
-          if (!slideText) continue
-
-          const pageInfo: PageInfo = {
-            pageNumber: i + 1,
-            content: slideText,
-            startOffset: currentOffset,
-            endOffset: currentOffset + slideText.length
-          }
-
-          pages.push(pageInfo)
-          currentOffset += slideText.length + 3 // +3 for separator
-        }
+      if (!content) {
+        throw new Error('No readable text content found in PowerPoint document')
       }
 
-      // 提取标题（通常是第一页的第一行）
-      const firstLine = content.split('\n')[0]?.trim()
-      const title = firstLine && firstLine.length < 100 ? firstLine : undefined
+      const slides = opts.preserveStructure ? this.extractSlides(document.content) : []
+      const pages = this.buildPages(slides, content)
+
+      const title = this.extractTitle(slides, content)
+      const slideCount = pages.length || slides.length
 
       return {
         content,
         title,
-        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        structure:
-          pages.length > 0
-            ? {
-                type: 'pages',
-                pages
-              }
-            : undefined,
+        mimeType: PPTX_MIME,
+        structure: pages.length > 0 ? { type: 'pages', pages } : undefined,
         metadata: {
-          slideCount: pages.length,
-          characterCount: content.length
+          slideCount,
+          characterCount: content.length,
+          warnings: document.warnings
         }
       }
     } catch (error) {
       Logger.error('PptLoader', 'Failed to parse PPT:', error)
       throw new Error(`Failed to parse PPT: ${(error as Error).message}`)
     }
+  }
+
+  /** Thu thập các node 'slide' trong AST, kèm số thứ tự slide thật. */
+  private extractSlides(nodes: OfficeContentNode[] | undefined): ExtractedSlide[] {
+    const slides: ExtractedSlide[] = []
+
+    const visit = (list: OfficeContentNode[] | undefined): void => {
+      if (!list) return
+      for (const node of list) {
+        if (node.type === 'slide') {
+          const meta = node.metadata as SlideMetadata | undefined
+          slides.push({
+            slideNumber: meta?.slideNumber ?? slides.length + 1,
+            text: this.slideText(node)
+          })
+        }
+        if (node.children?.length) visit(node.children)
+      }
+    }
+
+    visit(nodes)
+    return slides
+  }
+
+  /**
+   * officeparser trả `text` rỗng cho node container (slide), nội dung nằm ở
+   * các node con — nên ghép lại từ children.
+   */
+  private slideText(node: OfficeContentNode): string {
+    if (node.text && node.text.trim()) return node.text.trim()
+    return (node.children ?? [])
+      .map((child) => (child.text ?? '').trim())
+      .filter((line) => line.length > 0)
+      .join('\n')
+  }
+
+  /**
+   * Dựng PageInfo với offset trỏ đúng vị trí trong `content`, để điều hướng
+   * citation nhảy đúng trang.
+   */
+  private buildPages(slides: ExtractedSlide[], content: string): PageInfo[] {
+    const pages: PageInfo[] = []
+    let cursor = 0
+
+    for (const slide of slides) {
+      if (!slide.text) continue
+
+      const found = content.indexOf(slide.text, cursor)
+      const startOffset = found >= 0 ? found : cursor
+      pages.push({
+        pageNumber: slide.slideNumber,
+        content: slide.text,
+        startOffset,
+        endOffset: startOffset + slide.text.length
+      })
+      cursor = startOffset + slide.text.length
+    }
+
+    return pages
+  }
+
+  private extractTitle(slides: ExtractedSlide[], content: string): string | undefined {
+    const firstSlideLine = slides[0]?.text.split('\n')[0]?.trim()
+    if (firstSlideLine && firstSlideLine.length < 100) return firstSlideLine
+
+    const firstLine = content.split('\n')[0]?.trim()
+    return firstLine && firstLine.length < 100 ? firstLine : undefined
   }
 }

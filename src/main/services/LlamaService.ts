@@ -453,7 +453,34 @@ export class LlamaService {
     const baseUrl = `http://${host}:${port}/v1`
     try {
       const r = await fetch(`${baseUrl}/models`, { method: 'GET' })
-      return r.ok
+      if (!r.ok) return false
+
+      // Kiểm tra model đang chạy có khớp model đang được cấu hình không.
+      // Nếu user đổi model trong Settings, server cũ vẫn chạy model cũ —
+      // phải coi như "down" để ensure*Started() tự restart với model mới.
+      const expected = this.getDefaultModelFile(kind)
+      if (!expected) return true
+
+      const payload = (await r.json()) as { data?: Array<{ id?: string }> }
+      const ids = (payload.data || []).map((m) => (m.id || '').toLowerCase())
+      if (ids.length === 0) return true
+
+      const expectedLower = expected.toLowerCase()
+      const expectedBase = basename(expectedLower)
+      const matches = ids.some(
+        (id) =>
+          id === expectedLower ||
+          id.endsWith(expectedBase) ||
+          expectedLower.endsWith(id)
+      )
+      if (!matches) {
+        Logger.warn(
+          'LlamaService',
+          `Server ${kind} is running a different model than configured (expected ${expectedBase})`
+        )
+        return false
+      }
+      return true
     } catch {
       return false
     }
@@ -618,7 +645,7 @@ export class LlamaService {
 
     if (await this.isServerUp('chat')) return true
 
-    Logger.warn('LlamaService', 'Chat server is down. Attempting auto-restart...')
+    Logger.warn('LlamaService', 'Chat server is down (or model changed). Attempting restart...')
 
     this.detectMachineInfo()
 
@@ -631,9 +658,20 @@ export class LlamaService {
       return false
     }
 
+    // Giải phóng port nếu process cũ vẫn còn (ví dụ đang chạy model cũ)
+    try {
+      this.chatProc?.kill()
+    } catch {
+      // ignore
+    }
+    this.chatProc = null
+    // Chờ OS giải phóng port trước khi spawn process mới
+    await new Promise((r) => setTimeout(r, 1500))
+
     this.spawnServer('chat', bin, chatModel)
 
-    const ready = await this.waitForServer('chat', 20000)
+    // Model 4B+ trên CPU có thể mất tới ~1 phút để load
+    const ready = await this.waitForServer('chat', 60000)
     if (!ready) {
       Logger.warn('LlamaService', 'Chat server did not become ready within timeout')
       return false
@@ -655,7 +693,7 @@ export class LlamaService {
 
     if (await this.isServerUp('embedding')) return true
 
-    Logger.warn('LlamaService', 'Embedding server is down. Attempting auto-restart...')
+    Logger.warn('LlamaService', 'Embedding server is down (or model changed). Attempting restart...')
 
     this.detectMachineInfo()
 
@@ -668,9 +706,19 @@ export class LlamaService {
       return false
     }
 
+    // Giải phóng port nếu process cũ vẫn còn (ví dụ đang chạy model cũ)
+    try {
+      this.embedProc?.kill()
+    } catch {
+      // ignore
+    }
+    this.embedProc = null
+    // Chờ OS giải phóng port trước khi spawn process mới
+    await new Promise((r) => setTimeout(r, 1500))
+
     this.spawnServer('embedding', bin, embeddingModel)
 
-    const ready = await this.waitForServer('embedding', 20000)
+    const ready = await this.waitForServer('embedding', 30000)
     if (!ready) {
       Logger.warn('LlamaService', 'Embedding server did not become ready within timeout')
       return false

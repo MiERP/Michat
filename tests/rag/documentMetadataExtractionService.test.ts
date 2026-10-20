@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractDocumentMetadata,
+  inspectorFromMetadata,
   isOriginalLegalDocument,
   mergeDocumentMetadataInspector
 } from '../../src/main/services/DocumentMetadataExtractionService'
@@ -29,6 +30,21 @@ năm 2022 về "Đẩy mạnh phát triển công nghiệp quốc phòng đến 
 năm tiếp theo", là một văn kiện có ý nghĩa chiến lược đặc biệt quan trọng.`
 
 describe('DocumentMetadataExtractionService', () => {
+  it('does not freeze missing fields when saving an unchanged form', () => {
+    const extracted = extractDocumentMetadata({ title: 'Test', content: DOCUMENT })
+    delete extracted.inspector.fields.issuedAt
+    const edited = inspectorFromMetadata(
+      { ...extracted.metadata, issuedAt: undefined },
+      extracted.inspector
+    )
+    expect(edited.fields.issuedAt).toBeUndefined()
+    expect(
+      mergeDocumentMetadataInspector(
+        extractDocumentMetadata({ title: 'Test', content: DOCUMENT }).inspector,
+        edited
+      ).fields.issuedAt?.value
+    ).toBe('2025-05-06')
+  })
   it('extracts six document metadata fields', () => {
     const result = extractDocumentMetadata({
       title: '99_2025_ND-CP_655856.doc',
@@ -122,19 +138,66 @@ describe('DocumentMetadataExtractionService', () => {
 
   it('accepts common original-document number formats', () => {
     const resolution = 'CHÍNH PHỦ\nSố: 15/NQ-CP\nCỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nNGHỊ QUYẾT'
-    const decision = 'THỦ TƯỚNG CHÍNH PHỦ\nSố: 123/QĐ-TTg\nCỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nQUYẾT ĐỊNH'
+    const decision =
+      'THỦ TƯỚNG CHÍNH PHỦ\nSố: 123/QĐ-TTg\nCỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nQUYẾT ĐỊNH'
     const partyResolution = 'BỘ CHÍNH TRỊ\nSố: 08-NQ/TW\nĐẢNG CỘNG SẢN VIỆT NAM\nNGHỊ QUYẾT'
 
     expect(isOriginalLegalDocument(resolution)).toBe(true)
     expect(isOriginalLegalDocument(decision)).toBe(true)
     expect(isOriginalLegalDocument(partyResolution)).toBe(true)
-    expect(extractDocumentMetadata({ title: 'resolution.pdf', content: resolution }).metadata.documentNumber).toBe('15/NQ-CP')
-    expect(extractDocumentMetadata({ title: 'decision.pdf', content: decision }).metadata.documentNumber).toBe('123/QĐ-TTg')
-    expect(extractDocumentMetadata({ title: 'party.pdf', content: partyResolution }).metadata).toMatchObject({ documentNumber: '08-NQ/TW', issuer: 'Bộ Chính trị' })
+    expect(
+      extractDocumentMetadata({ title: 'resolution.pdf', content: resolution }).metadata
+        .documentNumber
+    ).toBe('15/NQ-CP')
+    expect(
+      extractDocumentMetadata({ title: 'decision.pdf', content: decision }).metadata.documentNumber
+    ).toBe('123/QĐ-TTg')
+    expect(
+      extractDocumentMetadata({ title: 'party.pdf', content: partyResolution }).metadata
+    ).toMatchObject({ documentNumber: '08-NQ/TW', issuer: 'Bộ Chính trị' })
   })
 
   it('rejects a study that quotes an official masthead', () => {
-    const study = 'NGHIÊN CỨU VỀ NGHỊ QUYẾT 08\nTrích nguyên văn:\nĐẢNG CỘNG SẢN VIỆT NAM\nSố: 08-NQ/TW\nNGHỊ QUYẾT'
+    const study =
+      'NGHIÊN CỨU VỀ NGHỊ QUYẾT 08\nTrích nguyên văn:\nĐẢNG CỘNG SẢN VIỆT NAM\nSố: 08-NQ/TW\nNGHỊ QUYẾT'
     expect(isOriginalLegalDocument(study)).toBe(false)
+  })
+
+  it('keeps the document number instead of a longer number in a cited legal basis', () => {
+    const content = DOCUMENT + '\nCăn cứ Nghị định số: 1234/2024/NĐ-CP về nội dung tham khảo;'
+    expect(extractDocumentMetadata({ title: 'synthetic', content }).metadata.documentNumber).toBe(
+      '99/2025/NĐ-CP'
+    )
+  })
+
+  it('does not borrow the issuance date from a cited legal basis', () => {
+    const content = DOCUMENT.replace('Hà Nội, ngày 06 tháng 05 năm 2025', '')
+    expect(
+      extractDocumentMetadata({ title: 'synthetic', content }).metadata.issuedAt
+    ).toBeUndefined()
+  })
+
+  it('does not extract an impossible calendar date', () => {
+    const content = DOCUMENT.replace('ngày 06 tháng 05 năm 2025', 'ngày 31 tháng 02 năm 2025')
+    expect(
+      extractDocumentMetadata({ title: 'synthetic', content }).metadata.issuedAt
+    ).toBeUndefined()
+  })
+
+  it('extracts only the issuer from a flattened ministry header', () => {
+    const content = DOCUMENT.replace('CHÍNH PHỦ', 'BỘ QUỐC PHÒNG').replace(/\s+/g, ' ')
+    expect(extractDocumentMetadata({ title: 'synthetic', content }).metadata.issuer).toBe(
+      'Bộ Quốc Phòng'
+    )
+  })
+
+  it('accepts a mixed-case title below the document type', () => {
+    const content = DOCUMENT.replace(
+      'QUY ĐỊNH CHI TIẾT MỘT SỐ ĐIỀU CỦA LUẬT CÔNG NGHIỆP QUỐC PHÒNG, AN NINH VÀ ĐỘNG VIÊN CÔNG NGHIỆP',
+      'Về việc kiểm thử hệ thống dữ liệu'
+    )
+    expect(extractDocumentMetadata({ title: 'synthetic', content }).metadata.documentTitle).toBe(
+      'Về việc kiểm thử hệ thống dữ liệu'
+    )
   })
 })

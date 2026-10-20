@@ -4,6 +4,12 @@
  */
 
 import Logger from '../../shared/utils/logger'
+import { estimateTokens as estimateTextTokens } from '../../shared/utils/tokenEstimate'
+import {
+  findDeepestSection,
+  sanitizeCompactSections,
+  type CompactSection
+} from './loaders/sections'
 
 /**
  * Tùy chọn chia đoạn
@@ -15,6 +21,16 @@ export interface ChunkOptions {
   minChunkSize?: number // Kích thước đoạn tối thiểu, mặc định 100
   maxChunkTokens?: number // Ngưỡng token an toàn cho mỗi chunk, mặc định 96
   maxTableRowsPerChunk?: number // Số dòng dữ liệu bảng tối đa trong mỗi chunk, mặc định 3
+}
+
+/**
+ * Ngữ cảnh cấu trúc để neo chunk vào mục/trang.
+ * Offset trong đây tính trên CÙNG content truyền vào chunk() — không đổi
+ * ranh giới cắt chunk, chỉ gắn nhãn (headingPath / pageStart / pageEnd).
+ */
+export interface ChunkStructureContext {
+  sections?: CompactSection[]
+  pages?: Array<{ pageNumber: number; startOffset: number; endOffset: number }>
 }
 
 /**
@@ -62,17 +78,22 @@ export class ChunkingService {
 
   /**
    * Chia văn bản thành các đoạn
+   *
+   * @param structure Ngữ cảnh cấu trúc (sections/pages) để gắn headingPath và
+   * khoảng trang cho từng chunk. Chỉ gắn nhãn — không thay đổi cách cắt.
    */
-  chunk(text: string, options?: ChunkOptions): ChunkResult[] {
+  chunk(text: string, options?: ChunkOptions, structure?: ChunkStructureContext): ChunkResult[] {
     const opts = { ...this.defaultOptions, ...options }
     const { minChunkSize } = opts
 
-    // Tiền xử lý: loại bỏ khoảng trắng dư thừa
-    const cleanedText = this.preprocessText(text)
+    // Tiền xử lý: loại bỏ khoảng trắng dư thừa (kèm bản đồ offset để tra cấu trúc)
+    const { text: cleanedText, offsets } = this.preprocessWithMap(text)
 
     if (!cleanedText || cleanedText.length === 0) {
       return []
     }
+
+    const normalizedStructure = this.normalizeStructureContext(structure)
 
     // Nếu văn bản ngắn hơn kích thước tối thiểu, trả về toàn bộ văn bản
     if (cleanedText.length <= minChunkSize) {
@@ -82,7 +103,14 @@ export class ChunkingService {
           index: 0,
           startOffset: 0,
           endOffset: cleanedText.length,
-          tokenCount: this.estimateTokens(cleanedText)
+          tokenCount: this.estimateTokens(cleanedText),
+          metadata: this.buildStructuralMetadata(
+            0,
+            cleanedText.length,
+            offsets,
+            text.length,
+            normalizedStructure
+          )
         }
       ]
     }
@@ -98,9 +126,19 @@ export class ChunkingService {
 
       for (const chunk of generated) {
         if (chunk.content.length >= minChunkSize) {
+          const structural = this.buildStructuralMetadata(
+            chunk.startOffset,
+            chunk.endOffset,
+            offsets,
+            text.length,
+            normalizedStructure
+          )
+
           chunks.push({
             ...chunk,
-            index: chunks.length
+            index: chunks.length,
+            metadata:
+              structural || chunk.metadata ? { ...chunk.metadata, ...structural } : undefined
           })
         }
       }
@@ -163,19 +201,122 @@ export class ChunkingService {
   }
 
   /**
-   * Tiền xử lý văn bản
+   * Tiền xử lý văn bản (tương đương: chuẩn hóa CRLF, gộp 4+ newline thành 3, trim)
+   * Trả kèm bản đồ offset: offsets[i] = vị trí của ký tự thứ i trong text GỐC.
+   * Nhờ đó offset của chunk (tính trên text đã xử lý) vẫn tra được đúng
+   * vị trí trong documents.content (nơi offset của section/page đang nằm).
    */
-  private preprocessText(text: string): string {
-    return (
-      text
-        // Chuẩn hóa ký tự xuống dòng
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        // Loại bỏ các dòng trống liên tiếp quá nhiều (giữ tối đa 3 ký tự xuống dòng)
-        .replace(/\n{4,}/g, '\n\n\n')
-        // Loại bỏ khoảng trắng đầu/cuối
-        .trim()
-    )
+  private preprocessWithMap(text: string): { text: string; offsets: number[] } {
+    const chars: string[] = []
+    const offsets: number[] = []
+    let i = 0
+
+    while (i < text.length) {
+      const ch = text[i]
+
+      if (ch === '\r' || ch === '\n') {
+        const runStart = i
+        let count = 0
+
+        while (i < text.length && (text[i] === '\r' || text[i] === '\n')) {
+          i += text[i] === '\r' && text[i + 1] === '\n' ? 2 : 1
+          count++
+        }
+
+        const emitted = count >= 4 ? 3 : count
+        for (let k = 0; k < emitted; k++) {
+          chars.push('\n')
+          offsets.push(runStart)
+        }
+        continue
+      }
+
+      chars.push(ch)
+      offsets.push(i)
+      i += 1
+    }
+
+    let start = 0
+    let end = chars.length
+    while (start < end && /\s/.test(chars[start])) start++
+    while (end > start && /\s/.test(chars[end - 1])) end--
+
+    return {
+      text: chars.slice(start, end).join(''),
+      offsets: offsets.slice(start, end)
+    }
+  }
+
+  /**
+   * Chuẩn hóa ngữ cảnh cấu trúc: bỏ offset không hợp lệ và sắp theo vị trí.
+   */
+  private normalizeStructureContext(
+    structure?: ChunkStructureContext
+  ): ChunkStructureContext | undefined {
+    if (!structure) return undefined
+
+    const sections = structure.sections?.length
+      ? sanitizeCompactSections(structure.sections)
+      : undefined
+    const pages = structure.pages?.length
+      ? structure.pages
+          .filter(
+            (page) =>
+              Number.isFinite(page.startOffset) &&
+              Number.isFinite(page.endOffset) &&
+              page.endOffset > page.startOffset
+          )
+          .sort((a, b) => a.startOffset - b.startOffset)
+      : undefined
+
+    if (!sections?.length && !pages?.length) return undefined
+    return { sections, pages }
+  }
+
+  /**
+   * Gắn nhãn cấu trúc cho một chunk: headingPath/sectionTitle/sectionLevel
+   * (theo section sâu nhất chứa offset bắt đầu) và pageStart/pageEnd.
+   */
+  private buildStructuralMetadata(
+    startOffset: number,
+    endOffset: number,
+    offsets: number[],
+    originalLength: number,
+    structure?: ChunkStructureContext
+  ): Record<string, unknown> | undefined {
+    if (!structure) return undefined
+
+    // Đưa offset của chunk về hệ toạ độ của content gốc (nơi section/page toạ độ)
+    const originalStart = offsets[startOffset] ?? startOffset
+    const originalEnd =
+      endOffset < offsets.length ? (offsets[endOffset] ?? originalLength) : originalLength
+
+    const meta: Record<string, unknown> = {}
+
+    if (structure.sections?.length) {
+      const section = findDeepestSection(structure.sections, originalStart)
+      if (section) {
+        meta.headingPath = section.headingPath
+        meta.sectionTitle = section.title
+        meta.sectionLevel = section.level
+        // Khoảng offset của section để hạ nguồn mở rộng ngữ cảnh theo MỤC
+        // (small-to-big) mà không cần tra lại cấu trúc tài liệu.
+        meta.sectionStart = section.startOffset
+        meta.sectionEnd = section.endOffset
+      }
+    }
+
+    if (structure.pages?.length) {
+      const overlapping = structure.pages.filter(
+        (page) => originalStart < page.endOffset && originalEnd > page.startOffset
+      )
+      if (overlapping.length > 0) {
+        meta.pageStart = overlapping[0].pageNumber
+        meta.pageEnd = overlapping[overlapping.length - 1].pageNumber
+      }
+    }
+
+    return Object.keys(meta).length > 0 ? meta : undefined
   }
 
   private extractBlocks(text: string): Array<{
@@ -299,7 +440,9 @@ export class ChunkingService {
 
     let currentRows: string[] = []
     let estimatedLength = tableHeader.length + columnHeader.length + tableEnd.length + 4
-    let estimatedTokens = this.estimateTokensStrict([tableHeader, columnHeader, tableEnd].join('\n'))
+    let estimatedTokens = this.estimateTokensStrict(
+      [tableHeader, columnHeader, tableEnd].join('\n')
+    )
     let rowStartIndex = 0
 
     const flushChunk = (rowEndExclusive: number) => {
@@ -336,10 +479,7 @@ export class ChunkingService {
       const reachesTokenLimit = estimatedTokens + rowTokens > options.maxChunkTokens
       const reachesRowLimit = currentRows.length >= options.maxTableRowsPerChunk
 
-      if (
-        (reachesLengthLimit || reachesTokenLimit || reachesRowLimit) &&
-        currentRows.length > 0
-      ) {
+      if ((reachesLengthLimit || reachesTokenLimit || reachesRowLimit) && currentRows.length > 0) {
         flushChunk(idx)
         rowStartIndex = idx
       }
@@ -384,34 +524,10 @@ export class ChunkingService {
   }
 
   /**
-   * Ước tính số token
-   * Dựa trên công thức kinh nghiệm cho văn bản trộn CJK và tiếng Anh
+   * Ước tính số token (dùng chung với RAG context budget).
    */
   estimateTokens(text: string): number {
-    if (!text || text.length === 0) return 0
-
-    let vietnamChars = 0
-    let otherChars = 0
-
-    for (const char of text) {
-      const code = char.charCodeAt(0)
-      // CJK Unified Ideographs và các vùng mở rộng
-      if (
-        (code >= 0x4e00 && code <= 0x9fff) || // CJK cơ bản
-        (code >= 0x3400 && code <= 0x4dbf) || // CJK mở rộng A
-        (code >= 0xf900 && code <= 0xfaff) || // CJK tương thích
-        (code >= 0x3040 && code <= 0x309f) || // Hiragana
-        (code >= 0x30a0 && code <= 0x30ff) || // Katakana
-        (code >= 0xac00 && code <= 0xd7af) // Hangul
-      ) {
-        vietnamChars++
-      } else {
-        otherChars++
-      }
-    }
-
-    // CJK ~1.5 ký tự/token, tiếng Anh ~4 ký tự/token
-    return Math.ceil(vietnamChars / 1.5 + otherChars / 4)
+    return estimateTextTokens(text)
   }
 
   /**

@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Card } from '../ui/card'
 import { PanelHeader } from '../ui/panel-header'
 import DocumentList from './source/DocumentList'
+import KnowledgeLinksPanel from './source/KnowledgeLinksPanel'
 import type { KnowledgeDocument } from '../../../../shared/types/knowledge'
 import type {
   DocumentMetadata,
@@ -200,7 +201,7 @@ function MetadataSummaryField({
 }): ReactElement {
   return (
     <div className="min-w-0 rounded-md border border-border/70 bg-background/60 p-2.5">
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {field ? metadataStatusLabels[field.status] : 'Chưa xác định'}
@@ -264,7 +265,10 @@ function MetadataSummaryPanel({
   if (!isOriginalLegalDocument(document.content || '')) {
     if (document.mimeType !== 'application/pdf') return <></>
     return (
-      <section className="shrink-0 border-t border-border bg-muted/20 px-3 py-2" aria-label="Kiểm tra PDF">
+      <section
+        className="shrink-0 border-t border-border bg-muted/20 px-3 py-2"
+        aria-label="Kiểm tra PDF"
+      >
         <p className="text-xs text-muted-foreground">
           Thông tin pháp lý chỉ hiển thị cho văn bản gốc.
         </p>
@@ -277,7 +281,7 @@ function MetadataSummaryPanel({
       className="max-h-[48%] shrink-0 overflow-y-auto border-t border-border bg-muted/20"
       aria-label="Thông tin pháp lý"
     >
-      <div className="sticky top-0 z-[1] flex items-center justify-between gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">
+      <div className="sticky top-0 z-[1] flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">
         <div className="min-w-0">
           <h2 className="text-xs font-semibold">Thông tin pháp lý</h2>
           <p className="truncate text-[11px] text-muted-foreground" title={document.title}>
@@ -308,7 +312,7 @@ function MetadataSummaryPanel({
         </div>
       </div>
       <div className="space-y-2 p-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           <MetadataSummaryField
             label="Số, ký hiệu"
             value={existing.documentNumber || inspector?.fields.documentNumber?.value}
@@ -567,13 +571,14 @@ export default function SourcePanel(): ReactElement {
   const [modalType, setModalType] = useState<AddSourceType | null>(null)
   const [defaultEmbeddingModel, setDefaultEmbeddingModel] = useState<string | undefined>(undefined)
   const [openedDocument, setOpenedDocument] = useState<KnowledgeDocument | null>(null)
-  const [inspectedDocumentId, setInspectedDocumentId] = useState<string | null>(null)
   const [metadataDocument, setMetadataDocument] = useState<KnowledgeDocument | null>(null)
 
   const {
     documents,
     isLoading,
     isIndexing,
+    inspectedDocumentId,
+    setInspectedDocumentId,
     loadDocuments,
     loadStats,
     addDocument,
@@ -622,6 +627,26 @@ export default function SourcePanel(): ReactElement {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notebookId])
+
+  // Lắng nghe auto-sync (watcher reindex file ngoài app) và tài liệu mới được
+  // nạp lại vào KB (vd office export tự import) → refresh danh sách + thống kê.
+  useEffect(() => {
+    if (!notebookId) return
+    const reload = () => {
+      loadDocuments(notebookId)
+      loadStats(notebookId)
+    }
+    const cleanupAutoSync = window.api.knowledge.onAutoSynced(() => {
+      reload()
+    })
+    const cleanupDocsChanged = window.api.knowledge.onDocumentsChanged((data) => {
+      if (data.notebookId === notebookId) reload()
+    })
+    return () => {
+      cleanupAutoSync()
+      cleanupDocsChanged()
+    }
+  }, [notebookId, loadDocuments, loadStats])
 
   // 当 notebook 切换时清空选中的文档
   useEffect(() => {
@@ -912,6 +937,15 @@ export default function SourcePanel(): ReactElement {
                   onOpenSettings={handleOpenSettings}
                 />
               </ScrollArea>
+              {notebookId && (
+                <KnowledgeLinksPanel
+                  notebookId={notebookId}
+                  document={inspectedDocument}
+                  onDocumentChanged={() => {
+                    if (notebookId) void loadDocuments(notebookId)
+                  }}
+                />
+              )}
               <MetadataSummaryPanel
                 document={inspectedDocument}
                 onEdit={setMetadataDocument}

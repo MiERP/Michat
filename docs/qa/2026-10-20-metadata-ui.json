@@ -1,0 +1,18 @@
+{
+  "dialogClosed": true,
+  "metadata": {
+    "documentType": "Nghị quyết",
+    "issuer": "Cơ quan QA từ giao diện",
+    "issuedAt": "2025-05-06",
+    "documentTitle": "Về việc kiểm thử metadata",
+    "legalBases": "Căn cứ Nghị định số: 1234/2024/NĐ-CP ngày 01 tháng 01 năm 2024;"
+  },
+  "statuses": {
+    "documentNumber": "user_corrected",
+    "documentType": "extracted",
+    "issuer": "user_corrected",
+    "issuedAt": "extracted",
+    "documentTitle": "extracted",
+    "legalBases": "extracted"
+  }
+}

@@ -1,5 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type { ChatSession, ChatMessage } from '../shared/types/chat'
+import type { ChatSession, ChatMessage, ChatScope } from '../shared/types/chat'
 import type { Notebook, Note, ProviderConfig, AppSettings } from '../shared/types'
 import type {
   KnowledgeDocument,
@@ -12,8 +12,9 @@ import type {
 } from '../shared/types/knowledge'
 import type { UpdateState, UpdateCheckResult, UpdateOperationResult } from '../shared/types/update'
 import type { LicenseStatus } from '../shared/types/license'
-import type { MindMap, Quiz, QuizSession } from '../main/db/schema'
+import type { Quiz, QuizSession } from '../main/db/schema'
 import type { DocumentMetadata } from '../main/services/DocumentMetadataExtractionService'
+import type { DocumentEnrichment } from '../main/services/DocumentEnrichmentService'
 
 // 重新导出共享类型
 export type {
@@ -23,7 +24,6 @@ export type {
   Note,
   ProviderConfig,
   AppSettings,
-  MindMap,
   Quiz,
   QuizSession
 }
@@ -38,6 +38,40 @@ export type {
 }
 export type { UpdateState, UpdateCheckResult, UpdateOperationResult }
 export type { LicenseStatus }
+
+/** Word / Excel / PowerPoint document kinds handled by the office engine. */
+export type OfficeDocumentKind = 'docx' | 'xlsx' | 'pptx'
+
+/** officecli skill the office assistant can follow ('auto' = pick by format). */
+export type OfficeAgentSkill =
+  | 'auto'
+  | 'officecli-docx'
+  | 'officecli-word-form'
+  | 'officecli-academic-paper'
+  | 'officecli-xlsx'
+  | 'officecli-financial-model'
+  | 'officecli-data-dashboard'
+  | 'officecli-pptx'
+  | 'officecli-pitch-deck'
+  | 'morph-ppt'
+  | 'morph-ppt-3d'
+
+export interface OfficeStatus {
+  available: boolean
+  version: string | null
+  binaryPath: string | null
+  workspaceDir: string | null
+  error?: string
+}
+
+export interface OfficeIssue {
+  id: string
+  type: string
+  severity: string
+  path: string
+  message: string
+  suggestion?: string
+}
 
 declare global {
   interface Window {
@@ -87,31 +121,12 @@ declare global {
       updateNote: (id: string, updates: Partial<Pick<Note, 'title' | 'content'>>) => Promise<void>
       deleteNote: (id: string) => Promise<void>
 
-      // Items 相关（统一管理笔记、思维导图等）
+      // Items 相关（统一管理笔记、题库等）
       items: {
         getAll: (notebookId: string) => Promise<any[]>
         updateOrder: (itemId: string, order: number) => Promise<{ success: boolean }>
         batchUpdateOrder: (updates: Record<string, number>) => Promise<{ success: boolean }>
         delete: (itemId: string, deleteResource?: boolean) => Promise<{ success: boolean }>
-      }
-
-      // Mind Map 相关
-      mindmap: {
-        getLatest: (notebookId: string) => Promise<MindMap | null>
-        get: (mindMapId: string) => Promise<MindMap | null>
-        generate: (
-          notebookId: string
-        ) => Promise<{ success: boolean; mindMapId?: string; error?: string }>
-        getNodeChunks: (mindMapId: string, nodeId: string) => Promise<any[]>
-        update: (
-          mindMapId: string,
-          updates: Partial<Pick<MindMap, 'title'>>
-        ) => Promise<{ success: boolean }>
-        delete: (mindMapId: string) => Promise<{ success: boolean }>
-        openWindow: (notebookId: string, mindMapId?: string) => Promise<void>
-        onProgress: (
-          callback: (data: { notebookId: string; stage: string; progress: number }) => void
-        ) => () => void
       }
 
       // Quiz 相关
@@ -124,6 +139,7 @@ declare global {
             questionCount?: number
             difficulty?: 'easy' | 'medium' | 'hard'
             customPrompt?: string
+            documentIds?: string[]
           }
         ) => Promise<{ success: boolean; quizId?: string; error?: string }>
         submitSession: (
@@ -131,11 +147,18 @@ declare global {
           answers: Record<string, number>
         ) => Promise<{ success: boolean; sessionId?: string }>
         getSession: (sessionId: string) => Promise<QuizSession | null>
+        getQuestionChunks: (
+          quizId: string,
+          questionId: string
+        ) => Promise<Array<{ id: string; content: string; documentTitle: string }>>
         update: (quizId: string, updates: { title?: string }) => Promise<{ success: boolean }>
         delete: (quizId: string) => Promise<{ success: boolean }>
         openWindow: (notebookId: string, quizId?: string) => Promise<{ success: boolean }>
         onProgress: (
           callback: (data: { notebookId: string; stage: string; progress: number }) => void
+        ) => () => void
+        onGenerated: (
+          callback: (data: { notebookId: string; quizId?: string }) => void
         ) => () => void
       }
 
@@ -148,7 +171,7 @@ declare global {
 
       // Chat Message 相关
       getMessages: (sessionId: string) => Promise<ChatMessage[]>
-      sendMessage: (sessionId: string, content: string) => Promise<string>
+      sendMessage: (sessionId: string, content: string, scope?: ChatScope) => Promise<string>
       abortMessage: (messageId: string) => Promise<{ success: boolean; reason?: string }>
 
       // 流式消息监听（AI SDK 流式协议格式）
@@ -257,7 +280,64 @@ declare global {
         } | null>
         deleteDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
         reindexDocument: (documentId: string) => Promise<{ success: boolean; error?: string }>
-        refreshDocumentMetadata: (documentId: string) => Promise<{ success: boolean; error?: string }>
+        enrichDocument: (documentId: string) => Promise<{
+          success: boolean
+          enrichment?: DocumentEnrichment
+          error?: string
+        }>
+        getNotebookSummary: (notebookId: string) => Promise<{
+          success: boolean
+          summary?: {
+            summary: string
+            generatedAt: string
+            model?: string
+          } | null
+          pending?: boolean
+          error?: string
+        }>
+        regenerateNotebookSummary: (notebookId: string) => Promise<{
+          success: boolean
+          summary?: { summary: string | null; generatedAt: string }
+          error?: string
+        }>
+        refreshDocumentMetadata: (
+          documentId: string
+        ) => Promise<{ success: boolean; error?: string }>
+
+        // Feedback loop + lifecycle + knowledge links
+        recordFeedback: (
+          notebookId: string,
+          chunkId: string,
+          kind: 'citation_good' | 'citation_bad' | 'user_correction',
+          note?: string
+        ) => Promise<{ success: boolean; error?: string }>
+        setDocumentLifecycle: (
+          documentId: string,
+          state: 'draft' | 'verified' | 'outdated'
+        ) => Promise<{
+          success: boolean
+          document?: KnowledgeDocument
+          error?: string
+        }>
+        getLinks: (
+          notebookId: string,
+          documentId: string
+        ) => Promise<{
+          success: boolean
+          links: Array<{
+            id: string
+            sourceDocumentId: string
+            targetDocumentId: string
+            targetTitle: string
+            relationType: 'related' | 'extends' | 'contradicts'
+            confidence: number
+            evidence?: string | null
+          }>
+          error?: string
+        }>
+        generateLinks: (
+          documentId: string
+        ) => Promise<{ success: boolean; linkCount?: number; error?: string }>
 
         // 统计
         getStats: (notebookId: string) => Promise<KnowledgeStats>
@@ -271,21 +351,55 @@ declare global {
 
         // 索引进度监听
         onIndexProgress: (callback: (progress: IndexProgress) => void) => () => void
+        // 自动同步监听（watcher 触发的增量 reindex）
+        onAutoSynced: (callback: (data: any) => void) => () => void
+        // 监听 tài liệu mới được nạp lại vào KB
+        onDocumentsChanged: (callback: (data: { notebookId: string }) => void) => () => void
       }
 
-      templates: {
-        selectTemplate: (kind: 'word' | 'excel') => Promise<string | null>
-        selectOutput: (kind: 'word' | 'excel') => Promise<string | null>
-        generateWord: (
-          templatePath: string,
-          outputPath: string,
-          data: Record<string, unknown>
-        ) => Promise<{ success: boolean; outputPath?: string; error?: string }>
-        generateExcel: (
-          templatePath: string,
-          outputPath: string,
-          data: Record<string, unknown>
-        ) => Promise<{ success: boolean; outputPath?: string; error?: string }>
+      // Office document engine (Word / Excel / PowerPoint via officecli)
+      office: {
+        status: () => Promise<OfficeStatus>
+        workspaceDir: () => Promise<string>
+        defaultOutputPath: (kind: OfficeDocumentKind, name: string) => Promise<string>
+        selectOutput: (kind: OfficeDocumentKind, defaultName: string) => Promise<string | null>
+        exportDocument: (payload: {
+          kind: OfficeDocumentKind
+          title: string
+          markdown: string
+          outputPath: string
+          notebookId: string
+        }) => Promise<{ success: boolean; outputPath?: string; error?: string }>
+        generate: (payload: {
+          kind: OfficeDocumentKind
+          title: string
+          skill?: OfficeAgentSkill
+          instruction?: string
+          markdown: string
+          outputPath: string
+          notebookId: string
+          templatePath?: string
+        }) => Promise<{
+          success: boolean
+          status?: 'ok' | 'no_provider' | 'engine_unavailable'
+          outputPath?: string
+          usedFallback?: boolean
+          toolCalls?: number
+          attempts?: number
+          error?: string
+        }>
+        onGenerateProgress: (
+          callback: (data: { outputPath: string; stage: string; progress: number }) => void
+        ) => () => void
+        renderPreview: (
+          filePath: string
+        ) => Promise<{ success: boolean; html?: string; error?: string }>
+        validate: (filePath: string) => Promise<{ success: boolean; message: string | null }>
+        issues: (
+          filePath: string
+        ) => Promise<{ success: boolean; count: number; issues: OfficeIssue[] }>
+        openFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
+        openWindow: (notebookId: string) => Promise<{ success: boolean }>
       }
 
       // Llama model management

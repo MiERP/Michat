@@ -97,7 +97,6 @@ export interface AppSettings {
   hasCompletedOnboarding: boolean
   defaultChatModel?: string // 默认对话模型
   defaultEmbeddingModel?: string // 默认嵌入模型
-  defaultRerankModel?: string // 默认重排序模型
   rerankEnabled?: boolean
   rerankTopN?: number
   rerankUseHeuristicFallback?: boolean
@@ -105,17 +104,21 @@ export interface AppSettings {
   ragThreshold?: number
   ragSkipShortQueryLength?: number
   ragEnableChitChatHeuristic?: boolean
+  /** Bật tầng chọn tài liệu của Hierarchical Retrieval (doc-level index). */
+  ragHierarchicalEnabled?: boolean
+  /** Số tài liệu lấy ở tầng chọn tài liệu. */
+  ragDocTopK?: number
   allowRemoteProviders?: boolean
   prompts?: {
-    mindMap?: {
-      'vi-VN'?: string // 中文思维导图生成提示词
-      'en-US'?: string // 英文思维导图生成提示词
-    }
     quiz?: {
       'vi-VN'?: string // 中文答题生成提示词
       'en-US'?: string // 英文答题生成提示词
     }
     chat?: {
+      'vi-VN'?: string
+      'en-US'?: string
+    }
+    office?: {
       'vi-VN'?: string
       'en-US'?: string
     }

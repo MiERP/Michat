@@ -296,6 +296,8 @@ export async function deleteNotebook(id: string) {
     const sqlite = getSqlite()
     if (sqlite) {
       sqlite.prepare('DELETE FROM fts_chunks WHERE notebook_id = ?').run(id)
+      sqlite.prepare('DELETE FROM vec_documents WHERE notebook_id = ?').run(id)
+        sqlite.prepare('DELETE FROM vec_sections WHERE notebook_id = ?').run(id)
     }
 
     // 删除笔记本（外键级联会自动删除所有关联的 sessions、messages 和 documents）

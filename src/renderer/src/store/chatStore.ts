@@ -1,6 +1,8 @@
 import { create } from 'zustand'
-import type { ChatSession, ChatMessage } from '../types/notebook'
+import type { ChatSession, ChatMessage, ChatScope } from '../types/notebook'
 import Logger from '../../../shared/utils/logger'
+
+let activeSessionRequest = 0
 
 interface ChatStore {
   // Current session
@@ -11,6 +13,9 @@ interface ChatStore {
 
   // Message list (current session)
   messages: ChatMessage[]
+
+  // Phạm vi tri thức cho lượt hỏi kế tiếp (đúng tài liệu → đúng mục → đúng trang)
+  ragScope: ChatScope | null
 
   // Streaming message status: managed by notebookId
   streamingMessages: Record<string, string>
@@ -25,6 +30,7 @@ interface ChatStore {
   setCurrentSession: (session: ChatSession | null) => void
   setSessions: (sessions: ChatSession[]) => void
   setMessages: (messages: ChatMessage[]) => void
+  setRagScope: (scope: ChatScope | null) => void
 
   addMessage: (message: ChatMessage) => void
   updateMessageContent: (messageId: string, content: string) => void
@@ -45,12 +51,20 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   currentSession: null,
   sessions: [],
   messages: [],
+  ragScope: null,
   streamingMessages: {},
   messageToNotebook: {},
 
-  setCurrentSession: (session) => set({ currentSession: session }),
+  setCurrentSession: (session) =>
+    set((state) => ({
+      currentSession: session,
+      // Đổi sổ tay → phạm vi cũ trỏ vào tài liệu của sổ tay khác, phải bỏ đi
+      // nếu không RAG sẽ lọc về rỗng một cách khó hiểu.
+      ragScope: session?.notebookId !== state.currentSession?.notebookId ? null : state.ragScope
+    })),
   setSessions: (sessions) => set({ sessions }),
   setMessages: (messages) => set({ messages }),
+  setRagScope: (ragScope) => set({ ragScope }),
 
   addMessage: (message) =>
     set((state) => ({
@@ -83,11 +97,15 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
       return {
         streamingMessages: newStreamingMessages,
-        messages: state.messages.map((msg) => ({
-          ...msg,
-          isStreaming: msg.id === messageId && !!messageId,
-          isReasoningStreaming: msg.id === messageId && !!messageId
-        }))
+        messages: state.messages.map((msg) =>
+          msg.notebookId !== notebookId
+            ? msg
+            : {
+                ...msg,
+                isStreaming: msg.id === messageId && !!messageId,
+                isReasoningStreaming: msg.id === messageId && !!messageId
+              }
+        )
       }
     }),
 
@@ -102,17 +120,20 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   },
 
   loadActiveSession: async (notebookId) => {
-    const activeSession = await window.api.getActiveSession(notebookId)
-
-    if (activeSession) {
-      // 找到活跃session，设置为当前session
-      set({ currentSession: activeSession })
-      await get().loadMessages(activeSession.id)
-    } else {
-      // 没有活跃session，创建第一个
-      const newSession = await get().createSession(notebookId, `Session ${Date.now()}`)
-      set({ currentSession: newSession })
+    const request = ++activeSessionRequest
+    if (get().currentSession?.notebookId !== notebookId) {
+      get().setCurrentSession(null)
+      set({ messages: [], sessions: [] })
     }
+    let session = await window.api.getActiveSession(notebookId)
+    if (request !== activeSessionRequest) return
+    if (!session) {
+      session = await window.api.createChatSession(notebookId, `Session ${Date.now()}`)
+      if (request !== activeSessionRequest) return
+      set((state) => ({ sessions: [session!, ...state.sessions] }))
+    }
+    get().setCurrentSession(session)
+    await get().loadMessages(session.id)
   },
 
   loadMessages: async (sessionId) => {
@@ -120,13 +141,22 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
     // 从缓存中恢复正在流式传输的消息内容
     const state = get()
+    if (state.currentSession?.id !== sessionId) return
     const messages = dbMessages.map((msg: ChatMessage) => {
+      // Database rows carry sessionId; notebookId belongs to the session.
+      const message = { ...msg, notebookId: state.currentSession!.notebookId }
       const cached = state.messageToNotebook[msg.id]
-      if (cached && cached.content) {
+      if (cached) {
         // 如果缓存中有内容，说明这条消息正在流式传输，使用缓存的内容
-        return { ...msg, content: cached.content, isStreaming: true }
+        return {
+          ...message,
+          content: cached.content,
+          reasoningContent: cached.reasoningContent,
+          isStreaming: true,
+          isReasoningStreaming: !cached.content
+        }
       }
-      return msg
+      return message
     })
 
     set({ messages })
@@ -134,17 +164,15 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   createSession: async (notebookId, title) => {
     const session = await window.api.createChatSession(notebookId, title)
-    set((state) => ({
-      sessions: [session, ...state.sessions],
-      currentSession: session
-    }))
+    get().setCurrentSession(session)
+    set((state) => ({ sessions: [session, ...state.sessions], messages: [] }))
     return session
   },
 
   sendMessage: async (sessionId, content) => {
     // 1. 找到session对应的notebookId
     const session = get().currentSession
-    if (!session) return
+    if (!session || session.id !== sessionId) return
 
     const notebookId = session.notebookId
 
@@ -159,8 +187,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }
     get().addMessage(userMessage)
 
-    // 3. 发送消息并获取 assistant messageId
-    const messageId = await window.api.sendMessage(sessionId, content)
+    // 3. 发送消息并获取 assistant messageId (kèm phạm vi tri thức đang chọn)
+    const messageId = await window.api.sendMessage(sessionId, content, get().ragScope ?? undefined)
 
     // 4. 添加 assistant 消息占位符（包含推理字段）
     const assistantMessage: ChatMessage = {
@@ -174,7 +202,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       isStreaming: true,
       isReasoningStreaming: true
     }
-    get().addMessage(assistantMessage)
+    if (get().currentSession?.id === sessionId) get().addMessage(assistantMessage)
     get().setStreamingMessage(notebookId, messageId)
 
     // 5. 初始化缓存，记录 messageId -> {notebookId, content, reasoningContent}
@@ -216,7 +244,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
         // 清理缓存
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { [messageId]: _removed, ...rest } = state.messageToNotebook
+        const { [messageId]: _removed, ...rest } = get().messageToNotebook
         set({ messageToNotebook: rest })
       } else {
         Logger.warn('ChatStore', `Failed to abort: ${result.reason}`)

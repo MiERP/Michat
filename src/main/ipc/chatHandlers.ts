@@ -8,12 +8,28 @@ import { LlamaService } from '../services/LlamaService'
 import { LicenseService } from '../services/LicenseService'
 import { validateAndCleanMessages } from '../utils/messageValidator'
 import { settingsManager } from '../config'
-import type { ChatCitation, ChatMessageMetadata } from '../../shared/types/chat'
+import { markActive } from '../utils/activityTracker'
+import { clipTextToTokens, estimateTokens } from '../../shared/utils/tokenEstimate'
+import type { ChatCitation, ChatMessageMetadata, ChatScope } from '../../shared/types/chat'
+import type { SearchMetadataFilter } from '../../shared/types/knowledge'
 import type { AppSettings } from '../../shared/types'
 import Logger from '../../shared/utils/logger'
 import { ChatSchemas, validate, validateWithEvent } from './validation'
 
-const CONTROL_CHARS_PATTERN = new RegExp('[' + String.fromCharCode(0) + '-' + String.fromCharCode(8) + String.fromCharCode(11) + String.fromCharCode(12) + String.fromCharCode(14) + '-' + String.fromCharCode(31) + String.fromCharCode(127) + ']', 'g')
+const CONTROL_CHARS_PATTERN = new RegExp(
+  '[' +
+    String.fromCharCode(0) +
+    '-' +
+    String.fromCharCode(8) +
+    String.fromCharCode(11) +
+    String.fromCharCode(12) +
+    String.fromCharCode(14) +
+    '-' +
+    String.fromCharCode(31) +
+    String.fromCharCode(127) +
+    ']',
+  'g'
+)
 
 // Active streaming requests map (messageId -> AbortController)
 const activeStreams = new Map<string, AbortController>()
@@ -22,8 +38,11 @@ const activeStreams = new Map<string, AbortController>()
 const STREAM_TIMEOUT_MS = 5 * 60 * 1000
 const streamTimestamps = new Map<string, number>()
 
-const RAG_MAX_CHARS_PER_DOC = 1600
-const RAG_MAX_TOTAL_CONTEXT_CHARS = 12000
+// Ngân sách ngữ cảnh tính theo TOKEN (trước đây tính theo ký tự, không đo token).
+// 800 token/tài liệu và 6000 token tổng ≈ mức cũ (1600 ký tự/12000 ký tự) với
+// tiếng Việt ~2 ký tự/token, nhưng giờ chặn được cả trường hợp văn bản dày token.
+const RAG_MAX_TOKENS_PER_DOC = 800
+const RAG_MAX_TOTAL_CONTEXT_TOKENS = 6000
 
 function sanitizePromptText(raw: string): string {
   return raw
@@ -35,9 +54,24 @@ function sanitizePromptText(raw: string): string {
     .trim()
 }
 
-function clipText(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value
-  return `${value.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`
+/**
+ * Đưa phạm vi người dùng chọn (nếu có) về metadataFilter cho KnowledgeService.
+ */
+function buildScopeFilter(scope?: ChatScope): SearchMetadataFilter | undefined {
+  if (!scope) return undefined
+
+  const documentIds = scope.documentIds?.filter((id) => typeof id === 'string' && id.trim())
+  const sectionPath = scope.sectionPath?.filter((part) => typeof part === 'string' && part.trim())
+  const pageRange =
+    scope.pageRange && scope.pageRange.from <= scope.pageRange.to ? scope.pageRange : undefined
+
+  if (!documentIds?.length && !sectionPath?.length && !pageRange) return undefined
+
+  return {
+    documentIds: documentIds?.length ? documentIds : undefined,
+    sectionPath: sectionPath?.length ? sectionPath : undefined,
+    pageRange
+  }
 }
 
 function trackStream(messageId: string, controller: AbortController): void {
@@ -73,8 +107,12 @@ setInterval(cleanupStaleStreams, 2 * 60 * 1000).unref()
 function buildRAGContext(
   searchResults: Array<{
     chunkId: string
+    documentId: string
     documentTitle: string
     content: string
+    matchedContent?: string
+    sectionPath?: string[]
+    pageNumber?: number
     score: number
   }>
 ): { context: string; includedChunkIds: Set<string> } {
@@ -82,34 +120,58 @@ function buildRAGContext(
 
   const includedChunkIds = new Set<string>()
   const contextParts: string[] = []
-  let totalContentChars = 0
+  const seenSections = new Set<string>()
+  let totalTokens = 0
 
   for (const result of searchResults) {
-    if (totalContentChars >= RAG_MAX_TOTAL_CONTEXT_CHARS) break
+    if (totalTokens >= RAG_MAX_TOTAL_CONTEXT_TOKENS) break
 
-    const sanitized = sanitizePromptText(result.content)
+    // Small-to-big: nhiều chunk trong CÙNG một mục cho ra cùng một khối ngữ cảnh.
+    // Chỉ đưa vào prompt một lần để không đốt ngân sách token vô ích.
+    const sectionKey = result.sectionPath?.length
+      ? `${result.documentId}::${result.sectionPath.join('>')}`
+      : ''
+    if (sectionKey) {
+      if (seenSections.has(sectionKey)) continue
+      seenSections.add(sectionKey)
+    }
+
+    // Đoạn chính (chunk mà citation neo vào) phải đứng ĐẦU doc để:
+    //  - cắt theo ngân sách token từ đầu → LLM luôn đọc đúng đoạn được citation trước
+    //  - thứ tự đọc của LLM khớp với thứ tự hiển thị khi người dùng bấm [n]
+    const reordered = reorderContextWithPrimary(result.content, result.matchedContent)
+    const sanitized = sanitizePromptText(reordered)
     if (!sanitized) continue
 
-    const remaining = RAG_MAX_TOTAL_CONTEXT_CHARS - totalContentChars
-    const targetChars = Math.min(RAG_MAX_CHARS_PER_DOC, remaining)
-    if (targetChars <= 0) break
+    const remainingTokens = RAG_MAX_TOTAL_CONTEXT_TOKENS - totalTokens
+    const targetTokens = Math.min(RAG_MAX_TOKENS_PER_DOC, remainingTokens)
+    if (targetTokens <= 0) break
 
-    const clipped = clipText(sanitized, targetChars)
+    const clipped = clipTextToTokens(sanitized, targetTokens)
     if (!clipped) continue
 
     includedChunkIds.add(result.chunkId)
-    totalContentChars += clipped.length
+    totalTokens += estimateTokens(clipped)
 
-    contextParts.push(
-      `<doc id="${contextParts.length + 1}" chunk="${result.chunkId}" title="${result.documentTitle}" score="${result.score.toFixed(3)}">\n${clipped}\n</doc>`
-    )
+    const attributes = [
+      `id="${contextParts.length + 1}"`,
+      `chunk="${result.chunkId}"`,
+      `title="${result.documentTitle}"`,
+      result.sectionPath?.length ? `section="${result.sectionPath.join(' > ')}"` : '',
+      typeof result.pageNumber === 'number' ? `page="${result.pageNumber}"` : '',
+      `score="${result.score.toFixed(3)}"`
+    ]
+      .filter(Boolean)
+      .join(' ')
+
+    contextParts.push(`<doc ${attributes}>\n${clipped}\n</doc>`)
   }
 
   if (contextParts.length === 0) return { context: '', includedChunkIds }
 
   return {
     context: `Knowledge base context for the current user question:
-Below are relevant retrieved documents:
+Below are relevant retrieved documents. Each <doc> carries its source structure (title, section, page) when available. In each document, the primary cited passage comes FIRST, followed by surrounding context from the same source (if any).
 
 <documents>
 ${contextParts.join('\n\n')}
@@ -118,12 +180,33 @@ ${contextParts.join('\n\n')}
 Instructions:
 1. Please answer the user's question based ONLY on the documents above.
 2. If the provided knowledge is insufficient or irrelevant, clearly state that you don't know based on the context.
-3. When a statement uses document evidence, append citation index in square brackets, e.g. [1].
+3. When a statement uses document evidence, append citation index in square brackets, e.g. [1]. The number MUST match the document's id attribute (e.g. <doc id="2"> is cited as [2]).
 4. Do NOT attach all document indices by default; only cite the specific document(s) actually used.
 5. If one statement uses multiple documents, cite only the necessary ones, e.g. [1][3].
 6. Do NOT add a separate provenance sentence like "This information was found in file..."; keep citations inline with the statement itself.`,
     includedChunkIds
   }
+}
+
+/**
+ * Đưa đoạn chính (matchedContent - chunk mà citation neo vào) lên đầu,
+ * phần văn cảnh xung quanh (prev/next) để sau và được dán nhãn rõ.
+ */
+function reorderContextWithPrimary(content: string, matchedContent?: string): string {
+  if (!matchedContent) return content
+
+  const separator = '\n...\n'
+  const parts = content.split(separator)
+  if (parts.length < 2) return content
+
+  const primaryIndex = parts.findIndex((part) => part.trim() === matchedContent.trim())
+  if (primaryIndex <= 0) return content
+
+  const primary = parts[primaryIndex]
+  const surrounding = parts.filter((_, i) => i !== primaryIndex && _.trim())
+  if (surrounding.length === 0) return primary
+
+  return `${primary}\n\n[Surrounding context from the same document]\n${surrounding.join(separator)}`
 }
 
 function buildLongTermMemoryContext(
@@ -143,23 +226,33 @@ function buildLongTermMemoryContext(
   return `Long-term conversation memory from previous archived sessions:\n\n${blocks}\n\nUse this memory only as background context. If user intent conflicts with old memory, follow the newest user instruction.`
 }
 
+/** Bỏ dấu tiếng Việt để so khớp nhận cả "chào" lẫn "chao". */
+function stripVietnameseDiacritics(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+}
+
 function isLikelyChitChat(query: string, shortQueryLength: number): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
   if (q.length < shortQueryLength) return true
 
-  const patterns = [
-    /^(hi|hello|hey)\b/,
-    /^(xin chao|chao|chÃƒÆ’Ã†â€™Ãƒâ€š o)\b/,
-    /^(good (morning|afternoon|evening))/,
-    /^(ban|bÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚ÂºÃƒâ€šÃ‚Â¡n) (co|cÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³) (the|thÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚Â»Ãƒâ€ Ã¢â‚¬â„¢) (giup|giÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºp)/,
-    /^(cam on|cÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚ÂºÃƒâ€šÃ‚Â£m ÃƒÆ’Ã¢â‚¬Â Ãƒâ€šÃ‚Â¡n|thank you)\b/
+  const englishPatterns = [/^(hi|hello|hey)\b/, /^(good (morning|afternoon|evening))/, /^thank you\b/]
+  if (englishPatterns.some((re) => re.test(q))) return true
+
+  const ascii = stripVietnameseDiacritics(q)
+  const vietnamesePatterns = [
+    /^(xin chao|chao)\b/,
+    /^ban co the giup/,
+    /^cam on\b/
   ]
 
-  return patterns.some((re) => re.test(q))
+  return vietnamesePatterns.some((re) => re.test(ascii))
 }
 
-function normalizeCitationSnippet(raw: string, maxLength = 240): string {
+function normalizeCitationSnippet(raw: string, maxLength = 2000): string {
   const cleaned = raw.replace(/\s+/g, ' ').trim()
   if (cleaned.length <= maxLength) return cleaned
   return `${cleaned.slice(0, maxLength).trim()}...`
@@ -176,6 +269,7 @@ function buildCitations(
     matchedContent?: string
     sourceUri?: string
     pageNumber?: number
+    sectionPath?: string[]
   }>
 ): ChatCitation[] {
   return searchResults.map((result, idx) => ({
@@ -187,7 +281,8 @@ function buildCitations(
     score: result.score,
     snippet: normalizeCitationSnippet(result.matchedContent || result.content),
     sourceUri: result.sourceUri,
-    pageNumber: result.pageNumber
+    pageNumber: result.pageNumber,
+    sectionPath: result.sectionPath
   }))
 }
 
@@ -251,7 +346,7 @@ export function registerChatHandlers(
   ipcMain.handle(
     'send-message',
     validateWithEvent(ChatSchemas.sendMessage, async (event, args) => {
-      const { sessionId, content } = args
+      const { sessionId, content, scope } = args
 
       // 1. ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â­Ãƒâ€¹Ã…â€œÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â·ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯
       queries.createMessage(sessionId, 'user', content)
@@ -343,8 +438,9 @@ export function registerChatHandlers(
         const useChitChatHeuristic = effectiveSettings.ragEnableChitChatHeuristic ?? true
         const rerankEnabled = effectiveSettings.rerankEnabled ?? true
         const rerankTopN = Math.min(Math.max(effectiveSettings.rerankTopN ?? 12, ragTopK), 100)
-        const rerankModel = effectiveSettings.defaultRerankModel?.trim() || undefined
         const rerankUseHeuristicFallback = effectiveSettings.rerankUseHeuristicFallback ?? true
+        const hierarchicalEnabled = effectiveSettings.ragHierarchicalEnabled ?? true
+        const hierarchicalDocTopK = Math.min(Math.max(effectiveSettings.ragDocTopK ?? 8, 1), 50)
 
         if (
           hasEmbeddingModel &&
@@ -353,13 +449,18 @@ export function registerChatHandlers(
           const session = queries.getSessionById(sessionId)
           if (session?.notebookId) {
             const ragStartedAt = Date.now()
+            const scopeFilter = buildScopeFilter(scope)
             const searchResults = await knowledgeService.search(session.notebookId, content, {
               topK: ragTopK,
               threshold: ragThreshold,
+              metadataFilter: scopeFilter,
+              hierarchical: {
+                enabled: hierarchicalEnabled,
+                docTopK: hierarchicalDocTopK
+              },
               rerank: {
                 enabled: rerankEnabled,
                 topN: rerankTopN,
-                model: rerankModel,
                 heuristicFallback: rerankUseHeuristicFallback
               }
             })
@@ -372,7 +473,7 @@ export function registerChatHandlers(
               )
               Logger.debug(
                 'ChatHandlers',
-                `RAG: Found ${searchResults.length} relevant chunks for query, kept ${citationMetadata.length} chunks after prompt budget trim (topK=${ragTopK}, threshold=${ragThreshold}, rerankEnabled=${rerankEnabled}, rerankTopN=${rerankTopN}, latency=${Date.now() - ragStartedAt}ms)`
+                `RAG: Found ${searchResults.length} relevant chunks for query, kept ${citationMetadata.length} chunks after prompt budget trim (topK=${ragTopK}, threshold=${ragThreshold}, rerankEnabled=${rerankEnabled}, rerankTopN=${rerankTopN}, hierarchical=${hierarchicalEnabled && !scopeFilter}, scoped=${!!scopeFilter}, contextTokens=${estimateTokens(ragContext)}, latency=${Date.now() - ragStartedAt}ms)`
               )
 
               // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â°ÃƒÂ¢Ã¢â€šÂ¬  RAG ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€¦ ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â½Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Âº system message ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â°ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤Ãƒâ€šÃ‚Â´
@@ -426,9 +527,10 @@ export function registerChatHandlers(
       let usageMetadata: any = null
 
       // ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â°Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ Provider ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã‚Â¸ÃƒÆ’Ã‚Â¦Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â,ÃƒÆ’Ã‚Â¨Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â·ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ AbortControllerÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂºÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚ÂºÃƒâ€¦Ã‚Â½ AI SDK fullStreamÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°
+      // Đánh dấu hoạt động để background queue tạm dừng khi user đang chat
+      markActive()
       const abortController = await provider.sendMessageStream(
         messages,
-        // onChunk - ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬  AI SDK fullStream ÃƒÆ’Ã‚Â§Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â§Ãƒâ€šÃ‚Â part ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â±Ãƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¥Ãƒâ€¦Ã‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹
         (chunk) => {
           const { metadata, content, done } = chunk
 
@@ -535,8 +637,6 @@ export function registerChatHandlers(
                 newSessionId
               })
             }
-
-            event.sender.send('message-complete', { messageId: assistantMessage.id })
           } catch (error) {
             Logger.error('ChatHandlers', 'Error in completion callback:', error)
             event.sender.send('message-error', {

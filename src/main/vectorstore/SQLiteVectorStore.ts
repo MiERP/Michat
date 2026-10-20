@@ -34,8 +34,8 @@ export class SQLiteVectorStore implements VectorStore {
     }
 
     const insertStmt = sqlite.prepare(`
-      INSERT OR REPLACE INTO vec_embeddings (embedding_id, chunk_id, notebook_id, embedding)
-      VALUES (?, ?, ?, ?)
+      INSERT OR REPLACE INTO vec_embeddings (embedding_id, chunk_id, document_id, notebook_id, embedding)
+      VALUES (?, ?, ?, ?, ?)
     `)
 
     const insertMany = sqlite.transaction((items: VectorItem[]) => {
@@ -48,8 +48,11 @@ export class SQLiteVectorStore implements VectorStore {
           )
         }
 
+        const documentId =
+          typeof item.metadata?.documentId === 'string' ? item.metadata.documentId : null
+
         // sqlite-vec 可以直接接受 Float32Array
-        insertStmt.run(item.id, item.chunkId, this.notebookId, item.vector)
+        insertStmt.run(item.id, item.chunkId, documentId, this.notebookId, item.vector)
       }
     })
 
@@ -141,6 +144,11 @@ export class SQLiteVectorStore implements VectorStore {
         return []
       }
 
+      const requestedDocumentIds = filter?.documentIds?.filter(Boolean) || []
+      if (requestedDocumentIds.length === 0 && filter?.documentIds) {
+        return []
+      }
+
       let querySql = `
         SELECT
           embedding_id,
@@ -153,6 +161,14 @@ export class SQLiteVectorStore implements VectorStore {
       `
 
       const params: any[] = [queryVector, topK, this.notebookId]
+
+      // Lọc theo tài liệu ngay trong KNN (không dựng danh sách chunk_id khổng lồ)
+      if (requestedDocumentIds.length > 0) {
+        const placeholders = requestedDocumentIds.map(() => '?').join(',')
+        querySql += ` AND document_id IN (${placeholders})`
+        params.push(...requestedDocumentIds)
+      }
+
       if (requestedChunkIds.length > 0) {
         const placeholders = requestedChunkIds.map(() => '?').join(',')
         querySql += ` AND chunk_id IN (${placeholders})`

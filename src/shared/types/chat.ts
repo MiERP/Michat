@@ -26,6 +26,18 @@ export interface ChatCitation {
   snippet: string
   sourceUri?: string
   pageNumber?: number
+  /** Đường dẫn mục (heading) mà chunk được neo vào — để citation chỉ đúng mục. */
+  sectionPath?: string[]
+}
+
+/**
+ * Phạm vi tri thức cho một lượt hỏi (Metadata-Aware Retrieval).
+ * Người dùng chọn: đúng tài liệu → đúng mục → đúng khoảng trang.
+ */
+export interface ChatScope {
+  documentIds?: string[]
+  sectionPath?: string[]
+  pageRange?: { from: number; to: number }
 }
 
 export interface ChatMessageMetadata {

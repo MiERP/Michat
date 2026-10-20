@@ -14,7 +14,6 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
     hasCompletedOnboarding: stored.hasCompletedOnboarding ?? defaultSettings.hasCompletedOnboarding,
     defaultChatModel: stored.defaultChatModel ?? defaultSettings.defaultChatModel,
     defaultEmbeddingModel: stored.defaultEmbeddingModel ?? defaultSettings.defaultEmbeddingModel,
-    defaultRerankModel: stored.defaultRerankModel ?? defaultSettings.defaultRerankModel,
     rerankEnabled: stored.rerankEnabled ?? defaultSettings.rerankEnabled,
     rerankTopN: stored.rerankTopN ?? defaultSettings.rerankTopN,
     rerankUseHeuristicFallback:
@@ -25,12 +24,11 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
       stored.ragSkipShortQueryLength ?? defaultSettings.ragSkipShortQueryLength,
     ragEnableChitChatHeuristic:
       stored.ragEnableChitChatHeuristic ?? defaultSettings.ragEnableChitChatHeuristic,
+    ragHierarchicalEnabled:
+      stored.ragHierarchicalEnabled ?? defaultSettings.ragHierarchicalEnabled,
+    ragDocTopK: stored.ragDocTopK ?? defaultSettings.ragDocTopK,
     allowRemoteProviders: stored.allowRemoteProviders ?? defaultSettings.allowRemoteProviders,
     prompts: {
-      mindMap: {
-        'vi-VN': stored.prompts?.mindMap?.['vi-VN'] ?? defaultSettings.prompts!.mindMap!['vi-VN'],
-        'en-US': stored.prompts?.mindMap?.['en-US'] ?? defaultSettings.prompts!.mindMap!['en-US']
-      },
       quiz: {
         'vi-VN': stored.prompts?.quiz?.['vi-VN'] ?? defaultSettings.prompts!.quiz!['vi-VN'],
         'en-US': stored.prompts?.quiz?.['en-US'] ?? defaultSettings.prompts!.quiz!['en-US']
@@ -38,6 +36,10 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
       chat: {
         'vi-VN': stored.prompts?.chat?.['vi-VN'] ?? defaultSettings.prompts!.chat!['vi-VN'],
         'en-US': stored.prompts?.chat?.['en-US'] ?? defaultSettings.prompts!.chat!['en-US']
+      },
+      office: {
+        'vi-VN': stored.prompts?.office?.['vi-VN'] ?? defaultSettings.prompts!.office!['vi-VN'],
+        'en-US': stored.prompts?.office?.['en-US'] ?? defaultSettings.prompts!.office!['en-US']
       }
     }
   }

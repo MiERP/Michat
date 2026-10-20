@@ -4,7 +4,7 @@
  */
 
 // 从 shared 导入统一的聊天类型
-export type { ChatSession, ChatMessage } from '../../../shared/types/chat'
+export type { ChatSession, ChatMessage, ChatScope } from '../../../shared/types/chat'
 
 // 从 shared 导入笔记本和笔记类型
 export type { Notebook, Note } from '../../../shared/types'

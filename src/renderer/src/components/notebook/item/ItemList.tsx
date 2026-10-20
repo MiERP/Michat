@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react'
-import { FileText, Network, Trash2, Loader2, Edit2, ClipboardList } from 'lucide-react'
+import { FileText, Trash2, Loader2, Edit2, ClipboardList } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   DndContext,
@@ -40,7 +40,6 @@ interface ItemListProps {
   items: ItemDetail[]
   currentNote: Note | null
   onSelectNote: (note: Note) => void
-  onOpenMindMap: (mindMapId: string) => void
   onOpenQuiz?: (quizId: string) => void
   onDeleteItem: (itemId: string) => void
   onRefresh?: () => void
@@ -51,7 +50,6 @@ function SortableItemRow({
   item,
   currentNote,
   onSelectNote,
-  onOpenMindMap,
   onOpenQuiz,
   onDeleteItem,
   onRefresh,
@@ -61,7 +59,6 @@ function SortableItemRow({
   item: ItemDetail
   currentNote: Note | null
   onSelectNote: (note: Note) => void
-  onOpenMindMap: (mindMapId: string) => void
   onOpenQuiz?: (quizId: string) => void
   onDeleteItem: (itemId: string) => void
   onRefresh?: () => void
@@ -83,19 +80,15 @@ function SortableItemRow({
   }
 
   const isNote = item.type === 'note'
-  const isMindMap = item.type === 'mindmap'
   const isQuiz = item.type === 'quiz'
   const note = isNote ? (item.resource as Note) : null
-  const mindMap = isMindMap ? item.resource : null
   const quiz = isQuiz ? item.resource : null
   const isCurrentNote = isNote && currentNote?.id === item.resourceId
-  const isGenerating =
-    (isMindMap || isQuiz) && (mindMap?.status === 'generating' || quiz?.status === 'generating')
-  const isFailed =
-    (isMindMap || isQuiz) && (mindMap?.status === 'failed' || quiz?.status === 'failed')
+  const isGenerating = isQuiz && quiz?.status === 'generating'
+  const isFailed = isQuiz && quiz?.status === 'failed'
 
   const handleRename = () => {
-    const currentTitle = isNote ? note?.title : isMindMap ? mindMap?.title : quiz?.title
+    const currentTitle = isNote ? note?.title : quiz?.title
     setNewTitle(currentTitle || '')
     setIsRenameDialogOpen(true)
   }
@@ -106,8 +99,6 @@ function SortableItemRow({
     try {
       if (isNote && note) {
         await window.api.updateNote(note.id, { title: newTitle.trim() })
-      } else if (isMindMap && mindMap) {
-        await window.api.mindmap.update(mindMap.id, { title: newTitle.trim() })
       } else if (isQuiz && quiz) {
         await window.api.quiz.update(quiz.id, { title: newTitle.trim() })
       }
@@ -135,8 +126,6 @@ function SortableItemRow({
       onClick={() => {
         if (isNote && note) {
           onSelectNote(note)
-        } else if (isMindMap && mindMap && !isGenerating) {
-          onOpenMindMap(mindMap.id)
         } else if (isQuiz && quiz && !isGenerating) {
           onOpenQuiz?.(quiz.id)
         }
@@ -155,11 +144,8 @@ function SortableItemRow({
       <div className="flex items-center">
         {/* 图标 */}
         {isNote && <FileText className="w-4 h-4 text-muted-foreground" />}
-        {isMindMap && !isGenerating && <Network className="w-4 h-4 text-chart-1" />}
         {isQuiz && !isGenerating && <ClipboardList className="w-4 h-4 text-chart-2" />}
-        {(isMindMap || isQuiz) && isGenerating && (
-          <Loader2 className="w-4 h-4 text-chart-1 animate-spin" />
-        )}
+        {isQuiz && isGenerating && <Loader2 className="w-4 h-4 text-chart-1 animate-spin" />}
       </div>
 
       {/* 内容列 - 可被压缩 */}
@@ -169,22 +155,6 @@ function SortableItemRow({
             <h3 className="text-sm font-medium truncate">{note.title}</h3>
             <p className="text-xs text-muted-foreground line-clamp-2">
               {note.content.replace(/^#.*\n/, '').slice(0, 100)}
-            </p>
-          </>
-        )}
-        {isMindMap && mindMap && (
-          <>
-            <h3 className="text-sm font-medium truncate flex items-center gap-2">
-              {mindMap.title}
-              {mindMap.status === 'generating' && (
-                <span className="text-xs text-muted-foreground">{t('generating')}</span>
-              )}
-              {mindMap.status === 'failed' && (
-                <span className="text-xs text-destructive">{t('failed')}</span>
-              )}
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              {t('mindMapVersion', { version: mindMap.version })}
             </p>
           </>
         )}
@@ -200,7 +170,8 @@ function SortableItemRow({
               )}
             </h3>
             <p className="text-xs text-muted-foreground">
-              {t('quizVersion', { version: quiz.version })}
+              {t('quizVersion', { version: quiz.version })} ·{' '}
+              {t('questionCount', { count: quiz.questionsData?.length ?? 0 })}
             </p>
           </>
         )}
@@ -221,7 +192,7 @@ function SortableItemRow({
         variant="ghost"
         size="icon"
         className="opacity-0 group-hover:opacity-100 w-8 h-8 mt-0.5 text-destructive hover:bg-destructive/10 hover:text-destructive cursor-pointer"
-        title={isNote ? t('deleteNote') : isMindMap ? t('deleteMindMap') : t('deleteQuiz')}
+        title={isNote ? t('deleteNote') : t('deleteQuiz')}
       >
         <Trash2 className="w-4 h-4" />
       </Button>
@@ -259,16 +230,8 @@ function SortableItemRow({
       <Dialog open={isRenameDialogOpen} onOpenChange={setIsRenameDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {isNote ? t('renameNote') : isMindMap ? t('renameMindMap') : t('renameQuiz')}
-            </DialogTitle>
-            <DialogDescription>
-              {isNote
-                ? t('renameNoteDesc')
-                : isMindMap
-                  ? t('renameMindMapDesc')
-                  : t('renameNoteDesc')}
-            </DialogDescription>
+            <DialogTitle>{isNote ? t('renameNote') : t('renameQuiz')}</DialogTitle>
+            <DialogDescription>{t('renameNoteDesc')}</DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Input
@@ -280,13 +243,7 @@ function SortableItemRow({
                   handleRenameConfirm()
                 }
               }}
-              placeholder={
-                isNote
-                  ? t('noteTitlePlaceholder')
-                  : isMindMap
-                    ? t('mindMapTitlePlaceholder')
-                    : t('noteTitlePlaceholder')
-              }
+              placeholder={t('noteTitlePlaceholder')}
             />
           </div>
           <DialogFooter>
@@ -305,14 +262,8 @@ function SortableItemRow({
         isOpen={isDeleteDialogOpen}
         onClose={() => setIsDeleteDialogOpen(false)}
         onConfirm={handleConfirmDelete}
-        title={isNote ? t('deleteNote') : isMindMap ? t('deleteMindMap') : t('deleteQuiz')}
-        message={
-          isNote
-            ? t('deleteNoteWarning')
-            : isMindMap
-              ? t('confirmDeleteMindMap')
-              : t('confirmDeleteQuiz')
-        }
+        title={isNote ? t('deleteNote') : t('deleteQuiz')}
+        message={isNote ? t('deleteNoteWarning') : t('confirmDeleteQuiz')}
       />
     </>
   )
@@ -322,7 +273,6 @@ export default function ItemList({
   items,
   currentNote,
   onSelectNote,
-  onOpenMindMap,
   onOpenQuiz,
   onDeleteItem,
   onRefresh
@@ -396,7 +346,6 @@ export default function ItemList({
               item={item}
               currentNote={currentNote}
               onSelectNote={onSelectNote}
-              onOpenMindMap={onOpenMindMap}
               onOpenQuiz={onOpenQuiz}
               onDeleteItem={onDeleteItem}
               onRefresh={onRefresh}

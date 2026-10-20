@@ -3,9 +3,19 @@
  * 答题服务 - 生成和管理笔记本的答题题库
  */
 
+import { randomUUID } from 'crypto'
 import { getDatabase, executeCheckpoint } from '../db'
-import { quizzes, documents, chunks, notebooks, items, quizSessions } from '../db/schema'
-import type { Quiz, NewQuiz, QuizSession, NewQuizSession } from '../db/schema'
+import {
+  quizzes,
+  documents,
+  chunks,
+  notebooks,
+  items,
+  quizSessions,
+  chunkFeedback
+} from '../db/schema'
+import type { Quiz, NewQuiz, QuizSession, NewQuizSession, NewChunkFeedback } from '../db/schema'
+import type { KnowledgeService } from './KnowledgeService'
 import type { QuizQuestion, QuizGenerationResult } from '../../shared/types/quiz'
 import { eq, desc, and, inArray } from 'drizzle-orm'
 import { ProviderManager } from '../providers/ProviderManager'
@@ -22,8 +32,15 @@ export type QuizProgressCallback = (stage: string, progress: number) => void
 
 const MAX_SOURCE_DOCS = 10
 const MAX_CHUNKS_PER_DOC = 4
-const MAX_CHARS_PER_CHUNK = 900
-const MAX_PROMPT_CONTENT_CHARS = 32000
+const MAX_CHARS_PER_CHUNK = 600
+const MAX_PROMPT_CONTENT_CHARS = 10000
+const BATCH_SIZE = 5
+const MAX_BATCHES = 4
+// Model 4B+ trên CPU sinh chậm, nhưng timeout phải ngắn + huỷ được request
+// để user không chờ vô hạn; retry ở tầng batch bên dưới.
+const GENERATION_TIMEOUT_MS = 180000
+// Giới hạn output: một batch ~5 câu không cần quá 4k token
+const MAX_OUTPUT_TOKENS = 4096
 
 type QualityMode = 'fast' | 'balanced' | 'accurate'
 
@@ -34,34 +51,58 @@ function getQualityMode(): QualityMode {
 }
 
 /**
+ * Hẹn giờ cho promise generation kèm AbortSignal — khi hết giờ, huỷ luôn
+ * request đang chạy để llama-server không tiếp tục ngốn slot (gây xếp hàng).
+ */
+function withAbortTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController()
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      controller.abort()
+      reject(new Error('Generation timed out — model may be overloaded'))
+    }, ms)
+    fn(controller.signal).then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
+/**
  * 答题生成选项
  */
 export interface QuizGenerationOptions {
   questionCount?: number // 题目数量，默认10
   difficulty?: 'easy' | 'medium' | 'hard' // 难度，默认medium
   customPrompt?: string // 自定义提示词
+  documentIds?: string[] // 指定文档生成；bỏ trống = tất cả tài liệu
 }
 
 /**
- * 获取quiz生成 Prompt（支持国际化和自定义）
+ * 获取quiz生成 Prompt（支持国际化和自定义）— đồng thời trả về ngôn ngữ
+ * để gắn đúng chỉ thị độ khó (trước đây detect sai cho prompt tiếng Việt).
  */
-async function getQuizPrompt(customPrompt?: string): Promise<string> {
-  // 如果提供了自定义提示词，直接使用
-  if (customPrompt && customPrompt.trim()) {
-    return customPrompt.trim()
-  }
-
-  // 否则从设置中获取
+async function getQuizPrompt(customPrompt?: string): Promise<{ prompt: string; language: string }> {
   const settings = await settingsManager.getAllSettings()
   const language = settings.language || 'vi-VN'
 
-  const prompt = settings.prompts?.quiz?.[language]
+  // 如果提供了自定义提示词，直接使用
+  if (customPrompt && customPrompt.trim()) {
+    return { prompt: customPrompt.trim(), language }
+  }
 
+  const prompt = settings.prompts?.quiz?.[language]
   if (!prompt) {
     throw new Error(`未找到 ${language} 语言的答题生成提示词`)
   }
 
-  return prompt
+  return { prompt, language }
 }
 
 /**
@@ -103,8 +144,8 @@ const QuizQuestionSchema: z.ZodType<QuizQuestion> = z.object({
   questionText: z.string().max(200).describe('题目文本，不超过200字'),
   options: z.array(z.string().max(100)).length(4).describe('4个选项'),
   correctAnswer: z.number().min(0).max(3).describe('正确答案索引（0-3）'),
-  explanation: z.string().max(300).describe('答案解释，不超过300字'),
-  hints: z.array(z.string().max(100)).min(1).max(2).describe('1-2个提示'),
+  explanation: z.string().max(300).default('').describe('答案解释，不超过300字'),
+  hints: z.array(z.string().max(100)).max(2).default([]).describe('1-2个提示'),
   metadata: z
     .object({
       chunkIds: z.array(z.string()).describe('关联的chunk ID列表')
@@ -117,10 +158,14 @@ const QuizQuestionSchema: z.ZodType<QuizQuestion> = z.object({
  */
 function createQuizSchema(questionCount: number) {
   return z.object({
-    questions: z.array(QuizQuestionSchema).length(questionCount).describe(`${questionCount}道题目`),
-    metadata: z.object({
-      totalQuestions: z.number().describe('总题数')
-    })
+    // Chấp nhận ít hơn yêu cầu thay vì ép validation lỗi phải sinh lại toàn bộ
+    // (một lần sinh trên CPU local có thể mất nhiều phút).
+    questions: z.array(QuizQuestionSchema).min(1).max(questionCount).describe('题目数组'),
+    metadata: z
+      .object({
+        totalQuestions: z.number().describe('总题数')
+      })
+      .optional()
   })
 }
 
@@ -128,62 +173,50 @@ function createQuizSchema(questionCount: number) {
  * 答题服务
  */
 export class QuizService {
-  constructor(private providerManager: ProviderManager) {}
+  constructor(
+    private providerManager: ProviderManager,
+    private knowledgeService: KnowledgeService
+  ) {}
 
   /**
-   * 聚合笔记本内容
+   * 聚合笔记本内容 — đọc qua KnowledgeService (pipeline dùng chung) thay vì
+   * query thẳng bảng documents/chunks.
    */
   private trimChunkContent(content: string): string {
     return content.replace(/\s+/g, ' ').trim().slice(0, MAX_CHARS_PER_CHUNK)
   }
 
-  private async aggregateNotebookContent(notebookId: string): Promise<string> {
-    const db = getDatabase()
-    const contentParts: string[] = []
+  private async aggregateNotebookContent(
+    notebookId: string,
+    documentIds?: string[]
+  ): Promise<string> {
     const mode = getQualityMode()
     const docsLimit = mode === 'fast' ? 6 : mode === 'accurate' ? 12 : MAX_SOURCE_DOCS
     const chunksPerDoc = mode === 'fast' ? 3 : mode === 'accurate' ? 6 : MAX_CHUNKS_PER_DOC
 
     try {
-      const docs = db
-        .select({
-          id: documents.id,
-          title: documents.title,
-          type: documents.type,
-          updatedAt: documents.updatedAt
-        })
-        .from(documents)
-        .where(and(eq(documents.notebookId, notebookId), eq(documents.status, 'indexed')))
-        .orderBy(desc(documents.updatedAt))
-        .limit(docsLimit)
-        .all()
+      const docsWithChunks = this.knowledgeService.getIndexedDocumentsWithChunks(notebookId, {
+        documentIds,
+        docsLimit,
+        chunksPerDoc,
+        spreadChunks: true
+      })
 
-      Logger.info('QuizService', `Found ${docs.length} indexed documents (limited)`)
+      Logger.info(
+        'QuizService',
+        `Found ${docsWithChunks.length} indexed documents (scope=${documentIds && documentIds.length > 0 ? 'selected' : 'all'})`
+      )
 
-      if (docs.length === 0) {
+      if (docsWithChunks.length === 0) {
         throw new Error('笔记本没有可用内容生成题目，请先添加文档到知识库')
       }
 
-      for (const doc of docs) {
-        const docChunks = db
-          .select({ id: chunks.id, content: chunks.content })
-          .from(chunks)
-          .where(eq(chunks.documentId, doc.id))
-          .orderBy(chunks.chunkIndex)
-          .limit(chunksPerDoc)
-          .all()
-
-        if (docChunks.length > 0) {
-          const chunkContent = docChunks
-            .map((c) => `[chunk:${c.id}] ${this.trimChunkContent(c.content)}`)
-            .join('\n')
-          contentParts.push(`[文档: ${doc.title}]\n${chunkContent}`)
-        }
-      }
-
-      if (contentParts.length === 0) {
-        throw new Error('笔记本没有可用内容生成题目')
-      }
+      const contentParts = docsWithChunks.map((doc) => {
+        const chunkContent = doc.chunks
+          .map((c) => `[chunk:${c.id}] ${this.trimChunkContent(c.content)}`)
+          .join('\n')
+        return `[文档: ${doc.title}]\n${chunkContent}`
+      })
 
       let mergedContent = contentParts.join('\n\n---\n\n')
       if (mergedContent.length > MAX_PROMPT_CONTENT_CHARS) {
@@ -198,7 +231,9 @@ export class QuizService {
   }
 
   /**
-   * 调用LLM生成题目 (使用 streamObject 结构化输出)
+   * 调用LLM生成题目（chạy tuần tự theo batch — streamObject để báo tiến độ
+   * và có thể huỷ khi timeout; không chạy song song vì llama-server local
+   * là single-slot, batch song song chỉ xếp hàng chờ nhau).
    */
   private async callLLMForGeneration(
     content: string,
@@ -216,20 +251,87 @@ export class QuizService {
 
     Logger.info('QuizService', `Using provider: ${provider.name}`)
 
-    const promptTemplate = await getQuizPrompt(options?.customPrompt)
+    const { prompt: promptTemplate, language } = await getQuizPrompt(options?.customPrompt)
     const questionCount = Math.min(Math.max(options?.questionCount || 10, 3), 20)
     const difficulty = options?.difficulty || 'medium'
-
-    const isVietNam = promptTemplate.includes('中文') || promptTemplate.includes('题目')
-    const language = isVietNam ? 'vi-VN' : 'en-US'
     const difficultyInstruction = getDifficultyInstruction(difficulty, language)
 
     const model = provider.getAIModel()
-    const QuizSchema = createQuizSchema(questionCount)
-
-    let lastError: Error | null = null
     const mode = getQualityMode()
-    const maxAttempts = mode === 'accurate' ? 3 : mode === 'fast' ? 1 : 2
+    // Một lần sinh đã tốn nhiều phút; retry chỉ nhân thời gian chờ. Chỉ mode
+    // accurate được retry (1 lần), balanced/fast không retry batch.
+    const maxAttempts = mode === 'accurate' ? 2 : 1
+
+    const maxBatchesByMode = { fast: 1, balanced: 2, accurate: 4 } as const
+    const desiredBatches = Math.min(
+      Math.ceil(questionCount / BATCH_SIZE),
+      maxBatchesByMode[mode],
+      MAX_BATCHES
+    )
+    const contentParts = this.splitContentIntoParts(content, desiredBatches)
+    const batchCount = Math.max(1, contentParts.length)
+
+    const baseCount = Math.floor(questionCount / batchCount)
+    const remainder = questionCount % batchCount
+
+    const batches = Array.from({ length: batchCount }, (_, i) => {
+      const count = Math.max(1, baseCount + (i < remainder ? 1 : 0))
+      return { contentPart: contentParts[i] ?? contentParts[0], count }
+    })
+
+    onProgress?.('generating_quiz', 30)
+
+    const results: QuizQuestion[][] = []
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i]
+      const batchStart = 30 + Math.round((i / batchCount) * 40)
+      const batchEnd = 30 + Math.round(((i + 1) / batchCount) * 40)
+      let partialTicks = 0
+
+      const questions = await this.generateQuestionsBatch(
+        model,
+        promptTemplate,
+        batch.contentPart,
+        batch.count,
+        difficultyInstruction,
+        maxAttempts,
+        () => {
+          partialTicks++
+          if (partialTicks % 5 === 0) {
+            onProgress?.(
+              'generating_quiz',
+              Math.min(batchStart + Math.round(partialTicks * 0.5), batchEnd)
+            )
+          }
+        }
+      )
+      results.push(questions)
+      onProgress?.('generating_quiz', Math.min(batchEnd, 70))
+    }
+
+    onProgress?.('parsing_result', 70)
+
+    const questions = results.flat()
+    return {
+      questions,
+      metadata: { totalQuestions: questions.length }
+    }
+  }
+
+  /**
+   * 生成单个批次的题目（含独立重试）
+   */
+  private async generateQuestionsBatch(
+    model: any,
+    promptTemplate: string,
+    contentPart: string,
+    questionCount: number,
+    difficultyInstruction: string,
+    maxAttempts: number,
+    onPartialProgress?: () => void
+  ): Promise<QuizQuestion[]> {
+    const BatchSchema = createQuizSchema(questionCount)
+    let lastError: Error | null = null
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const correction =
@@ -239,50 +341,62 @@ export class QuizService {
 
       let prompt = promptTemplate.replace(/\{\{QUESTION_COUNT\}\}/g, questionCount.toString())
       prompt = prompt.replace(/\{\{DIFFICULTY_INSTRUCTION\}\}/g, difficultyInstruction)
-      prompt = prompt.replace(/\{\{CONTENT\}\}/g, content)
+      prompt = prompt.replace(/\{\{CONTENT\}\}/g, contentPart)
       prompt = `${prompt}${correction}`
 
       try {
-        onProgress?.('generating_quiz', attempt === 1 ? 30 : 45)
+        const result = await withAbortTimeout(async (signal) => {
+          const { partialObjectStream, object } = streamObject({
+            model,
+            schema: BatchSchema,
+            prompt,
+            temperature: 0.5,
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
+            maxRetries: 0,
+            abortSignal: signal
+          })
 
-        const { partialObjectStream, object } = streamObject({
-          model,
-          schema: QuizSchema,
-          prompt
-        })
-
-        let lastProgress = attempt === 1 ? 30 : 45
-        let chunkCount = 0
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        for await (const _ of partialObjectStream) {
-          chunkCount++
-          if (chunkCount % 6 === 0) {
-            lastProgress = Math.min(lastProgress + 4, 68)
-            onProgress?.('generating_quiz', lastProgress)
+          // Vừa drain stream vừa báo tiến độ: % nhích dần thay vì đứng im 30%
+          for await (const partialObject of partialObjectStream) {
+            void partialObject
+            onPartialProgress?.()
           }
-        }
 
-        onProgress?.('parsing_result', 70)
+          return await object
+        }, GENERATION_TIMEOUT_MS)
 
-        const result = await object
-        if (!result.questions || result.questions.length < 1) {
+        const questions = result.questions
+        if (!questions || questions.length < 1) {
           throw new Error('生成的题目数量不正确')
         }
 
-        return {
-          questions: result.questions,
-          metadata: result.metadata
-        }
+        return questions
       } catch (error) {
         lastError = error as Error
         Logger.warn(
           'QuizService',
-          `Quiz generation attempt ${attempt} failed: ${lastError.message}`
+          `Quiz batch generation attempt ${attempt} failed: ${lastError.message}`
         )
       }
     }
 
     throw new Error(`生成题目失败: ${lastError?.message || 'unknown error'}`)
+  }
+
+  /**
+   * 将聚合内容按文档段落拆分，尽量均匀分配到指定数量的部分
+   */
+  private splitContentIntoParts(content: string, parts: number): string[] {
+    const sections = content.split('\n\n---\n\n').filter((s) => s.trim().length > 0)
+    if (sections.length === 0) return [content]
+
+    const targetParts = Math.min(Math.max(parts, 1), sections.length)
+    const groups: string[][] = Array.from({ length: targetParts }, () => [])
+    sections.forEach((section, i) => {
+      groups[i % targetParts].push(section)
+    })
+
+    return groups.map((group) => group.join('\n\n---\n\n')).filter((s) => s.trim().length > 0)
   }
 
   /**
@@ -334,8 +448,8 @@ export class QuizService {
           ...question,
           options: question.options.map((opt) => opt.trim()),
           questionText: question.questionText.trim(),
-          explanation: question.explanation.trim(),
-          hints: question.hints.map((hint) => hint.trim())
+          explanation: (question.explanation ?? '').trim(),
+          hints: (question.hints ?? []).map((hint) => hint.trim())
         })
       }
     })
@@ -383,8 +497,7 @@ export class QuizService {
       const newVersion = (latestVersion?.version || 0) + 1
 
       // 根据语言生成标题
-      const titleTemplate =
-        language === 'en-US' ? `${notebook.title} Quiz` : `${notebook.title}`
+      const titleTemplate = language === 'en-US' ? `${notebook.title} Quiz` : `${notebook.title}`
 
       const newQuiz: NewQuiz = {
         id: quizId,
@@ -422,7 +535,7 @@ export class QuizService {
 
       // 2. 聚合内容
       onProgress?.('aggregating_content', 10)
-      const content = await this.aggregateNotebookContent(notebookId)
+      const content = await this.aggregateNotebookContent(notebookId, options?.documentIds)
 
       // 3. 调用LLM生成
       const result = await this.callLLMForGeneration(content, options, onProgress)
@@ -532,6 +645,48 @@ export class QuizService {
     const totalQuestions = questions.length
     const score = Math.round((correctCount / totalQuestions) * 100)
 
+    // Feedback loop: kết quả quiz trở thành tín hiệu cho retrieval.
+    // Câu trả lời đúng → chunk nguồn được boost; sai → giảm trọng số.
+    const chunkMapping = quiz.chunkMapping as Record<string, string[]> | null
+    if (chunkMapping) {
+      const answeredQuestions = questions.filter((q) => answers[q.id] !== undefined)
+      const referencedChunkIds = [
+        ...new Set(answeredQuestions.flatMap((q) => chunkMapping[q.id] || []))
+      ]
+      const existingChunkIds = new Set(
+        referencedChunkIds.length > 0
+          ? db
+              .select({ id: chunks.id })
+              .from(chunks)
+              .where(inArray(chunks.id, referencedChunkIds))
+              .all()
+              .map((c) => c.id)
+          : []
+      )
+
+      const feedbackRows: NewChunkFeedback[] = []
+      for (const question of answeredQuestions) {
+        const kind =
+          answers[question.id] === question.correctAnswer ? 'citation_good' : 'citation_bad'
+        for (const chunkId of chunkMapping[question.id] || []) {
+          if (!existingChunkIds.has(chunkId)) continue
+          feedbackRows.push({
+            id: `fb_${randomUUID()}`,
+            chunkId,
+            notebookId: quiz.notebookId,
+            kind,
+            note: `quiz:${quizId}:${question.id}`,
+            createdAt: new Date()
+          })
+        }
+      }
+
+      if (feedbackRows.length > 0) {
+        db.insert(chunkFeedback).values(feedbackRows).run()
+        Logger.info('QuizService', `Quiz feedback recorded on ${feedbackRows.length} chunks`)
+      }
+    }
+
     // 创建会话记录
     const newSession: NewQuizSession = {
       id: sessionId,
@@ -559,6 +714,34 @@ export class QuizService {
     const db = getDatabase()
     const session = db.select().from(quizSessions).where(eq(quizSessions.id, sessionId)).get()
     return session
+  }
+
+  /**
+   * Lấy nguồn chunk của một câu hỏi (từ chunkMapping) — dùng để hiển thị
+   * "câu hỏi này dựa trên đoạn nào của tài liệu nào".
+   */
+  getQuestionChunks(
+    quizId: string,
+    questionId: string
+  ): Array<{ id: string; content: string; documentTitle: string }> {
+    const db = getDatabase()
+    const quiz = this.getQuiz(quizId)
+    if (!quiz) return []
+
+    const chunkMapping = quiz.chunkMapping as Record<string, string[]> | null
+    const chunkIds = chunkMapping?.[questionId] || []
+    if (chunkIds.length === 0) return []
+
+    const chunkRows = db.select().from(chunks).where(inArray(chunks.id, chunkIds)).all()
+    const docIds = [...new Set(chunkRows.map((c) => c.documentId))]
+    const docRows = db.select().from(documents).where(inArray(documents.id, docIds)).all()
+    const docMap = new Map(docRows.map((d) => [d.id, d.title]))
+
+    return chunkRows.map((c) => ({
+      id: c.id,
+      content: c.content,
+      documentTitle: docMap.get(c.documentId) || 'Unknown'
+    }))
   }
 
   /**

@@ -1,163 +1,312 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { LlamaService } from './services/LlamaService'
-import { OfficeProviderBridgeService } from './services/office/OfficeProviderBridgeService'
-import { initDatabase, runMigrations, initExtensions, closeDatabase, executeCheckpoint } from './db'
+import { officeCliService } from './services/officecli/OfficeCliService'
+import {
+  initDatabase,
+  runMigrations,
+  initExtensions,
+  closeDatabase,
+  executeCheckpoint,
+  getDatabase
+} from './db'
+import { notebooks } from './db/schema'
+import { getAllNotebooks } from './db/queries'
+import { wasVectorIndexRebuilt } from './db'
 import { ProviderManager } from './providers/ProviderManager'
 import { SessionAutoSwitchService } from './services/SessionAutoSwitchService'
 import { KnowledgeService } from './services/KnowledgeService'
+import { KnowledgeLinkService } from './services/KnowledgeLinkService'
+import { DocumentEnrichmentService } from './services/DocumentEnrichmentService'
+import { NotebookSummaryService } from './services/NotebookSummaryService'
+import { BackgroundJobService } from './services/BackgroundJobService'
 import { UpdateService } from './services/UpdateService'
 import { ShortcutManager } from './services/ShortcutManager'
 import { LicenseService } from './services/LicenseService'
 import { createMainWindow } from './windows'
 import { registerAllHandlers } from './ipc'
-import { getStore } from './config/store'
+import { getStore, settingsManager } from './config'
 import Logger from '../shared/utils/logger'
 import { isAllowedExternalOpenUrl } from './security/guards'
 
 let providerManager: ProviderManager | null = null
 let sessionAutoSwitchService: SessionAutoSwitchService | null = null
 let knowledgeService: KnowledgeService | null = null
+let backgroundJobService: BackgroundJobService | null = null
 let updateService: UpdateService | null = null
 let shortcutManager: ShortcutManager | null = null
 let isQuitting = false // Flag to indicate if app is quitting
 
 let llamaService: LlamaService | null = null
-let officeProviderBridgeService: OfficeProviderBridgeService | null = null
+
+/**
+ * Hằng ngày enqueue decay-links cho mọi notebook
+ * (giảm confidence liên kết cũ, loại link quá yếu)
+ */
+function scheduleDailyLinkDecay(queue: BackgroundJobService): void {
+  const enqueueAll = (): void => {
+    try {
+      const db = getDatabase()
+      const allNotebooks = db.select({ id: notebooks.id }).from(notebooks).all()
+      for (const nb of allNotebooks) {
+        queue.enqueueDecayLinks(nb.id)
+      }
+      if (allNotebooks.length > 0) {
+        Logger.info('Main', `Scheduled daily decay-links for ${allNotebooks.length} notebooks`)
+      }
+    } catch (error) {
+      Logger.error('Main', 'Failed to schedule decay-links:', error)
+    }
+  }
+
+  // Chạy ngay khi khởi động + mỗi 24h
+  enqueueAll()
+  const timer = setInterval(enqueueAll, 24 * 60 * 60 * 1000)
+  timer.unref()
+}
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   try {
-  const licenseStatus = LicenseService.ensureLicenseOnStartup()
-  Logger.info(
-    'Main',
-    `License startup check: ${licenseStatus.valid ? 'valid' : 'invalid'}${licenseStatus.expiresAt ? `, expiresAt=${licenseStatus.expiresAt}` : ''}`
-  )
+    const licenseStatus = LicenseService.ensureLicenseOnStartup()
+    Logger.info(
+      'Main',
+      `License startup check: ${licenseStatus.valid ? 'valid' : 'invalid'}${licenseStatus.expiresAt ? `, expiresAt=${licenseStatus.expiresAt}` : ''}`
+    )
 
-  // Auto-start llama.cpp servers (best effort)
-  llamaService = new LlamaService()
-  await llamaService.ensureStarted()
+    // Auto-start llama.cpp servers (best effort)
+    llamaService = new LlamaService()
 
-  officeProviderBridgeService = new OfficeProviderBridgeService()
-  officeProviderBridgeService.setLlamaService(llamaService)
-  await officeProviderBridgeService.start()
-  Logger.info('Main', `Office provider bridge started at ${officeProviderBridgeService.address}`)
-
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.michat.app')
-
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
-
-  // Initialize database
-  Logger.info('Main', 'Initializing database...')
-  initDatabase()
-  runMigrations()
-  initExtensions()
-  Logger.info('Main', 'Database initialized')
-
-  // Initialize Provider Manager
-  Logger.info('Main', 'Initializing Provider Manager...')
-  providerManager = new ProviderManager()
-  await providerManager.initialize()
-  Logger.info('Main', 'Provider Manager initialized')
-
-  // Initialize Session Auto Switch Service
-  Logger.info('Main', 'Initializing Session Auto Switch Service...')
-  sessionAutoSwitchService = new SessionAutoSwitchService(providerManager)
-  Logger.info('Main', 'Session Auto Switch Service initialized')
-
-  // Initialize Knowledge Service
-  Logger.info('Main', 'Initializing Knowledge Service...')
-  knowledgeService = new KnowledgeService(providerManager)
-  Logger.info('Main', 'Knowledge Service initialized')
-
-  // Initialize Update Service
-  Logger.info('Main', 'Initializing Update Service...')
-  updateService = new UpdateService()
-  Logger.info('Main', 'Update Service initialized')
-
-  // Initialize electron-store
-  Logger.info('Main', 'Initializing electron-store...')
-  const store = await getStore()
-  Logger.info('Main', 'electron-store initialized')
-
-  // Initialize Shortcut Manager
-  Logger.info('Main', 'Initializing Shortcut Manager...')
-  shortcutManager = new ShortcutManager(store)
-  Logger.info('Main', 'Shortcut Manager initialized')
-
-  // Register all IPC Handlers
-  registerAllHandlers(
-    providerManager,
-    sessionAutoSwitchService,
-    knowledgeService,
-    updateService,
-    shortcutManager,
-    store,
-    llamaService
-  )
-
-  // IPC test (development only)
-  if (process.env.NODE_ENV === 'development') {
-    ipcMain.on('ping', () => console.log('pong'))
-  }
-
-  // Handle get platform request
-  ipcMain.handle('get-platform', () => {
-    return process.platform
-  })
-
-  // Handle get app version request
-  ipcMain.handle('get-app-version', () => {
-    return app.getVersion()
-  })
-
-  // Handle open external URL request
-  ipcMain.handle('open-external-url', async (_event, url: string) => {
-    try {
-      if (!isAllowedExternalOpenUrl(url)) {
-        throw new Error('Only public http/https URLs can be opened')
+    // Seed local model defaults so chat and RAG work on first launch without
+    // the user having to open Settings → General and save first.
+    const currentSettings = await settingsManager.getAllSettings()
+    const seeded: { defaultChatModel?: string; defaultEmbeddingModel?: string } = {}
+    if (!currentSettings.defaultChatModel || !currentSettings.defaultEmbeddingModel) {
+      const models = llamaService.listModels()
+      if (!currentSettings.defaultChatModel) {
+        const chatModel = models.find((model) => model.type === 'chat')
+        if (chatModel) seeded.defaultChatModel = `llama:${chatModel.filename}`
       }
-
-      await shell.openExternal(url)
-      return { success: true }
-    } catch (error: any) {
-      Logger.error('Main', 'Failed to open external URL:', error)
-      return { success: false, error: error.message }
-    }
-  })
-
-  // Create main window
-  const mainWindow = createMainWindow()
-
-  // Set main window for update service
-  updateService.setMainWindow(mainWindow)
-
-  // Set main window for shortcut manager and register shortcuts
-  shortcutManager.setMainWindow(mainWindow)
-  shortcutManager.registerShortcuts()
-  Logger.info('Main', 'Shortcuts registered')
-
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) {
-      const mainWindow = createMainWindow()
-      // Re-register shortcuts for the new window
-      if (shortcutManager) {
-        shortcutManager.setMainWindow(mainWindow)
-        shortcutManager.registerShortcuts()
-        Logger.info('Main', 'Shortcuts re-registered after window re-creation')
+      if (!currentSettings.defaultEmbeddingModel) {
+        const embeddingModel = models.find((model) => model.type === 'embedding')
+        if (embeddingModel) seeded.defaultEmbeddingModel = `llama:${embeddingModel.filename}`
+      }
+      if (Object.keys(seeded).length > 0) {
+        await settingsManager.updateSettings(seeded)
+        Logger.info('Main', `Seeded default models: ${JSON.stringify(seeded)}`)
       }
     }
-  })
+
+    await llamaService.ensureStarted()
+
+    // Office document engine (bundled officecli binary; degrades gracefully).
+    // The module singleton is shared with the agent tools.
+    officeCliService.setUserDataDir(app.getPath('userData'))
+    const officeStatus = await officeCliService.initialize()
+    Logger.info(
+      'Main',
+      officeStatus.available
+        ? `Office engine ready (v${officeStatus.version})`
+        : `Office engine unavailable: ${officeStatus.error}`
+    )
+
+    // Set app user model id for windows
+    electronApp.setAppUserModelId('com.michat.app')
+
+    // Default open or close DevTools by F12 in development
+    // and ignore CommandOrControl + R in production.
+    // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
+
+    // Initialize database
+    Logger.info('Main', 'Initializing database...')
+    initDatabase()
+    runMigrations()
+    initExtensions()
+    Logger.info('Main', 'Database initialized')
+
+    // Initialize Provider Manager
+    Logger.info('Main', 'Initializing Provider Manager...')
+    providerManager = new ProviderManager()
+    await providerManager.initialize()
+    Logger.info('Main', 'Provider Manager initialized')
+
+    // Initialize Knowledge Service
+    Logger.info('Main', 'Initializing Knowledge Service...')
+    knowledgeService = new KnowledgeService(
+      providerManager,
+      llamaService ?? undefined,
+      officeCliService
+    )
+    Logger.info('Main', 'Knowledge Service initialized')
+
+    // Initialize Session Auto Switch Service (cần knowledgeService để lưu memory)
+    Logger.info('Main', 'Initializing Session Auto Switch Service...')
+    const chatCtxSize = llamaService?.getRuntimeInfo().chatCtxSize ?? null
+    sessionAutoSwitchService = new SessionAutoSwitchService(
+      providerManager,
+      knowledgeService,
+      chatCtxSize
+    )
+    Logger.info('Main', 'Session Auto Switch Service initialized')
+
+    // Initialize Background Job Service (queue cho auto-link/decay/reindex/enrich)
+    Logger.info('Main', 'Initializing Background Job Service...')
+    const linkService = new KnowledgeLinkService(providerManager)
+    const enrichmentService = new DocumentEnrichmentService(providerManager, knowledgeService)
+    const notebookSummaryService = new NotebookSummaryService(providerManager)
+    backgroundJobService = new BackgroundJobService(
+      knowledgeService,
+      linkService,
+      enrichmentService,
+      30000,
+      60000,
+      (jobType, jobNotebookId) => {
+        // Job nền hoàn thành (vd enrich-document) → báo UI refresh tài liệu,
+        // để thẻ tóm tắt trong khung chat cập nhật ngay khi tóm tắt sẵn sàng.
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) {
+            win.webContents.send('knowledge:documents-changed', { notebookId: jobNotebookId })
+          }
+        }
+
+        // Tóm tắt từng tài liệu vừa hoàn thành → xếp hàng tổng hợp lại tóm tắt
+        // thống nhất của notebook (dedup ngăn xếp trùng).
+        if (jobType === 'enrich-document' && jobNotebookId) {
+          backgroundJobService?.enqueueSummarizeNotebook(jobNotebookId)
+        }
+      },
+      notebookSummaryService
+    )
+    backgroundJobService.start()
+    scheduleDailyLinkDecay(backgroundJobService)
+
+    // Bảo trì dữ liệu cũ (chạy nền khi app rảnh):
+    //  - bảng vector vừa phải tạo lại → embed lại toàn bộ chunk thiếu vector
+    //  - quét tài liệu index trước khi có headingPath/doc vector → index lại
+    const maintenanceNotebooks = getAllNotebooks()
+    const vectorIndexRebuilt = wasVectorIndexRebuilt()
+    for (const notebook of maintenanceNotebooks) {
+      if (vectorIndexRebuilt) {
+        backgroundJobService.enqueueRebuildVectors(notebook.id)
+      }
+      backgroundJobService.enqueueBackfill(notebook.id)
+      // Tóm tắt notebook cũ/stale → tự tổng hợp lại khi app rảnh (skip nếu tươi).
+      backgroundJobService.enqueueSummarizeNotebook(notebook.id)
+    }
+    if (maintenanceNotebooks.length > 0) {
+      Logger.info(
+        'Main',
+        `Maintenance queued for ${maintenanceNotebooks.length} notebook(s) (vectorRebuilt=${vectorIndexRebuilt})`
+      )
+    }
+    Logger.info('Main', 'Background Job Service initialized')
+
+    // Initialize Update Service
+    Logger.info('Main', 'Initializing Update Service...')
+    updateService = new UpdateService()
+    Logger.info('Main', 'Update Service initialized')
+
+    // Initialize electron-store
+    Logger.info('Main', 'Initializing electron-store...')
+    const store = await getStore()
+    Logger.info('Main', 'electron-store initialized')
+
+    // Initialize Shortcut Manager
+    Logger.info('Main', 'Initializing Shortcut Manager...')
+    shortcutManager = new ShortcutManager(store)
+    Logger.info('Main', 'Shortcut Manager initialized')
+
+    // Register all IPC Handlers
+    registerAllHandlers(
+      providerManager,
+      sessionAutoSwitchService,
+      knowledgeService,
+      updateService,
+      shortcutManager,
+      store,
+      llamaService,
+      backgroundJobService,
+      officeCliService,
+      notebookSummaryService
+    )
+
+    // IPC test (development only)
+    if (process.env.NODE_ENV === 'development') {
+      ipcMain.on('ping', () => console.log('pong'))
+    }
+
+    // Handle get platform request
+    ipcMain.handle('get-platform', () => {
+      return process.platform
+    })
+
+    // Handle get app version request
+    ipcMain.handle('get-app-version', () => {
+      return app.getVersion()
+    })
+
+    // Handle open external URL request
+    ipcMain.handle('open-external-url', async (_event, url: string) => {
+      try {
+        if (!isAllowedExternalOpenUrl(url)) {
+          throw new Error('Only public http/https URLs can be opened')
+        }
+
+        await shell.openExternal(url)
+        return { success: true }
+      } catch (error: any) {
+        Logger.error('Main', 'Failed to open external URL:', error)
+        return { success: false, error: error.message }
+      }
+    })
+
+    // Create main window
+    const mainWindow = createMainWindow()
+
+    // Start knowledge auto-sync (watcher + incremental reindex)
+    knowledgeService.startAutoSync((payload) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('knowledge:auto-synced', payload)
+      }
+
+      // File đổi ngoài app → nội dung mới làm tóm tắt cũ hết hạn (sourceHash
+      // lệch) → tự xếp hàng làm giàu lại + sinh link nền khi app rảnh.
+      if (!payload.error && payload.reason === 'file-changed' && backgroundJobService) {
+        const changedDoc = knowledgeService?.getDocument(payload.documentId)
+        if (changedDoc) {
+          backgroundJobService.enqueueEnrich(payload.documentId, changedDoc.notebookId)
+          backgroundJobService.enqueueGenerateLinks(payload.documentId, changedDoc.notebookId)
+        }
+      }
+    })
+    Logger.info('Main', 'Knowledge auto-sync started')
+
+    // Set main window for update service
+    updateService.setMainWindow(mainWindow)
+
+    // Set main window for shortcut manager and register shortcuts
+    shortcutManager.setMainWindow(mainWindow)
+    shortcutManager.registerShortcuts()
+    Logger.info('Main', 'Shortcuts registered')
+
+    app.on('activate', function () {
+      // On macOS it's common to re-create a window in the app when the
+      // dock icon is clicked and there are no other windows open.
+      if (BrowserWindow.getAllWindows().length === 0) {
+        const mainWindow = createMainWindow()
+        // Re-register shortcuts for the new window
+        if (shortcutManager) {
+          shortcutManager.setMainWindow(mainWindow)
+          shortcutManager.registerShortcuts()
+          Logger.info('Main', 'Shortcuts re-registered after window re-creation')
+        }
+      }
+    })
   } catch (error) {
     Logger.error('Main', 'Fatal error during app initialization:', error)
     dialog.showErrorBox(
@@ -187,16 +336,15 @@ app.on('window-all-closed', () => {
   if (llamaService) {
     llamaService.stop()
   }
-  officeProviderBridgeService?.stop()
 })
 
 // First line of defense: before-quit event (user initiated quit)
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   if (isQuitting) return
 
-  Logger.info('Main', 'before-quit event triggered')
-
+  event.preventDefault()
   isQuitting = true
+  Logger.info('Main', 'before-quit: graceful shutdown started')
 
   // Unregister shortcuts
   if (shortcutManager) {
@@ -204,13 +352,28 @@ app.on('before-quit', () => {
     Logger.info('Main', 'Shortcuts unregistered')
   }
 
-  if (llamaService) {
-    llamaService.stop()
-  }
-  officeProviderBridgeService?.stop()
+  knowledgeService?.stopAutoSync()
+  backgroundJobService?.stop()
 
-  Logger.info('Main', 'Closing database connection...')
-  closeDatabase()
+  void (async () => {
+    try {
+      // Shutdown barrier: chờ llama.cpp, officecli và job nền dừng hẳn
+      // TRƯỚC KHI đóng DB — tránh ghi dở dang hoặc truy vấn vào DB đã đóng.
+      // Có trần tổng 10 giây để một thành phần treo không chặn app thoát.
+      const tasks: Promise<unknown>[] = []
+      if (llamaService) tasks.push(llamaService.stop())
+      tasks.push(officeCliService.closeAll())
+      if (backgroundJobService) tasks.push(backgroundJobService.shutdown())
+      const cap = new Promise<void>((resolve) => setTimeout(resolve, 10000))
+      await Promise.race([Promise.allSettled(tasks), cap])
+      Logger.info('Main', 'Shutdown tasks settled, closing database...')
+    } catch (error) {
+      Logger.error('Main', 'Error during graceful shutdown:', error)
+    } finally {
+      closeDatabase()
+      app.quit()
+    }
+  })()
 })
 
 // Second line of defense: will-quit event (backup)
@@ -227,7 +390,6 @@ const handleShutdown = (signal: string) => {
 
   if (!isQuitting) {
     isQuitting = true
-    officeProviderBridgeService?.stop()
     closeDatabase()
   }
 

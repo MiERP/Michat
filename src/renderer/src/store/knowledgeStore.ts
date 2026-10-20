@@ -24,6 +24,8 @@ interface KnowledgeStore {
   isIndexing: boolean
   indexProgress: IndexProgress | null
   error: string | null
+  /** Tài liệu đang được người dùng xem (chọn ở cột trái) — hiển thị tóm tắt trong khung chat. */
+  inspectedDocumentId: string | null
 
   // Actions
   setDocuments: (docs: KnowledgeDocument[]) => void
@@ -34,6 +36,7 @@ interface KnowledgeStore {
   setIsIndexing: (value: boolean) => void
   setIndexProgress: (progress: IndexProgress | null) => void
   setError: (error: string | null) => void
+  setInspectedDocumentId: (documentId: string | null) => void
   clearSearchResults: () => void
 
   // 异步操作
@@ -82,6 +85,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   isIndexing: false,
   indexProgress: null,
   error: null,
+  inspectedDocumentId: null,
 
   // Setters
   setDocuments: (documents) => set({ documents }),
@@ -92,6 +96,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   setIsIndexing: (isIndexing) => set({ isIndexing }),
   setIndexProgress: (indexProgress) => set({ indexProgress }),
   setError: (error) => set({ error }),
+  setInspectedDocumentId: (inspectedDocumentId) => set({ inspectedDocumentId }),
   clearSearchResults: () => set({ searchResults: [] }),
 
   // 加载文档列表

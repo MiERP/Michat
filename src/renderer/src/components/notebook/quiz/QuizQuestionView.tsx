@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Lightbulb, Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useQuizStore } from '../../../store/quizStore'
@@ -6,6 +6,12 @@ import type { QuizQuestion } from '../../../../../shared/types/quiz'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
 import { cn } from '../../../lib/utils'
+
+interface QuestionSource {
+  id: string
+  content: string
+  documentTitle: string
+}
 
 export default function QuizQuestionView() {
   const { t } = useTranslation('quiz')
@@ -23,6 +29,38 @@ export default function QuizQuestionView() {
   } = useQuizStore()
 
   const [showExplanation, setShowExplanation] = useState(false)
+  const [sourcesByQuestion, setSourcesByQuestion] = useState<Record<string, QuestionSource[]>>({})
+  const fetchedRef = useRef<Set<string>>(new Set())
+
+  const shouldShowExplanation = isReviewMode || showExplanation
+
+  // Khi hiện lời giải → tải nguồn chunk của câu hỏi (chunkMapping) để hiển thị.
+  // Lưu theo từng câu hỏi để không hiển thị nhầm nguồn của câu trước đó.
+  useEffect(() => {
+    if (!currentQuiz || !shouldShowExplanation) return
+    const quizQuestions = currentQuiz.questionsData as any as QuizQuestion[]
+    const activeQuestion = quizQuestions[currentQuestionIndex]
+    if (!activeQuestion || fetchedRef.current.has(activeQuestion.id)) return
+
+    fetchedRef.current.add(activeQuestion.id)
+    let cancelled = false
+    void window.api.quiz
+      .getQuestionChunks(currentQuiz.id, activeQuestion.id)
+      .then((chunks) => {
+        if (!cancelled) {
+          setSourcesByQuestion((prev) => ({ ...prev, [activeQuestion.id]: chunks }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSourcesByQuestion((prev) => ({ ...prev, [activeQuestion.id]: [] }))
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentQuiz, currentQuestionIndex, shouldShowExplanation])
 
   if (!currentQuiz) return null
 
@@ -31,9 +69,7 @@ export default function QuizQuestionView() {
   const totalQuestions = getTotalQuestions()
   const selectedAnswer = answers[currentQuestion.id]
   const showHint = showHints[currentQuestion.id] || false
-
-  // 查看详情模式下，始终显示解析
-  const shouldShowExplanation = isReviewMode || showExplanation
+  const questionSources = sourcesByQuestion[currentQuestion.id] ?? []
 
   const handleSelectAnswer = (answerIndex: number) => {
     // 查看详情模式下不允许修改答案
@@ -189,6 +225,21 @@ export default function QuizQuestionView() {
                     {currentQuestion.explanation}
                   </p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Nguồn tri thức của câu hỏi (từ chunkMapping) */}
+          {shouldShowExplanation && questionSources.length > 0 && (
+            <div className="rounded-lg border border-border bg-muted/40 p-4">
+              <div className="text-xs font-medium text-muted-foreground mb-2">Nguồn tri thức:</div>
+              <div className="flex flex-col gap-2">
+                {questionSources.map((source) => (
+                  <div key={source.id} className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{source.documentTitle}</span>
+                    <p className="mt-0.5 line-clamp-3">{source.content.slice(0, 300)}</p>
+                  </div>
+                ))}
               </div>
             </div>
           )}

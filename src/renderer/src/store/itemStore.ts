@@ -1,11 +1,10 @@
 import { create } from 'zustand'
 import type { Note } from '../../../shared/types'
-import type { MindMap } from '../../../main/db/schema'
 
 /**
  * Item 类型
  */
-export type ItemType = 'note' | 'mindmap' | 'quiz' | 'ppt' | 'audio' | 'video'
+export type ItemType = 'note' | 'quiz' | 'ppt' | 'audio' | 'video'
 
 /**
  * Item 详情
@@ -18,7 +17,7 @@ export interface ItemDetail {
   order: number
   createdAt: Date
   updatedAt: Date
-  resource: Note | MindMap | any // 实际的资源数据
+  resource: Note | any // 实际的资源数据
 }
 
 /**

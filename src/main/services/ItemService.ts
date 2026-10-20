@@ -1,18 +1,18 @@
 import { getDatabase } from '../db'
-import { items, notes, mindMaps, quizzes, type Item, type NewItem } from '../db/schema'
+import { items, notes, quizzes, type Item, type NewItem } from '../db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 
 /**
  * Item 类型枚举
  */
-export type ItemType = 'note' | 'mindmap' | 'quiz' | 'ppt' | 'audio' | 'video'
+export type ItemType = 'note' | 'quiz' | 'ppt' | 'audio' | 'video'
 
 /**
  * Item 详情（包含关联的资源数据）
  */
 export interface ItemDetail extends Item {
-  resource: any // 根据 type 返回对应的资源数据（Note | MindMap | ...）
+  resource: any // 根据 type 返回对应的资源数据（Note | Quiz | ...）
 }
 
 /**
@@ -33,20 +33,20 @@ export class ItemService {
       .orderBy(items.order)
 
     // Batch load resources by type
-    const noteIds = itemsList.filter(i => i.type === 'note').map(i => i.resourceId)
-    const mindMapIds = itemsList.filter(i => i.type === 'mindmap').map(i => i.resourceId)
-    const quizIds = itemsList.filter(i => i.type === 'quiz').map(i => i.resourceId)
+    const noteIds = itemsList.filter((i) => i.type === 'note').map((i) => i.resourceId)
+    const quizIds = itemsList.filter((i) => i.type === 'quiz').map((i) => i.resourceId)
 
-    const [noteRows, mindMapRows, quizRows] = await Promise.all([
-      noteIds.length > 0 ? db.select().from(notes).where(inArray(notes.id, noteIds)) : Promise.resolve([]),
-      mindMapIds.length > 0 ? db.select().from(mindMaps).where(inArray(mindMaps.id, mindMapIds)) : Promise.resolve([]),
-      quizIds.length > 0 ? db.select().from(quizzes).where(inArray(quizzes.id, quizIds)) : Promise.resolve([])
+    const [noteRows, quizRows] = await Promise.all([
+      noteIds.length > 0
+        ? db.select().from(notes).where(inArray(notes.id, noteIds))
+        : Promise.resolve([]),
+      quizIds.length > 0
+        ? db.select().from(quizzes).where(inArray(quizzes.id, quizIds))
+        : Promise.resolve([])
     ])
 
     const noteMap = new Map<string, any>()
     for (const r of noteRows) noteMap.set(r.id, r)
-    const mindMapMap = new Map<string, any>()
-    for (const r of mindMapRows) mindMapMap.set(r.id, r)
     const quizMap = new Map<string, any>()
     for (const r of quizRows) quizMap.set(r.id, r)
 
@@ -54,9 +54,12 @@ export class ItemService {
     for (const item of itemsList) {
       let resource: any = null
       switch (item.type) {
-        case 'note': resource = noteMap.get(item.resourceId) || null; break
-        case 'mindmap': resource = mindMapMap.get(item.resourceId) || null; break
-        case 'quiz': resource = quizMap.get(item.resourceId) || null; break
+        case 'note':
+          resource = noteMap.get(item.resourceId) || null
+          break
+        case 'quiz':
+          resource = quizMap.get(item.resourceId) || null
+          break
       }
       if (resource) {
         itemDetails.push({ ...item, resource })
@@ -148,6 +151,15 @@ export class ItemService {
   }
 
   /**
+   * 根据 ID 获取 item
+   */
+  async getItemById(itemId: string): Promise<Item | null> {
+    const db = getDatabase()
+    const result = await db.select().from(items).where(eq(items.id, itemId)).limit(1)
+    return result[0] || null
+  }
+
+  /**
    * 删除关联的资源和 item
    */
   async deleteItemWithResource(itemId: string): Promise<void> {
@@ -164,9 +176,6 @@ export class ItemService {
     switch (type) {
       case 'note':
         await db.delete(notes).where(eq(notes.id, resourceId))
-        break
-      case 'mindmap':
-        await db.delete(mindMaps).where(eq(mindMaps.id, resourceId))
         break
       case 'quiz':
         await db.delete(quizzes).where(eq(quizzes.id, resourceId))

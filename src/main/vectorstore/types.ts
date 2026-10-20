@@ -32,6 +32,7 @@ export interface QueryOptions {
   threshold?: number // 相似度阈值（0-1），低于此值的结果不返回
   filter?: {
     chunkIds?: string[] // 限制在指定 chunk 中搜索
+    documentIds?: string[] // 限制在指定 document 中搜索（lọc ngay trong KNN）
   }
 }
 

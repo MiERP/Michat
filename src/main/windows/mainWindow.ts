@@ -21,7 +21,7 @@ function applyCSP(): void {
     // Allow inline styles (required for Tailwind CSS v4 runtime)
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     // Allow Google Fonts
-    "font-src 'self' https://fonts.gstatic.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
     // Allow images from self and data URIs
     "img-src 'self' data: blob:",
     // Allow media (e.g. audio/video attachments)

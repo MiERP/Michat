@@ -3,6 +3,7 @@
  * 使用 @mozilla/readability 智能提取网页正文
  */
 
+import { readFile } from 'fs/promises'
 import { JSDOM } from 'jsdom'
 import { Readability } from '@mozilla/readability'
 import * as cheerio from 'cheerio'
@@ -36,12 +37,9 @@ export class WebLoader implements IDocumentLoader {
     )
   }
 
-  async loadFromPath(): Promise<DocumentLoadResult> {
-    // Web 内容通常不从文件路径加载，而是从 URL
-    // 这里提供一个占位实现
-    throw new Error(
-      'WebLoader.loadFromPath is not supported. Use loadFromBuffer with HTML content.'
-    )
+  async loadFromPath(filePath: string, options?: LoadOptions): Promise<DocumentLoadResult> {
+    const buffer = await readFile(filePath)
+    return this.loadFromBuffer(buffer, options)
   }
 
   async loadFromBuffer(buffer: Buffer, options?: LoadOptions): Promise<DocumentLoadResult> {

@@ -10,7 +10,8 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createDeepSeek } from '@ai-sdk/deepseek'
 import { createQwen } from 'qwen-ai-provider'
 import { createOllama } from 'ollama-ai-provider-v2'
-import { streamText, embed, embedMany } from 'ai'
+import { streamText, embed, embedMany, stepCountIs } from 'ai'
+import { createOfficeAgentTools } from '../../services/officecli/agentTools'
 import type { BaseProvider, LLMProviderConfig } from '../capabilities/BaseProvider'
 import type { ChatCapability } from '../capabilities/ChatCapability'
 import type { EmbeddingCapability } from '../capabilities/EmbeddingCapability'
@@ -20,7 +21,20 @@ import type { ProviderDescriptor } from '../registry/ProviderDescriptor'
 import Logger from '../../../shared/utils/logger'
 import { assertLoopbackHttpUrl } from '../../security/guards'
 
-const CONTROL_CHARS_PATTERN = new RegExp('[' + String.fromCharCode(0) + '-' + String.fromCharCode(8) + String.fromCharCode(11) + String.fromCharCode(12) + String.fromCharCode(14) + '-' + String.fromCharCode(31) + String.fromCharCode(127) + ']', 'g')
+const CONTROL_CHARS_PATTERN = new RegExp(
+  '[' +
+    String.fromCharCode(0) +
+    '-' +
+    String.fromCharCode(8) +
+    String.fromCharCode(11) +
+    String.fromCharCode(12) +
+    String.fromCharCode(14) +
+    '-' +
+    String.fromCharCode(31) +
+    String.fromCharCode(127) +
+    ']',
+  'g'
+)
 
 /**
  * ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â°ÃƒÂ¢Ã¢â€šÂ¬  APIMessage ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â½Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Âº AI SDK ÃƒÆ’Ã‚Â§Ãƒâ€¦Ã‚Â¡ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ CoreMessage ÃƒÆ’Ã‚Â¦Ãƒâ€š Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚Â
@@ -33,10 +47,7 @@ function convertToCoreMessages(messages: APIMessage[]) {
 }
 
 function sanitizeMessageContent(content: string): string {
-  return content
-    .replace(CONTROL_CHARS_PATTERN, ' ')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
+  return content.replace(CONTROL_CHARS_PATTERN, ' ').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
 /**
@@ -243,12 +254,17 @@ export class AISDKProvider implements BaseProvider {
         const model = this.aiProvider!(modelId) as any
 
         // ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â°Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ AI SDK streamText
+        // Office document tools are attached when the bundled engine is ready:
+        // the local model can then read/edit Word, Excel and PowerPoint files
+        // and keep going for a bounded number of steps.
+        const agentTools = createOfficeAgentTools()
         const result = streamText({
           model,
           messages: coreMessages,
           temperature: this.config.temperature,
           maxOutputTokens: this.config.maxTokens,
-          abortSignal: abortController.signal
+          abortSignal: abortController.signal,
+          ...(agentTools ? { tools: agentTools, stopWhen: stepCountIs(8) } : {})
         })
 
         // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂºÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
@@ -310,6 +326,18 @@ export class AISDKProvider implements BaseProvider {
                 }
               })
               break
+
+            case 'tool-call': {
+              const toolName = (part as { toolName?: string }).toolName
+              Logger.info('AISDKProvider', `Tool call: ${toolName ?? 'unknown'}`)
+              break
+            }
+
+            case 'tool-result': {
+              const toolName = (part as { toolName?: string }).toolName
+              Logger.debug('AISDKProvider', `Tool result: ${toolName ?? 'unknown'}`)
+              break
+            }
 
             case 'text-delta':
               // ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¢Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã‚Â©ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬ ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â®Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â»Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚Â­ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¡Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°
