@@ -418,6 +418,15 @@ export class ChunkingService {
     options: Required<ChunkOptions>
   ): ChunkResult[] {
     const lines = tableContent.split('\n').filter((line) => line.trim().length > 0)
+    const marker = lines[0] || ''
+    const markerValue = (name: string): string | undefined =>
+      marker.match(new RegExp(`${name}=([^;\\]]+)`))?.[1]?.trim()
+    const sheetName = markerValue('sheet')
+    const firstDataRow = Number(markerValue('firstDataRow') || '1')
+    const tableMetadata = {
+      type: 'table',
+      ...(sheetName ? { sheetName } : {})
+    }
     if (lines.length <= 4) {
       const normalized = lines.join('\n')
       return [
@@ -427,7 +436,7 @@ export class ChunkingService {
           startOffset,
           endOffset: startOffset + tableContent.length,
           tokenCount: this.estimateTokens(normalized),
-          metadata: { type: 'table' }
+          metadata: tableMetadata
         }
       ]
     }
@@ -464,7 +473,10 @@ export class ChunkingService {
         tokenCount: this.estimateTokens(content),
         metadata: {
           type: 'table',
-          rowRange: [rowStartIndex + 1, rowEndExclusive]
+          rowRange: [firstDataRow + rowStartIndex, firstDataRow + rowEndExclusive - 1],
+          rowStart: firstDataRow + rowStartIndex,
+          rowEnd: firstDataRow + rowEndExclusive - 1,
+          ...(sheetName ? { sheetName } : {})
         }
       })
 
@@ -499,7 +511,7 @@ export class ChunkingService {
             startOffset,
             endOffset: startOffset + tableContent.length,
             tokenCount: this.estimateTokens(tableContent),
-            metadata: { type: 'table' }
+            metadata: tableMetadata
           }
         ]
   }

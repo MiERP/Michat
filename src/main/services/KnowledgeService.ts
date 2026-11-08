@@ -11,7 +11,7 @@ import { createHash } from 'crypto'
 import { app } from 'electron'
 import { join, basename, extname } from 'path'
 import { mkdir, copyFile, unlink, stat, readdir, readFile } from 'fs/promises'
-import { watch, type FSWatcher } from 'fs'
+import { existsSync, watch, type FSWatcher } from 'fs'
 import { getDatabase, executeCheckpoint, getSqlite } from '../db'
 import {
   documents,
@@ -35,7 +35,6 @@ import { and, eq, desc, inArray, isNull, sql } from 'drizzle-orm'
 import { EmbeddingService } from './EmbeddingService'
 import { ChunkingService, type ChunkOptions, type ChunkStructureContext } from './ChunkingService'
 import { FileParserService } from './FileParserService'
-import type { OfficeCliService } from './officecli/OfficeCliService'
 import type { SectionInfo } from './loaders/types'
 import {
   flattenSectionsWithPath,
@@ -44,6 +43,7 @@ import {
   type CompactSection
 } from './loaders/sections'
 import { MarkdownNormalizer } from './MarkdownNormalizer'
+import { detectQueryMetadata, normalizeMetadataValue } from '../utils/queryMetadata'
 import {
   extractDocumentMetadata,
   inspectorFromMetadata,
@@ -59,6 +59,15 @@ import { ProviderManager } from '../providers/ProviderManager'
 import { LlamaService } from './LlamaService'
 import Logger from '../../shared/utils/logger'
 import { isPathInsideDirectory } from '../security/guards'
+import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../shared/types/knowledge'
+import type { MetadataAwareSearchResult, RetrievalTrace } from '../../shared/types/retrieval'
+import {
+  createRetrievalPlan,
+  mergePreferredAndBroadResults,
+  type ExplicitRetrievalScope
+} from './RetrievalPlanner'
+import { DocumentMetadataIndexService } from './DocumentMetadataIndexService'
+import { WebFetchService } from './WebFetchService'
 
 /** Giới hạn số chunk mở rộng theo MỤC (small-to-big) để context không phình. */
 const MAX_SECTION_CONTEXT_CHUNKS = 12
@@ -77,6 +86,12 @@ const SECTION_INDEX_MAX_CHARS = 1200
 
 /** Nhận diện nội dung có heading markdown (điều kiện để backfill cấu trúc mục). */
 const HEADING_MARKER_REGEX = /^#{1,6}\s+\S/m
+
+interface RetrievalMetadataProjection {
+  keywords: string[]
+  entities: string[]
+  tags: string[]
+}
 
 /**
  * Dựng biểu thức MATCH cho FTS5.
@@ -143,6 +158,11 @@ export interface SearchOptions {
     docTopK?: number
     sectionTopK?: number
     threshold?: number
+  }
+  metadataAware?: {
+    enabled?: boolean
+    debug?: boolean
+    minPreferredResults?: number
   }
   rerank?: {
     enabled?: boolean
@@ -216,6 +236,8 @@ export class KnowledgeService {
   private fileParserService: FileParserService
   private rerankService: RerankService
   private markdownNormalizer: MarkdownNormalizer
+  private metadataIndexService = new DocumentMetadataIndexService()
+  private webFetchService = new WebFetchService()
   private knowledgeFilesDir: string
   private llamaService?: LlamaService
   private fileWatchers = new Map<string, FSWatcher>()
@@ -223,14 +245,10 @@ export class KnowledgeService {
   private autoSyncCallback?: (payload: AutoSyncPayload) => void
   private autoSyncRunning = false
 
-  constructor(
-    providerManager: ProviderManager,
-    llamaService?: LlamaService,
-    officeCliService?: OfficeCliService
-  ) {
+  constructor(providerManager: ProviderManager, llamaService?: LlamaService) {
     this.embeddingService = new EmbeddingService(providerManager)
     this.chunkingService = new ChunkingService()
-    this.fileParserService = new FileParserService(officeCliService)
+    this.fileParserService = new FileParserService()
     this.rerankService = new RerankService()
     this.markdownNormalizer = new MarkdownNormalizer()
     this.llamaService = llamaService
@@ -249,6 +267,30 @@ export class KnowledgeService {
     if (!ready) {
       throw new Error(
         'Embedding server is unavailable. Please import/select an embedding model (e.g. bge/e5) and try again.'
+      )
+    }
+  }
+
+  /**
+   * Số chiều embedding thực tế của model đang cấu hình.
+   * Dùng cho UI kiểm tra trước khi giữ lựa chọn model mới.
+   */
+  async probeEmbeddingDimensions(): Promise<number> {
+    await this.ensureEmbeddingReady()
+    return this.embeddingService.probeDimensions()
+  }
+
+  /**
+   * Chặn sớm khi model embedding không khớp schema vector (1024 chiều), trước
+   * khi ghi chunk/embedding — tránh để lại tài liệu `failed` giữa chừng.
+   */
+  private async assertEmbeddingDimensions(): Promise<void> {
+    const dimensions = await this.probeEmbeddingDimensions()
+    if (dimensions !== REQUIRED_EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `Embedding model returns ${dimensions}-dimensional vectors, but MiChat requires ` +
+          `${REQUIRED_EMBEDDING_DIMENSIONS}. Choose a ${REQUIRED_EMBEDDING_DIMENSIONS}-dimension ` +
+          'model (for example bge-m3).'
       )
     }
   }
@@ -352,6 +394,109 @@ export class KnowledgeService {
     return { sections, pages }
   }
 
+  /** Metadata pháp lý đã trích, chỉ giữ các trường có giá trị. */
+  private extractLegalMetadata(
+    metadata: Record<string, unknown> | null | undefined
+  ): Record<string, string> | undefined {
+    const source = metadata?.documentMetadata
+    if (!source || typeof source !== 'object') return undefined
+
+    const result: Record<string, string> = {}
+    for (const key of [
+      'documentNumber',
+      'documentType',
+      'issuer',
+      'issuedAt',
+      'documentTitle',
+      'legalBases'
+    ]) {
+      const value = (source as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value.trim()) result[key] = value.trim()
+    }
+
+    return Object.keys(result).length > 0 ? result : undefined
+  }
+
+  private extractRetrievalMetadata(
+    metadata: Record<string, unknown> | null | undefined
+  ): RetrievalMetadataProjection {
+    const enrichment =
+      metadata?.enrichment &&
+      typeof metadata.enrichment === 'object' &&
+      !Array.isArray(metadata.enrichment)
+        ? (metadata.enrichment as Record<string, unknown>)
+        : {}
+    const readList = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? [
+            ...new Set(
+              value
+                .filter((item): item is string => typeof item === 'string')
+                .map((item) => item.trim())
+                .filter(Boolean)
+            )
+          ]
+        : []
+
+    return {
+      keywords: readList(enrichment.keywords),
+      entities: readList(enrichment.entities),
+      tags: readList(metadata?.tags)
+    }
+  }
+
+  private readDocumentMetadataProjection(documentId: string): {
+    legalMetadata?: Record<string, string>
+    retrievalMetadata: RetrievalMetadataProjection
+  } {
+    const row = getDatabase()
+      .select({ metadata: documents.metadata })
+      .from(documents)
+      .where(eq(documents.id, documentId))
+      .get()
+    const metadata = row?.metadata as Record<string, unknown> | null | undefined
+    return {
+      legalMetadata: this.extractLegalMetadata(metadata),
+      retrievalMetadata: this.extractRetrievalMetadata(metadata)
+    }
+  }
+
+  private withRetrievalMetadata(
+    metadata: Record<string, unknown> | null | undefined,
+    projection: {
+      legalMetadata?: Record<string, string>
+      retrievalMetadata: RetrievalMetadataProjection
+    }
+  ): Record<string, unknown> | undefined {
+    const result = { ...(metadata || {}) }
+    if (projection.legalMetadata) result.documentMetadata = projection.legalMetadata
+    else delete result.documentMetadata
+
+    const hasRetrievalMetadata = Object.values(projection.retrievalMetadata).some(
+      (values) => values.length > 0
+    )
+    if (hasRetrievalMetadata) result.retrievalMetadata = projection.retrievalMetadata
+    else delete result.retrievalMetadata
+
+    return Object.keys(result).length > 0 ? result : undefined
+  }
+
+  private legalMetadataIndexText(legalMetadata: Record<string, string> | undefined): string {
+    if (!legalMetadata) return ''
+    return [
+      legalMetadata.documentNumber,
+      legalMetadata.documentType,
+      legalMetadata.issuer,
+      legalMetadata.issuedAt
+    ]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .join(' · ')
+  }
+
+  private retrievalMetadataIndexText(metadata: RetrievalMetadataProjection): string {
+    return [...metadata.keywords, ...metadata.entities, ...metadata.tags].join(' · ')
+  }
+
   /**
    * Text dùng để embed ở cấp TÀI LIỆU: ưu tiên summary (enrichment), nếu chưa có
    * thì dùng tiêu đề + phần đầu nội dung — đủ để phân biệt chủ đề tài liệu.
@@ -360,11 +505,15 @@ export class KnowledgeService {
     const metadata = (doc.metadata as Record<string, unknown> | null) || {}
     const enrichment = metadata.enrichment as { summary?: unknown } | undefined
     const summary = typeof enrichment?.summary === 'string' ? enrichment.summary.trim() : ''
+    const legalText = this.legalMetadataIndexText(this.extractLegalMetadata(metadata))
+    const retrievalText = this.retrievalMetadataIndexText(this.extractRetrievalMetadata(metadata))
 
     const heading = (doc.title || '').trim()
     const body = (doc.content || '').trim().slice(0, DOCUMENT_INDEX_MAX_CHARS)
 
-    return [heading, summary, body].filter((part) => part.length > 0).join('\n\n')
+    return [heading, legalText, retrievalText, summary, body]
+      .filter((part) => part.length > 0)
+      .join('\n\n')
   }
 
   /**
@@ -522,8 +671,20 @@ export class KnowledgeService {
     }
 
     try {
-      const texts = records.map(
-        (record) => `${record.title}\n\n${record.content.slice(0, SECTION_INDEX_MAX_CHARS)}`
+      const doc = getDatabase()
+        .select({ metadata: documents.metadata })
+        .from(documents)
+        .where(eq(documents.id, documentId))
+        .get()
+      const rootMetadata = doc?.metadata as Record<string, unknown> | null
+      const legalText = this.legalMetadataIndexText(this.extractLegalMetadata(rootMetadata))
+      const retrievalText = this.retrievalMetadataIndexText(
+        this.extractRetrievalMetadata(rootMetadata)
+      )
+      const texts = records.map((record) =>
+        [record.title, legalText, retrievalText, record.content.slice(0, SECTION_INDEX_MAX_CHARS)]
+          .filter((part) => part.length > 0)
+          .join('\n\n')
       )
       const results = await this.embeddingService.embedBatch(texts, { dimensions: 1024 })
 
@@ -604,11 +765,12 @@ export class KnowledgeService {
   async rebuildMissingVectors(
     notebookId: string,
     limit = 200
-  ): Promise<{ rebuilt: number; remaining: number }> {
+  ): Promise<{ rebuilt: number; remaining: number; ftsRebuilt: number }> {
     await this.ensureEmbeddingReady()
 
     const db = getDatabase()
     const sqlite = getSqlite()
+    const ftsRebuilt = this.backfillMissingFtsRows(notebookId)
 
     const existingChunkIds = new Set<string>(
       sqlite
@@ -630,7 +792,7 @@ export class KnowledgeService {
       .filter((row) => !existingChunkIds.has(row.id))
       .map((row) => row.id)
 
-    if (missingIds.length === 0) return { rebuilt: 0, remaining: 0 }
+    if (missingIds.length === 0) return { rebuilt: 0, remaining: 0, ftsRebuilt }
 
     const batchIds = missingIds.slice(0, Math.max(limit, 1))
     const batchRows = db
@@ -700,7 +862,7 @@ export class KnowledgeService {
       `Rebuilt ${vectorItems.length} chunk vectors for notebook ${notebookId} (remaining: ${remaining})`
     )
 
-    return { rebuilt: vectorItems.length, remaining }
+    return { rebuilt: vectorItems.length, remaining, ftsRebuilt }
   }
 
   /**
@@ -776,10 +938,18 @@ export class KnowledgeService {
    */
   private buildFtsIndexText(content: string, metadata?: Record<string, unknown> | null): string {
     const headingPath = metadata?.headingPath
-    if (!Array.isArray(headingPath) || headingPath.length === 0) return content
+    const path =
+      Array.isArray(headingPath) && headingPath.length > 0
+        ? headingPath.filter((part) => typeof part === 'string' && part.trim()).join(' > ')
+        : ''
 
-    const path = headingPath.filter((part) => typeof part === 'string' && part.trim()).join(' > ')
-    return path ? `${path}\n${content}` : content
+    const legal = metadata?.documentMetadata as Record<string, string> | undefined
+    const legalText = this.legalMetadataIndexText(legal)
+    const retrieval = metadata?.retrievalMetadata as RetrievalMetadataProjection | undefined
+    const retrievalText = retrieval ? this.retrievalMetadataIndexText(retrieval) : ''
+    const header = [path, legalText, retrievalText].filter((part) => part.length > 0).join(' > ')
+
+    return header ? `${header}\n${content}` : content
   }
 
   private getPageNumberForChunk(
@@ -882,6 +1052,91 @@ export class KnowledgeService {
     if (typeof pageStart === 'number' && Number.isFinite(pageStart)) return pageStart
 
     return this.getPageNumberForChunk(documentMetadata, startOffset, endOffset)
+  }
+
+  /**
+   * Tự suy filter metadata từ câu hỏi (số hiệu, loại văn bản, cơ quan) và đối
+   * chiếu với metadata thật đã lưu. Chỉ trả filter khi kết quả không mơ hồ —
+   * nếu không, retrieval chạy bình thường để tránh lọc rỗng.
+   */
+  detectMetadataFilter(notebookId: string, query: string): Record<string, string> | undefined {
+    const signals = detectQueryMetadata(query)
+    if (
+      !signals.documentNumber &&
+      signals.documentTypes.length === 0 &&
+      signals.issuers.length === 0
+    ) {
+      return undefined
+    }
+
+    const rows = getDatabase()
+      .select({ metadata: documents.metadata })
+      .from(documents)
+      .where(and(eq(documents.notebookId, notebookId), eq(documents.status, 'indexed')))
+      .all()
+    const metadataList = rows
+      .map((row) => this.extractLegalMetadata(row.metadata as Record<string, unknown> | null))
+      .filter((value): value is Record<string, string> => !!value)
+
+    if (metadataList.length === 0) return undefined
+
+    const uniqueValues = (values: string[]): string[] => Array.from(new Set(values))
+
+    if (signals.documentNumber) {
+      const target = normalizeMetadataValue(signals.documentNumber)
+      const targetHasYear = /^\d{1,4}\d{4}[A-Z]/.test(target)
+      const values = uniqueValues(
+        metadataList
+          .filter((metadata) => {
+            if (!metadata.documentNumber) return false
+            const stored = normalizeMetadataValue(metadata.documentNumber)
+            if (targetHasYear) return stored === target || stored.includes(target)
+            // Người dùng chỉ nói "15/NQ-CP": so với bản đã bỏ năm của số hiệu lưu.
+            return stored.replace(/^(\d{1,4})\d{4}(?=[A-Z])/, '$1') === target
+          })
+          .map((metadata) => metadata.documentNumber)
+      )
+      return values.length === 1 ? { documentNumber: values[0] } : undefined
+    }
+
+    const filters: Record<string, string> = {}
+
+    if (signals.documentTypes.length === 1) {
+      const target = normalizeMetadataValue(signals.documentTypes[0])
+      const values = uniqueValues(
+        metadataList
+          .filter(
+            (metadata) =>
+              metadata.documentType &&
+              normalizeMetadataValue(metadata.documentType).includes(target)
+          )
+          .map((metadata) => metadata.documentType)
+      )
+      if (values.length === 1) filters.documentType = values[0]
+    }
+
+    if (signals.issuers.length === 1) {
+      const target = normalizeMetadataValue(signals.issuers[0])
+      const values = uniqueValues(
+        metadataList
+          .filter(
+            (metadata) =>
+              metadata.issuer && normalizeMetadataValue(metadata.issuer).includes(target)
+          )
+          .map((metadata) => metadata.issuer)
+      )
+      if (values.length === 1) filters.issuer = values[0]
+    }
+
+    if (Object.keys(filters).length === 0) return undefined
+
+    const matches = metadataList.filter((metadata) =>
+      Object.entries(filters).every(([key, value]) =>
+        normalizeMetadataValue(metadata[key] || '').includes(normalizeMetadataValue(value))
+      )
+    )
+
+    return matches.length > 0 ? filters : undefined
   }
 
   private resolveFilteredDocumentIds(
@@ -1023,12 +1278,15 @@ export class KnowledgeService {
   /**
    * Số tài liệu đã index xong trong sổ tay (để kiểm tra độ phủ của doc index).
    */
-  private countIndexedDocuments(notebookId: string): number {
+  private countIndexedDocuments(notebookId: string, documentIds?: string[]): number {
     const db = getDatabase()
+    if (documentIds && documentIds.length === 0) return 0
+    const conditions = [eq(documents.notebookId, notebookId), eq(documents.status, 'indexed')]
+    if (documentIds) conditions.push(inArray(documents.id, documentIds))
     const row = db
       .select({ count: sql<number>`count(*)` })
       .from(documents)
-      .where(and(eq(documents.notebookId, notebookId), eq(documents.status, 'indexed')))
+      .where(and(...conditions))
       .get()
 
     return row?.count ?? 0
@@ -1037,12 +1295,15 @@ export class KnowledgeService {
   /**
    * Số bản ghi mục của notebook (để kiểm tra độ phủ của section index).
    */
-  private countSections(notebookId: string): number {
+  private countSections(notebookId: string, documentIds?: string[]): number {
     const db = getDatabase()
+    if (documentIds && documentIds.length === 0) return 0
+    const conditions = [eq(sections.notebookId, notebookId)]
+    if (documentIds) conditions.push(inArray(sections.documentId, documentIds))
     const row = db
       .select({ count: sql<number>`count(*)` })
       .from(sections)
-      .where(eq(sections.notebookId, notebookId))
+      .where(and(...conditions))
       .get()
 
     return row?.count ?? 0
@@ -1167,6 +1428,16 @@ export class KnowledgeService {
     // Vector cấp tài liệu phải bị xóa cùng, kể cả khi không còn chunk nào.
     this.removeDocumentVectors([documentId])
 
+    // Sections are written before chunk embeddings. A failure in the embedding
+    // phase must not leave orphan section rows behind: they would make the
+    // section-vector coverage check fail for every later search in the notebook.
+    try {
+      sectionVectorStore.deleteByDocumentIds([documentId])
+    } catch (error) {
+      Logger.warn('KnowledgeService', 'Failed to remove section vectors during cleanup:', error)
+    }
+    db.delete(sections).where(eq(sections.documentId, documentId)).run()
+
     if (docChunks.length === 0) return
 
     const chunkIds = docChunks.map((chunk) => chunk.id)
@@ -1175,6 +1446,242 @@ export class KnowledgeService {
     this.deleteFtsChunkIds(chunkIds)
     db.delete(embeddings).where(inArray(embeddings.chunkId, chunkIds)).run()
     db.delete(chunks).where(eq(chunks.documentId, documentId)).run()
+  }
+
+  /**
+   * Repairs durable indexes after an unexpected process stop. A document left
+   * in `processing` cannot be trusted: its relational rows, FTS rows and vec0
+   * rows may represent different partial writes. Remove those derived rows,
+   * preserve the source record for retry, and rebuild any missing FTS rows for
+   * otherwise indexed documents.
+   */
+  async reconcileNotebookIndexes(
+    notebookId: string
+  ): Promise<{ interruptedDocuments: number; ftsRebuilt: number }> {
+    const db = getDatabase()
+    const interrupted = db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(and(eq(documents.notebookId, notebookId), eq(documents.status, 'processing')))
+      .all()
+
+    for (const document of interrupted) {
+      await this.cleanupDocumentIndex(notebookId, document.id)
+      db.update(documents)
+        .set({
+          status: 'failed',
+          errorMessage: 'Indexing interrupted before completion. Retry the document to rebuild it.',
+          chunkCount: 0,
+          updatedAt: new Date()
+        })
+        .where(eq(documents.id, document.id))
+        .run()
+    }
+
+    const ftsRebuilt = this.backfillMissingFtsRows(notebookId)
+    if (interrupted.length > 0 || ftsRebuilt > 0) {
+      Logger.warn(
+        'KnowledgeService',
+        `Reconciled notebook ${notebookId}: interrupted=${interrupted.length}, fts=${ftsRebuilt}`
+      )
+    }
+    return { interruptedDocuments: interrupted.length, ftsRebuilt }
+  }
+
+  /**
+   * Bổ sung metadata pháp lý đã trích vào chunk.metadata + FTS cho tài liệu
+   * được index trước khi có metadata-aware retrieval. Chạy nền một lần sau
+   * khởi động; không đổi nội dung/embedding của chunk nên rất nhẹ.
+   */
+  async backfillLegalMetadataToIndex(
+    notebookId?: string
+  ): Promise<{ documents: number; chunks: number }> {
+    const db = getDatabase()
+    const sqlite = getSqlite()
+    if (!sqlite) return { documents: 0, chunks: 0 }
+
+    const conditions = [eq(documents.status, 'indexed')]
+    if (notebookId) conditions.push(eq(documents.notebookId, notebookId))
+
+    const rows = db
+      .select({
+        id: documents.id,
+        notebookId: documents.notebookId,
+        metadata: documents.metadata
+      })
+      .from(documents)
+      .where(and(...conditions))
+      .all()
+
+    let documentsUpdated = 0
+    let chunksUpdated = 0
+
+    for (const doc of rows) {
+      const rootMetadata = doc.metadata as Record<string, unknown> | null
+      const projection = {
+        legalMetadata: this.extractLegalMetadata(rootMetadata),
+        retrievalMetadata: this.extractRetrievalMetadata(rootMetadata)
+      }
+      if (
+        !projection.legalMetadata &&
+        !Object.values(projection.retrievalMetadata).some((values) => values.length > 0)
+      )
+        continue
+
+      const chunkRows = db
+        .select({ id: chunks.id, content: chunks.content, metadata: chunks.metadata })
+        .from(chunks)
+        .where(eq(chunks.documentId, doc.id))
+        .all()
+
+      const missing = chunkRows.filter((row) => {
+        const metadata = row.metadata as Record<string, unknown> | null
+        return !metadata?.documentMetadata && !metadata?.retrievalMetadata
+      })
+      if (missing.length === 0) continue
+
+      try {
+        const insert = sqlite.prepare(
+          'INSERT INTO fts_chunks (chunk_id, notebook_id, content) VALUES (?, ?, ?)'
+        )
+        const remove = sqlite.prepare('DELETE FROM fts_chunks WHERE chunk_id = ?')
+        const run = sqlite.transaction(() => {
+          for (const row of missing) {
+            const metadata = this.withRetrievalMetadata(
+              row.metadata as Record<string, unknown> | null,
+              projection
+            )
+            db.update(chunks).set({ metadata }).where(eq(chunks.id, row.id)).run()
+            remove.run(row.id)
+            insert.run(row.id, doc.notebookId, this.buildFtsIndexText(row.content, metadata))
+          }
+        })
+        run()
+
+        documentsUpdated++
+        chunksUpdated += missing.length
+        // Vector cấp tài liệu cũng nên chứa số hiệu/loại/cơ quan.
+        await this.updateDocumentVector(doc.id, doc.notebookId)
+      } catch (error) {
+        Logger.warn(
+          'KnowledgeService',
+          `Failed to backfill legal metadata for document ${doc.id}:`,
+          error
+        )
+      }
+    }
+
+    if (chunksUpdated > 0) {
+      Logger.info(
+        'KnowledgeService',
+        `Backfilled legal metadata into ${chunksUpdated} chunks across ${documentsUpdated} documents`
+      )
+    }
+
+    return { documents: documentsUpdated, chunks: chunksUpdated }
+  }
+
+  /**
+   * Tài liệu pháp lý bị mất metadata do parser cũ (DOCX từng mất bảng quốc
+   * hiệu/số hiệu). Chỉ trả tài liệu có file gốc để reindex lại nội dung.
+   */
+  findDocumentsNeedingLegalMetadataReindex(limit = 10): string[] {
+    const rows = getDatabase()
+      .select({
+        id: documents.id,
+        localFilePath: documents.localFilePath,
+        metadata: documents.metadata,
+        content: documents.content
+      })
+      .from(documents)
+      .where(eq(documents.status, 'indexed'))
+      .all()
+
+    const ids: string[] = []
+    for (const row of rows) {
+      if (ids.length >= limit) break
+      if (!row.localFilePath) continue
+      if (this.extractLegalMetadata(row.metadata as Record<string, unknown> | null)) continue
+
+      const raw = (row.content || '').trimStart()
+      // Dấu hiệu parser DOCX cũ thay bảng đầu văn bản bằng marker này.
+      if (!/^\[Table:\s*\d+\s+rows\]/i.test(raw)) continue
+
+      const opening = raw.slice(0, 6000)
+      const looksLegal =
+        /(?:^|\n)\s*(?:LUẬT|NGHỊ\s+ĐỊNH|THÔNG\s+TƯ|QUYẾT\s+ĐỊNH|NGHỊ\s+QUYẾT|CHỈ\s+THỊ)\b/iu.test(
+          opening
+        ) && /(?:CỘNG\s+HÒA|Quốc\s+hội|Chính\s+phủ)/iu.test(opening)
+      if (looksLegal) ids.push(row.id)
+    }
+
+    return ids
+  }
+
+  /**
+   * Dựng lại các dòng `fts_chunks` bị thiếu (bảng FTS bị xoá/tạo lại, hoặc lần
+   * insert trước thất bại giữa chừng). Không phụ thuộc vào tình trạng vector.
+   */
+  private backfillMissingFtsRows(notebookId: string): number {
+    const sqlite = getSqlite()
+    if (!sqlite) return 0
+
+    try {
+      const existing = new Set(
+        (
+          sqlite
+            .prepare('SELECT chunk_id FROM fts_chunks WHERE notebook_id = ?')
+            .all(notebookId) as Array<{ chunk_id: string }>
+        ).map((row) => row.chunk_id)
+      )
+
+      const missingRows = getDatabase()
+        .select({
+          id: chunks.id,
+          content: chunks.content,
+          metadata: chunks.metadata,
+          documentId: chunks.documentId
+        })
+        .from(chunks)
+        .where(eq(chunks.notebookId, notebookId))
+        .all()
+        .filter((row) => !existing.has(row.id))
+
+      if (missingRows.length === 0) return 0
+
+      const projectionByDocument = new Map<
+        string,
+        { legalMetadata?: Record<string, string>; retrievalMetadata: RetrievalMetadataProjection }
+      >()
+      for (const documentId of new Set(missingRows.map((row) => row.documentId))) {
+        projectionByDocument.set(documentId, this.readDocumentMetadataProjection(documentId))
+      }
+
+      const insert = sqlite.prepare(
+        'INSERT INTO fts_chunks (chunk_id, notebook_id, content) VALUES (?, ?, ?)'
+      )
+      const run = sqlite.transaction((rows: typeof missingRows) => {
+        for (const row of rows) {
+          const metadata = this.withRetrievalMetadata(
+            row.metadata as Record<string, unknown> | null,
+            projectionByDocument.get(row.documentId) ?? {
+              retrievalMetadata: { keywords: [], entities: [], tags: [] }
+            }
+          )
+          insert.run(row.id, notebookId, this.buildFtsIndexText(row.content, metadata))
+        }
+      })
+      run(missingRows)
+
+      Logger.info(
+        'KnowledgeService',
+        `Backfilled ${missingRows.length} FTS rows for notebook ${notebookId}`
+      )
+      return missingRows.length
+    } catch (error) {
+      Logger.warn('KnowledgeService', 'Failed to backfill FTS rows:', error)
+      return 0
+    }
   }
 
   /**
@@ -1192,9 +1699,11 @@ export class KnowledgeService {
     onProgress?: IndexProgressCallback
   ): Promise<void> {
     await this.ensureEmbeddingReady()
+    await this.assertEmbeddingDimensions()
     const db = getDatabase()
     const now = new Date()
     this.refreshDocumentContentMetadata(documentId, content)
+    const metadataProjection = this.readDocumentMetadataProjection(documentId)
 
     // 1. Chunk
     onProgress?.('chunking', 10)
@@ -1224,6 +1733,7 @@ export class KnowledgeService {
       const chunkId = `chunk_${randomUUID()}`
       chunkIds.push(chunkId)
       chunkContents.push(chunk.content)
+      const chunkMetadata = this.withRetrievalMetadata(chunk.metadata, metadataProjection)
 
       const newChunk: NewChunk = {
         id: chunkId,
@@ -1234,7 +1744,7 @@ export class KnowledgeService {
         chunkIndex: chunk.index,
         startOffset: chunk.startOffset,
         endOffset: chunk.endOffset,
-        metadata: chunk.metadata,
+        metadata: chunkMetadata,
         tokenCount: chunk.tokenCount,
         sectionId: sectionPlan.assign(chunk.startOffset) ?? undefined,
         createdAt: now
@@ -1246,7 +1756,7 @@ export class KnowledgeService {
       if (sqlite) {
         sqlite
           .prepare('INSERT INTO fts_chunks (chunk_id, notebook_id, content) VALUES (?, ?, ?)')
-          .run(chunkId, notebookId, this.buildFtsIndexText(chunk.content, chunk.metadata))
+          .run(chunkId, notebookId, this.buildFtsIndexText(chunk.content, chunkMetadata))
       }
     }
 
@@ -1486,6 +1996,39 @@ export class KnowledgeService {
     }
   }
 
+  /** Fetches a public web page, converts it to canonical Markdown, then sends it
+   * through the same structure/chunk/vector/FTS pipeline as uploaded files. */
+  async addDocumentFromUrl(
+    notebookId: string,
+    url: string,
+    onProgress?: IndexProgressCallback
+  ): Promise<string> {
+    onProgress?.('fetching_url', 0)
+    const fetched = await this.webFetchService.fetchUrl(url, {
+      extractMainContent: true,
+      convertToMarkdown: true
+    })
+    if (!fetched.content.trim()) throw new Error('Web page has no indexable content')
+
+    const parsedUrl = new URL(fetched.url)
+    return this.addDocument(
+      notebookId,
+      {
+        title: fetched.title?.trim() || parsedUrl.hostname,
+        type: 'url',
+        content: fetched.content,
+        sourceUri: fetched.url,
+        mimeType: 'text/markdown',
+        metadata: {
+          ...(fetched.metadata || {}),
+          sourceMimeType: fetched.mimeType,
+          ...(fetched.description ? { description: fetched.description } : {})
+        }
+      },
+      onProgress
+    )
+  }
+
   private async collectSupportedFilesRecursively(folderPath: string): Promise<string[]> {
     const entries = await readdir(folderPath, { withFileTypes: true })
     const files: string[] = []
@@ -1675,7 +2218,105 @@ export class KnowledgeService {
       .where(eq(documents.id, documentId))
       .run()
 
-    return this.getDocument(documentId)!
+    const updated = this.getDocument(documentId)!
+    this.metadataIndexService.sync(updated)
+    return updated
+  }
+
+  /**
+   * Metadata-aware orchestration. Explicit scope and a uniquely identified
+   * document are hard constraints; all other inferred metadata gets a
+   * preferred pass followed by a broad pass, preserving recall.
+   */
+  async searchMetadataAware(
+    notebookId: string,
+    query: string,
+    options: SearchOptions = {}
+  ): Promise<MetadataAwareSearchResult<SearchResult>> {
+    const startedAt = Date.now()
+    const explicitScope = options.metadataFilter
+    const detectedMetadata = detectQueryMetadata(query)
+    // A document number is the only inferred signal permitted to become a
+    // hard scope. Resolve it directly through the relational index first so a
+    // large corpus does not need to be projected merely to find one document.
+    const directDocumentIds = detectedMetadata.documentNumber
+      ? this.metadataIndexService.findDocumentIdsByNumber(
+          notebookId,
+          detectedMetadata.documentNumber
+        )
+      : []
+    const corpus = this.metadataIndexService.listForPlanning(
+      notebookId,
+      directDocumentIds.length === 1 ? directDocumentIds : undefined
+    )
+    const plan = createRetrievalPlan(
+      query,
+      corpus,
+      explicitScope as ExplicitRetrievalScope | undefined
+    )
+    const inferredHard = plan.hardConstraints.find(
+      (constraint) => constraint.source === 'query-resolver'
+    )
+    const hardScope: SearchMetadataFilter | undefined = inferredHard
+      ? { ...explicitScope, documentIds: plan.preferredDocumentIds }
+      : explicitScope
+
+    const passes: RetrievalTrace['passes'] = []
+    const run = async (
+      name: 'preferred' | 'broad',
+      metadataFilter: SearchMetadataFilter | undefined,
+      documentIds?: string[]
+    ): Promise<SearchResult[]> => {
+      const passStartedAt = Date.now()
+      const result = await this.search(notebookId, query, { ...options, metadataFilter })
+      passes.push({
+        name,
+        documentIds: documentIds?.length,
+        returned: result.length,
+        elapsedMs: Date.now() - passStartedAt
+      })
+      return result
+    }
+
+    // A unique document number is exact enough to honour as a hard scope.
+    if (inferredHard) {
+      const results = await run('preferred', hardScope, plan.preferredDocumentIds)
+      return {
+        results,
+        trace: { version: 1, plan, passes, fallbackUsed: false, returned: results.length }
+      }
+    }
+
+    const preferredIds = plan.preferredDocumentIds
+    let preferredResults: SearchResult[] = []
+    if (preferredIds.length) {
+      const explicitIds = hardScope?.documentIds
+      const ids = explicitIds ? preferredIds.filter((id) => explicitIds.includes(id)) : preferredIds
+      if (ids.length) {
+        preferredResults = await run('preferred', { ...hardScope, documentIds: ids }, ids)
+      }
+    }
+
+    // Inferred type/issuer signals are never allowed to suppress semantic
+    // evidence. Always execute the broad pass, then use the preferred pass as
+    // a bounded ranking hint within that broad candidate set.
+    const broadResults = await run('broad', hardScope)
+    const fallbackUsed = preferredIds.length > 0
+    const results = mergePreferredAndBroadResults(preferredResults, broadResults, options.topK ?? 5)
+
+    const trace: RetrievalTrace = {
+      version: 1,
+      plan,
+      passes,
+      fallbackUsed,
+      returned: results.length
+    }
+    Logger.debug(
+      'KnowledgeService',
+      `Metadata-aware retrieval completed in ${Date.now() - startedAt}ms`,
+      trace
+    )
+    return { results, trace }
   }
 
   async search(
@@ -1684,6 +2325,7 @@ export class KnowledgeService {
     options: SearchOptions = {}
   ): Promise<SearchResult[]> {
     await this.ensureEmbeddingReady()
+    await this.assertEmbeddingDimensions()
     const startedAt = Date.now()
     const { topK = 5, threshold = 0.5, includeContent = true, metadataFilter, rerank } = options
     const rerankEnabled = rerank?.enabled ?? false
@@ -1696,7 +2338,12 @@ export class KnowledgeService {
     // CHUNK (chỉ cần khi lọc theo mục/khoảng trang).
     const scopeDocumentIds = this.resolveFilteredDocumentIds(notebookId, metadataFilter)
     if (scopeDocumentIds && scopeDocumentIds.length === 0) {
-      Logger.debug('KnowledgeService', 'Search returned 0 results due to metadata filter')
+      const hasMetadataFilter =
+        !!metadataFilter?.documentMetadata &&
+        Object.keys(metadataFilter.documentMetadata).length > 0
+      const message = 'Search returned 0 results due to metadata filter'
+      if (hasMetadataFilter) Logger.warn('KnowledgeService', message)
+      else Logger.debug('KnowledgeService', message)
       return []
     }
 
@@ -1720,14 +2367,20 @@ export class KnowledgeService {
 
     const vectorStore = await vectorStoreManager.getStore(notebookId, undefined, 1024)
 
-    // 1b. Tầng chọn TÀI LIỆU (Hierarchical Retrieval) — chỉ chạy khi caller bật
-    // và không có scope tường minh nào.
+    // 1b. Tầng chọn TÀI LIỆU (Hierarchical Retrieval). Hard scope được áp dụng
+    // trước, rồi semantic/keyword document retrieval thu hẹp bên trong scope.
     let hierarchicalDocumentIds: string[] = []
 
-    if ((options.hierarchical?.enabled ?? false) && !scopeDocumentIds && !scopeChunkIds) {
+    if ((options.hierarchical?.enabled ?? false) && !scopeChunkIds) {
       const docTopK = Math.min(Math.max(options.hierarchical?.docTopK ?? 8, 1), 50)
-      const indexedDocumentCount = this.countIndexedDocuments(notebookId)
-      const documentVectorCount = documentVectorStore.count(notebookId)
+      const indexedDocumentCount = this.countIndexedDocuments(
+        notebookId,
+        scopeDocumentIds ?? undefined
+      )
+      const documentVectorCount = documentVectorStore.count(
+        notebookId,
+        scopeDocumentIds ?? undefined
+      )
 
       if (documentVectorCount === 0) {
         Logger.debug('KnowledgeService', 'Hierarchical stage skipped: document index is empty')
@@ -1743,12 +2396,18 @@ export class KnowledgeService {
       } else {
         const docMatches = documentVectorStore.query(notebookId, queryEmbedding.embedding, {
           topK: docTopK,
-          threshold: options.hierarchical?.threshold
+          threshold: options.hierarchical?.threshold,
+          documentIds: scopeDocumentIds ?? undefined
         })
 
         // Hợp nhất với tài liệu khớp từ khoá (BM25 cấp tài liệu) để giữ recall
         // cho truy vấn mà vector cấp tài liệu không phủ.
-        const keywordDocumentIds = this.findKeywordDocumentIds(notebookId, query, docTopK * 2)
+        const hardScope = scopeDocumentIds ? new Set(scopeDocumentIds) : null
+        const keywordDocumentIds = this.findKeywordDocumentIds(
+          notebookId,
+          query,
+          docTopK * 2
+        ).filter((documentId) => !hardScope || hardScope.has(documentId))
         const selectedDocumentIds = [
           ...new Set([...docMatches.map((match) => match.documentId), ...keywordDocumentIds])
         ]
@@ -1760,16 +2419,18 @@ export class KnowledgeService {
       }
     }
 
-    const effectiveDocumentIds = scopeDocumentIds ?? hierarchicalDocumentIds
-    const documentFilterIds = effectiveDocumentIds.length > 0 ? effectiveDocumentIds : undefined
+    const effectiveDocumentIds =
+      hierarchicalDocumentIds.length > 0 ? hierarchicalDocumentIds : scopeDocumentIds
+    const documentFilterIds =
+      effectiveDocumentIds && effectiveDocumentIds.length > 0 ? effectiveDocumentIds : undefined
 
     // 1c. Tầng chọn MỤC (section retrieval) — tầng giữa của Hierarchical
     // Retrieval. Chỉ chạy khi caller bật hierarchical và không có scope mục/trang
     // tường minh. Tự bỏ qua khi section index chưa đủ phủ để không hỏng recall.
     if ((options.hierarchical?.enabled ?? false) && !scopeChunkIds) {
       const sectionTopK = Math.min(Math.max(options.hierarchical?.sectionTopK ?? 16, 1), 100)
-      const totalSections = this.countSections(notebookId)
-      const sectionVectorCount = sectionVectorStore.count(notebookId)
+      const totalSections = this.countSections(notebookId, documentFilterIds)
+      const sectionVectorCount = sectionVectorStore.count(notebookId, documentFilterIds)
 
       if (totalSections === 0) {
         Logger.debug('KnowledgeService', 'Section stage skipped: no section records')
@@ -2321,6 +2982,44 @@ export class KnowledgeService {
     return db.select().from(documents).where(eq(documents.id, documentId)).get()
   }
 
+  /**
+   * Đồng bộ projection metadata dùng cho retrieval xuống cả bảng quan hệ,
+   * chunk metadata và FTS. Gọi sau mọi thay đổi metadata/enrichment để các
+   * tầng planner, lexical search và citation quan sát cùng một snapshot.
+   */
+  syncDocumentRetrievalMetadata(documentId: string): void {
+    const document = this.getDocument(documentId)
+    if (!document) throw new Error(`Document ${documentId} not found`)
+
+    this.metadataIndexService.sync(document)
+    const projection = this.readDocumentMetadataProjection(documentId)
+    const chunkRows = getDatabase()
+      .select({ id: chunks.id, content: chunks.content, metadata: chunks.metadata })
+      .from(chunks)
+      .where(eq(chunks.documentId, documentId))
+      .all()
+    const sqlite = getSqlite()
+
+    const apply = (): void => {
+      const removeFts = sqlite?.prepare('DELETE FROM fts_chunks WHERE chunk_id = ?')
+      const insertFts = sqlite?.prepare(
+        'INSERT INTO fts_chunks (chunk_id, notebook_id, content) VALUES (?, ?, ?)'
+      )
+      for (const row of chunkRows) {
+        const metadata = this.withRetrievalMetadata(
+          row.metadata as Record<string, unknown> | null,
+          projection
+        )
+        getDatabase().update(chunks).set({ metadata }).where(eq(chunks.id, row.id)).run()
+        removeFts?.run(row.id)
+        insertFts?.run(row.id, document.notebookId, this.buildFtsIndexText(row.content, metadata))
+      }
+    }
+
+    if (sqlite && chunkRows.length > 0) sqlite.transaction(apply)()
+    else apply()
+  }
+
   updateDocumentMetadata(documentId: string, metadata: DocumentMetadata): Document {
     const db = getDatabase()
     const document = this.getDocument(documentId)
@@ -2343,7 +3042,9 @@ export class KnowledgeService {
       .where(eq(documents.id, documentId))
       .run()
 
-    return this.getDocument(documentId)!
+    this.syncDocumentRetrievalMetadata(documentId)
+    const updated = this.getDocument(documentId)!
+    return updated
   }
 
   refreshDocumentMetadata(documentId: string): Document {
@@ -2544,6 +3245,9 @@ export class KnowledgeService {
     await this.ensureEmbeddingReady()
     const db = getDatabase()
     const now = new Date()
+    // Trích metadata TRƯỚC khi dựng chunk/FTS để metadata mới đi vào index.
+    this.refreshDocumentContentMetadata(documentId, content)
+    const metadataProjection = this.readDocumentMetadataProjection(documentId)
 
     onProgress?.('diffing', 10)
     const chunkResults = this.chunkingService.chunk(content, chunkOptions, structure)
@@ -2590,7 +3294,7 @@ export class KnowledgeService {
           chunkIndex: chunk.index,
           startOffset: chunk.startOffset,
           endOffset: chunk.endOffset,
-          metadata: chunk.metadata,
+          metadata: this.withRetrievalMetadata(chunk.metadata, metadataProjection),
           tokenCount: chunk.tokenCount,
           sectionId: sectionPlan.assign(chunk.startOffset)
         })
@@ -2604,7 +3308,7 @@ export class KnowledgeService {
           chunkIndex: chunk.index,
           startOffset: chunk.startOffset,
           endOffset: chunk.endOffset,
-          metadata: chunk.metadata ?? null,
+          metadata: this.withRetrievalMetadata(chunk.metadata, metadataProjection) ?? null,
           tokenCount: chunk.tokenCount,
           sectionId: sectionPlan.assign(chunk.startOffset) ?? null,
           createdAt: now
@@ -2738,8 +3442,7 @@ export class KnowledgeService {
       await vectorStore.upsert(vectorItems)
     }
 
-    // 4. Refresh metadata + trạng thái document
-    this.refreshDocumentContentMetadata(documentId, content)
+    // 4. Trạng thái document (metadata đã refresh ở đầu incremental)
     db.update(documents)
       .set({ status: 'indexed', chunkCount: chunkResults.length, updatedAt: new Date() })
       .where(eq(documents.id, documentId))
@@ -2785,6 +3488,7 @@ export class KnowledgeService {
       })
       .where(eq(documents.id, documentId))
       .run()
+    this.metadataIndexService.sync(this.getDocument(documentId)!)
   }
 
   /**
@@ -2865,16 +3569,6 @@ export class KnowledgeService {
     }
   }
 
-  /**
-   * Nạp một tài liệu do hệ thống tạo ra (vd office export) vào KB.
-   * Khác addDocumentFromFile ở chỗ kiểm tra embedding sẵn sàng TRƯỚC khi chèn
-   * bản ghi — tránh tích tụ document 'failed' mỗi lần export thiếu embedding.
-   */
-  async importGeneratedFile(notebookId: string, filePath: string): Promise<string> {
-    await this.ensureEmbeddingReady()
-    return this.addDocumentFromFile(notebookId, filePath)
-  }
-
   // ==================== Auto-sync (watcher) ====================
 
   /**
@@ -2920,6 +3614,13 @@ export class KnowledgeService {
     if (!doc.sourceUri) return
     const key = `source:${doc.id}`
     if (this.fileWatchers.has(key)) return
+    if (!existsSync(doc.sourceUri)) {
+      // The source can legitimately be moved or deleted outside MiChat. Keep
+      // the indexed snapshot available, but do not attempt an invalid watcher
+      // again on every application startup.
+      Logger.info('KnowledgeService', `Auto-sync skipped missing source: ${doc.sourceUri}`)
+      return
+    }
 
     try {
       const watcher = watch(doc.sourceUri, () => {

@@ -10,8 +10,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createDeepSeek } from '@ai-sdk/deepseek'
 import { createQwen } from 'qwen-ai-provider'
 import { createOllama } from 'ollama-ai-provider-v2'
-import { streamText, embed, embedMany, stepCountIs } from 'ai'
-import { createOfficeAgentTools } from '../../services/officecli/agentTools'
+import { streamText, embed, embedMany } from 'ai'
 import type { BaseProvider, LLMProviderConfig } from '../capabilities/BaseProvider'
 import type { ChatCapability } from '../capabilities/ChatCapability'
 import type { EmbeddingCapability } from '../capabilities/EmbeddingCapability'
@@ -254,17 +253,12 @@ export class AISDKProvider implements BaseProvider {
         const model = this.aiProvider!(modelId) as any
 
         // ÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â°Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â§ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â¨ AI SDK streamText
-        // Office document tools are attached when the bundled engine is ready:
-        // the local model can then read/edit Word, Excel and PowerPoint files
-        // and keep going for a bounded number of steps.
-        const agentTools = createOfficeAgentTools()
         const result = streamText({
           model,
           messages: coreMessages,
           temperature: this.config.temperature,
           maxOutputTokens: this.config.maxTokens,
-          abortSignal: abortController.signal,
-          ...(agentTools ? { tools: agentTools, stopWhen: stepCountIs(8) } : {})
+          abortSignal: abortController.signal
         })
 
         // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â§Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬ ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂµÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚ÂºÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
@@ -449,7 +443,10 @@ export class AISDKProvider implements BaseProvider {
     const result = await embed({
       model: embeddingModel,
       value: text,
-      ...(providerOptions && { providerOptions }) // ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â·Ãƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¥Ãƒâ€¦ Ãƒâ€š  providerOptions
+      // Deterministic "input too large" errors must surface immediately so the
+      // adaptive splitter can shrink the text instead of retrying the same call.
+      maxRetries: 0,
+      ...(providerOptions && { providerOptions }) // ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¡ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â·Ãƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¥Ãƒâ€¦ Ãƒâ€š  providerOptions
     })
 
     return {
@@ -500,7 +497,8 @@ export class AISDKProvider implements BaseProvider {
     const result = await embedMany({
       model: embeddingModel,
       values: texts,
-      ...(providerOptions && { providerOptions }) // ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â¶ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â·Ãƒâ€šÃ‚Â»ÃƒÆ’Ã‚Â¥Ãƒâ€¦ Ãƒâ€š  providerOptions
+      maxRetries: 0,
+      ...(providerOptions && { providerOptions }) // ÃƒÆ’Ã‚Â¦Ãƒâ€¦Ã‚Â¾ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Âº providerOptions
     })
 
     const totalTokens = result.usage?.tokens || 0

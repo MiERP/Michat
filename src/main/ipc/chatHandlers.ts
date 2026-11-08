@@ -10,10 +10,10 @@ import { validateAndCleanMessages } from '../utils/messageValidator'
 import { settingsManager } from '../config'
 import { markActive } from '../utils/activityTracker'
 import { clipTextToTokens, estimateTokens } from '../../shared/utils/tokenEstimate'
-import type { ChatCitation, ChatMessageMetadata, ChatScope } from '../../shared/types/chat'
-import type { SearchMetadataFilter } from '../../shared/types/knowledge'
+import type { ChatCitation, ChatMessageMetadata } from '../../shared/types/chat'
 import type { AppSettings } from '../../shared/types'
 import Logger from '../../shared/utils/logger'
+import { buildScopeFilter } from '../utils/chatScope'
 import { ChatSchemas, validate, validateWithEvent } from './validation'
 
 const CONTROL_CHARS_PATTERN = new RegExp(
@@ -52,26 +52,6 @@ function sanitizePromptText(raw: string): string {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{4,}/g, '\n\n\n')
     .trim()
-}
-
-/**
- * Đưa phạm vi người dùng chọn (nếu có) về metadataFilter cho KnowledgeService.
- */
-function buildScopeFilter(scope?: ChatScope): SearchMetadataFilter | undefined {
-  if (!scope) return undefined
-
-  const documentIds = scope.documentIds?.filter((id) => typeof id === 'string' && id.trim())
-  const sectionPath = scope.sectionPath?.filter((part) => typeof part === 'string' && part.trim())
-  const pageRange =
-    scope.pageRange && scope.pageRange.from <= scope.pageRange.to ? scope.pageRange : undefined
-
-  if (!documentIds?.length && !sectionPath?.length && !pageRange) return undefined
-
-  return {
-    documentIds: documentIds?.length ? documentIds : undefined,
-    sectionPath: sectionPath?.length ? sectionPath : undefined,
-    pageRange
-  }
 }
 
 function trackStream(messageId: string, controller: AbortController): void {
@@ -114,6 +94,7 @@ function buildRAGContext(
     sectionPath?: string[]
     pageNumber?: number
     score: number
+    metadata?: Record<string, unknown>
   }>
 ): { context: string; includedChunkIds: Set<string> } {
   if (searchResults.length === 0) return { context: '', includedChunkIds: new Set() }
@@ -153,10 +134,24 @@ function buildRAGContext(
     includedChunkIds.add(result.chunkId)
     totalTokens += estimateTokens(clipped)
 
+    // Metadata pháp lý đã trích lúc upload được đưa thẳng vào context để model
+    // biết tài liệu nào là nghị định/thông tư, số hiệu, cơ quan, ngày ban hành.
+    const legalMetadata = (result.metadata?.documentMetadata || undefined) as
+      | Record<string, string>
+      | undefined
+    const attributeValue = (value: string): string =>
+      value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+
     const attributes = [
       `id="${contextParts.length + 1}"`,
       `chunk="${result.chunkId}"`,
-      `title="${result.documentTitle}"`,
+      `title="${attributeValue(result.documentTitle)}"`,
+      legalMetadata?.documentNumber
+        ? `number="${attributeValue(legalMetadata.documentNumber)}"`
+        : '',
+      legalMetadata?.documentType ? `type="${attributeValue(legalMetadata.documentType)}"` : '',
+      legalMetadata?.issuer ? `issuer="${attributeValue(legalMetadata.issuer)}"` : '',
+      legalMetadata?.issuedAt ? `issued="${attributeValue(legalMetadata.issuedAt)}"` : '',
       result.sectionPath?.length ? `section="${result.sectionPath.join(' > ')}"` : '',
       typeof result.pageNumber === 'number' ? `page="${result.pageNumber}"` : '',
       `score="${result.score.toFixed(3)}"`
@@ -239,15 +234,15 @@ function isLikelyChitChat(query: string, shortQueryLength: number): boolean {
   if (!q) return true
   if (q.length < shortQueryLength) return true
 
-  const englishPatterns = [/^(hi|hello|hey)\b/, /^(good (morning|afternoon|evening))/, /^thank you\b/]
+  const englishPatterns = [
+    /^(hi|hello|hey)\b/,
+    /^(good (morning|afternoon|evening))/,
+    /^thank you\b/
+  ]
   if (englishPatterns.some((re) => re.test(q))) return true
 
   const ascii = stripVietnameseDiacritics(q)
-  const vietnamesePatterns = [
-    /^(xin chao|chao)\b/,
-    /^ban co the giup/,
-    /^cam on\b/
-  ]
+  const vietnamesePatterns = [/^(xin chao|chao)\b/, /^ban co the giup/, /^cam on\b/]
 
   return vietnamesePatterns.some((re) => re.test(ascii))
 }
@@ -441,6 +436,8 @@ export function registerChatHandlers(
         const rerankUseHeuristicFallback = effectiveSettings.rerankUseHeuristicFallback ?? true
         const hierarchicalEnabled = effectiveSettings.ragHierarchicalEnabled ?? true
         const hierarchicalDocTopK = Math.min(Math.max(effectiveSettings.ragDocTopK ?? 8, 1), 50)
+        const metadataAwareEnabled = effectiveSettings.ragMetadataAwareEnabled ?? true
+        const retrievalDebugEnabled = effectiveSettings.ragRetrievalDebugEnabled ?? false
 
         if (
           hasEmbeddingModel &&
@@ -449,11 +446,11 @@ export function registerChatHandlers(
           const session = queries.getSessionById(sessionId)
           if (session?.notebookId) {
             const ragStartedAt = Date.now()
-            const scopeFilter = buildScopeFilter(scope)
-            const searchResults = await knowledgeService.search(session.notebookId, content, {
+            const explicitScope = buildScopeFilter(scope)
+
+            const retrievalOptions = {
               topK: ragTopK,
               threshold: ragThreshold,
-              metadataFilter: scopeFilter,
               hierarchical: {
                 enabled: hierarchicalEnabled,
                 docTopK: hierarchicalDocTopK
@@ -463,7 +460,27 @@ export function registerChatHandlers(
                 topN: rerankTopN,
                 heuristicFallback: rerankUseHeuristicFallback
               }
-            })
+            }
+
+            const metadataOutcome = metadataAwareEnabled
+              ? await knowledgeService.searchMetadataAware(session.notebookId, content, {
+                  ...retrievalOptions,
+                  metadataFilter: explicitScope,
+                  metadataAware: { enabled: true, debug: retrievalDebugEnabled }
+                })
+              : {
+                  results: await knowledgeService.search(session.notebookId, content, {
+                    ...retrievalOptions,
+                    metadataFilter: explicitScope
+                  })
+                }
+            const searchResults = metadataOutcome.results
+            if (retrievalDebugEnabled && 'trace' in metadataOutcome) {
+              Logger.info(
+                'ChatHandlers',
+                `Retrieval trace: ${JSON.stringify(metadataOutcome.trace)}`
+              )
+            }
 
             if (searchResults.length > 0) {
               const ragContextResult = buildRAGContext(searchResults)
@@ -473,7 +490,7 @@ export function registerChatHandlers(
               )
               Logger.debug(
                 'ChatHandlers',
-                `RAG: Found ${searchResults.length} relevant chunks for query, kept ${citationMetadata.length} chunks after prompt budget trim (topK=${ragTopK}, threshold=${ragThreshold}, rerankEnabled=${rerankEnabled}, rerankTopN=${rerankTopN}, hierarchical=${hierarchicalEnabled && !scopeFilter}, scoped=${!!scopeFilter}, contextTokens=${estimateTokens(ragContext)}, latency=${Date.now() - ragStartedAt}ms)`
+                `RAG: Found ${searchResults.length} relevant chunks for query, kept ${citationMetadata.length} chunks after prompt budget trim (topK=${ragTopK}, threshold=${ragThreshold}, rerankEnabled=${rerankEnabled}, rerankTopN=${rerankTopN}, hierarchical=${hierarchicalEnabled}, scoped=${!!explicitScope}, contextTokens=${estimateTokens(ragContext)}, latency=${Date.now() - ragStartedAt}ms)`
               )
 
               // ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â°ÃƒÂ¢Ã¢â€šÂ¬  RAG ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€¦ ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã‚Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¡ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â½Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¤Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Âº system message ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã‚Â¥ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â Ãƒâ€šÃ‚Â°ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚Â¶Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¦Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¯ÃƒÆ’Ã‚Â¥Ãƒâ€¹Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÆ’Ã‚Â¨Ãƒâ€šÃ‚Â¡Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¼ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¥Ãƒâ€šÃ‚Â¤Ãƒâ€šÃ‚Â´

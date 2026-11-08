@@ -13,5 +13,15 @@
     "filename": "gemma-4-E2B-it-Q4_K_M.gguf",
     "type": "chat",
     "addedAt": "2026-09-28T09:21:47.181Z"
+  },
+  "Ling-3.0-tiny-Q4_K_M.gguf": {
+    "filename": "Ling-3.0-tiny-Q4_K_M.gguf",
+    "type": "chat",
+    "addedAt": "2026-10-20T03:44:43.537Z"
+  },
+  "DeepSeek-V2-Lite.Q4_K_M.gguf": {
+    "filename": "DeepSeek-V2-Lite.Q4_K_M.gguf",
+    "type": "chat",
+    "addedAt": "2026-10-20T06:43:30.091Z"
   }
 }

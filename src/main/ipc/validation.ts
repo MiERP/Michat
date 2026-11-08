@@ -14,8 +14,7 @@ const promptLanguageSchema = z.object({
 
 const promptsSchema = z.object({
   quiz: promptLanguageSchema.optional(),
-  chat: promptLanguageSchema.optional(),
-  office: promptLanguageSchema.optional()
+  chat: promptLanguageSchema.optional()
 })
 
 const appSettingsUpdateSchema = z
@@ -35,6 +34,8 @@ const appSettingsUpdateSchema = z
     ragEnableChitChatHeuristic: z.boolean().optional(),
     ragHierarchicalEnabled: z.boolean().optional(),
     ragDocTopK: z.number().int().min(1).max(50).optional(),
+    ragMetadataAwareEnabled: z.boolean().optional(),
+    ragRetrievalDebugEnabled: z.boolean().optional(),
     allowRemoteProviders: z.boolean().optional(),
     prompts: promptsSchema.optional()
   })
@@ -56,6 +57,8 @@ const settingValueSchemas = {
   ragEnableChitChatHeuristic: appSettingsUpdateSchema.shape.ragEnableChitChatHeuristic.unwrap(),
   ragHierarchicalEnabled: appSettingsUpdateSchema.shape.ragHierarchicalEnabled.unwrap(),
   ragDocTopK: appSettingsUpdateSchema.shape.ragDocTopK.unwrap(),
+  ragMetadataAwareEnabled: appSettingsUpdateSchema.shape.ragMetadataAwareEnabled.unwrap(),
+  ragRetrievalDebugEnabled: appSettingsUpdateSchema.shape.ragRetrievalDebugEnabled.unwrap(),
   allowRemoteProviders: appSettingsUpdateSchema.shape.allowRemoteProviders.unwrap(),
   prompts: appSettingsUpdateSchema.shape.prompts.unwrap()
 }
@@ -237,6 +240,11 @@ export const KnowledgeSchemas = {
       })
   }),
 
+  addDocumentFromUrl: z.object({
+    notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
+    url: z.url().max(4096)
+  }),
+
   addDocumentsFromFolder: z.object({
     notebookId: z.string().min(1, 'Notebook ID cannot be empty'),
     folderPath: z
@@ -336,9 +344,7 @@ export const KnowledgeSchemas = {
         metadataFilter: z
           .object({
             documentIds: z.array(z.string().min(1)).optional(),
-            documentTypes: z
-              .array(z.enum(['file', 'note', 'url', 'text', 'memory']))
-              .optional(),
+            documentTypes: z.array(z.enum(['file', 'note', 'url', 'text', 'memory'])).optional(),
             sourceUriContains: z.string().min(1).max(500).optional(),
             sectionPath: z.array(z.string().min(1).max(300)).max(10).optional(),
             pageRange: z

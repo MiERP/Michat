@@ -6,7 +6,6 @@ import { UpdateService } from '../services/UpdateService'
 import { QuizService } from '../services/QuizService'
 import { ShortcutManager } from '../services/ShortcutManager'
 import { LlamaService } from '../services/LlamaService'
-import type { OfficeCliService } from '../services/officecli/OfficeCliService'
 import type Store from 'electron-store'
 import type { StoreSchema } from '../config/types'
 import { registerChatHandlers } from './chatHandlers'
@@ -21,7 +20,6 @@ import { registerItemHandlers } from './itemHandlers'
 import { registerShortcutHandlers } from './shortcutHandlers'
 import { registerLlamaHandlers } from './llamaHandlers'
 import { registerLicenseHandlers } from './licenseHandlers'
-import { registerOfficeHandlers } from './officeHandlers'
 import type { NotebookSummaryService } from '../services/NotebookSummaryService'
 
 /**
@@ -36,11 +34,14 @@ export function registerAllHandlers(
   store: Store<StoreSchema>,
   llamaService: LlamaService,
   backgroundJobService: BackgroundJobService,
-  officeCliService: OfficeCliService,
   notebookSummaryService: NotebookSummaryService
 ) {
   // 实例化 QuizService
-  const quizService = new QuizService(providerManager, knowledgeService)
+  const quizService = new QuizService(
+    providerManager,
+    knowledgeService,
+    () => llamaService.getRuntimeInfo().chatCtxSize
+  )
 
   registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
   registerProviderHandlers(providerManager, llamaService)
@@ -60,7 +61,6 @@ export function registerAllHandlers(
   registerShortcutHandlers(shortcutManager, store)
   registerLlamaHandlers(llamaService)
   registerLicenseHandlers()
-  registerOfficeHandlers(officeCliService, knowledgeService, providerManager)
   console.log('[IPC] All handlers registered')
 }
 
@@ -72,6 +72,5 @@ export {
   registerNoteHandlers,
   registerKnowledgeHandlers,
   registerQuizHandlers,
-  registerLicenseHandlers,
-  registerOfficeHandlers
+  registerLicenseHandlers
 }

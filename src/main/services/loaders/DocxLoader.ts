@@ -61,7 +61,21 @@ export class DocxLoader implements IDocumentLoader {
             headingStyle: 'atx',
             codeBlockStyle: 'fenced'
           })
-          content = turndownService.turndown(html).trim()
+          // Turndown's base rules flatten tables to consecutive paragraphs.
+          // Emit a deterministic GFM table so table rows remain retrievable
+          // and may subsequently be chunked with their columns intact.
+          turndownService.addRule('word-table-to-gfm', {
+            filter: 'table',
+            replacement: (_content, node) => this.tableToMarkdown(node as Element)
+          })
+          // OfficeParser trả về cả trang HTML (head + CSS). Nếu đưa nguyên vào
+          // turndown, phần CSS sẽ thành nội dung và bảng quốc hiệu/số hiệu ở
+          // đầu văn bản bị mất. Chỉ lấy <body> và bỏ style/script.
+          const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
+          const bodyHtml = (bodyMatch ? bodyMatch[1] : html)
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+          content = turndownService.turndown(bodyHtml).trim()
 
           const firstH1 = content.match(/^#\s+(.+)$/m)
           title = firstH1 ? firstH1[1].trim() : undefined
@@ -134,6 +148,62 @@ export class DocxLoader implements IDocumentLoader {
     flat[flat.length - 1].content = content.slice(flat[flat.length - 1].startOffset).trim()
 
     return this.buildHierarchy(flat)
+  }
+
+  private tableToMarkdown(table: Element): string {
+    const activeRowSpans = new Map<number, { remaining: number; value: string }>()
+    const rows: string[][] = []
+    for (const sourceRow of Array.from(table.getElementsByTagName('tr'))) {
+      const row: string[] = []
+      let column = 0
+      const fillRowSpans = (): void => {
+        while (activeRowSpans.has(column)) {
+          const span = activeRowSpans.get(column)!
+          row[column] = span.value
+          if (span.remaining <= 1) activeRowSpans.delete(column)
+          else activeRowSpans.set(column, { ...span, remaining: span.remaining - 1 })
+          column += 1
+        }
+      }
+
+      for (const cell of Array.from(sourceRow.children).filter(
+        (child) => child.tagName === 'TH' || child.tagName === 'TD'
+      )) {
+        fillRowSpans()
+        const value = (cell.textContent || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .replace(/\\/g, '\\\\')
+          .replace(/\|/g, '\\|')
+        const columnSpan = Math.max(
+          1,
+          Number.parseInt(cell.getAttribute('colspan') || '1', 10) || 1
+        )
+        const rowSpan = Math.max(1, Number.parseInt(cell.getAttribute('rowspan') || '1', 10) || 1)
+        for (let offset = 0; offset < columnSpan; offset += 1) {
+          const cellValue = offset === 0 ? value : ''
+          row[column + offset] = cellValue
+          if (rowSpan > 1) {
+            activeRowSpans.set(column + offset, { remaining: rowSpan - 1, value: cellValue })
+          }
+        }
+        column += columnSpan
+      }
+      fillRowSpans()
+      if (row.some(Boolean)) rows.push(row)
+    }
+    if (rows.length === 0) return ''
+
+    const columnCount = Math.max(...rows.map((row) => row.length))
+    const normalizedRows = rows.map((row) =>
+      Array.from({ length: columnCount }, (_, index) => row[index] || '')
+    )
+    const toRow = (cells: string[]) => `| ${cells.join(' | ')} |`
+    const header = normalizedRows[0]
+    const separator = Array.from({ length: columnCount }, () => '---')
+    const body = normalizedRows.slice(1).map(toRow)
+
+    return `\n\n${[toRow(header), toRow(separator), ...body].join('\n')}\n\n`
   }
 
   /**

@@ -50,6 +50,10 @@ interface KnowledgeStore {
     notebookId: string,
     filePath: string
   ) => Promise<{ success: boolean; documentId?: string; error?: string }>
+  addDocumentFromUrl: (
+    notebookId: string,
+    url: string
+  ) => Promise<{ success: boolean; documentId?: string; error?: string }>
   addDocumentsFromFolder: (
     notebookId: string,
     folderPath: string
@@ -154,6 +158,22 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
+  addDocumentFromUrl: async (notebookId, url) => {
+    set({ isIndexing: true, error: null })
+    try {
+      const result = await window.api.knowledge.addDocumentFromUrl(notebookId, url)
+      if (result.success) {
+        await get().loadDocuments(notebookId)
+        await get().loadStats(notebookId)
+      }
+      set({ isIndexing: false, indexProgress: null })
+      return result
+    } catch (error) {
+      set({ isIndexing: false, indexProgress: null, error: (error as Error).message })
+      return { success: false, error: (error as Error).message }
+    }
+  },
+
   // 从文件夹批量添加文档
   addDocumentsFromFolder: async (notebookId, folderPath) => {
     set({ isIndexing: true, error: null })
@@ -168,8 +188,6 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
       return { success: false, error: (error as Error).message }
     }
   },
-
-  // 从 URL 添加文档
 
   // 将 Note 添加到知识库
   addNoteToKnowledge: async (notebookId, noteId) => {

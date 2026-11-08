@@ -118,9 +118,21 @@ export class SQLiteSectionVectorStore {
       .filter((row) => (threshold === undefined ? true : row.score >= threshold))
   }
 
-  count(notebookId: string): number {
+  count(notebookId: string, documentIds?: string[]): number {
     const sqlite = getSqlite()
     if (!sqlite) return 0
+
+    if (documentIds) {
+      if (documentIds.length === 0) return 0
+      const placeholders = documentIds.map(() => '?').join(',')
+      const row = sqlite
+        .prepare(
+          `SELECT COUNT(*) as count FROM vec_sections
+           WHERE notebook_id = ? AND document_id IN (${placeholders})`
+        )
+        .get(notebookId, ...documentIds) as { count: number } | undefined
+      return row?.count || 0
+    }
 
     const row = sqlite
       .prepare('SELECT COUNT(*) as count FROM vec_sections WHERE notebook_id = ?')

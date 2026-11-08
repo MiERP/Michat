@@ -40,18 +40,20 @@ const ENRICHMENT_JSON = JSON.stringify({
 class FakeChatProvider {
   public calls = 0
   public hold = false
+  public lastMessages: unknown
 
   getDefaultChatModel(): string {
     return 'fake-chat'
   }
 
   async sendMessageStream(
-    _messages: unknown,
+    messages: unknown,
     onChunk: (chunk: { content: string }) => void,
     _onError: (error: Error) => void,
     onComplete: () => void
   ): Promise<AbortController> {
     this.calls++
+    this.lastMessages = messages
     const controller = new AbortController()
 
     if (this.hold) {
@@ -194,6 +196,34 @@ describe('Document enrichment + background queue', () => {
     expect(stored?.summary).toBe(enrichment.summary)
     expect(knowledgeService.getDocument(documentId)?.status).toBe('indexed')
 
+    const chunks = knowledgeService.getDocumentChunks(documentId)
+    expect(chunks[0].metadata).toMatchObject({
+      retrievalMetadata: {
+        keywords: ['hợp đồng', 'thanh toán'],
+        entities: ['Công ty ABC']
+      }
+    })
+    expect(
+      dbModule
+        .getSqlite()
+        .prepare(
+          "SELECT value_display FROM document_metadata_values WHERE document_id = ? AND field = 'entities'"
+        )
+        .all(documentId)
+    ).toEqual([expect.objectContaining({ value_display: 'Công ty ABC' })])
+
+    const metadataOutcome = await knowledgeService.searchMetadataAware(
+      context.notebookId,
+      'Nghĩa vụ của Công ty ABC',
+      { topK: 3, threshold: 0 }
+    )
+    expect(metadataOutcome.trace.plan.preferredConstraints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'entity', values: ['Công ty ABC'] })
+      ])
+    )
+    expect(metadataOutcome.results.some((result) => result.documentId === documentId)).toBe(true)
+
     // Vector cấp tài liệu phải được cập nhật lại (và không bị nhân đôi bản ghi)
     const docVectors = dbModule
       .getSqlite()
@@ -212,6 +242,20 @@ describe('Document enrichment + background queue', () => {
     await enrichmentService.enrich(documentId, { skipIfFresh: true })
 
     expect(providerManager.chat.calls).toBe(callsAfterFirst)
+  })
+
+  it('samples the full document for enrichment instead of only its first excerpt', async () => {
+    const { enrichmentService, knowledgeService, notebookId, providerManager } = context
+    const tailEvidence = 'ENTITY-ONLY-AT-THE-END-OF-THE-DOCUMENT'
+    const documentId = await knowledgeService.addDocument(notebookId, {
+      title: 'Dài',
+      type: 'text',
+      content: `${'Nội dung mở đầu. '.repeat(900)}\n\n${tailEvidence}`
+    })
+
+    await enrichmentService.enrich(documentId)
+
+    expect(JSON.stringify(providerManager.chat.lastMessages)).toContain(tailEvidence)
   })
 
   it('can be cancelled mid-stream without writing an enrichment', async () => {

@@ -27,6 +27,8 @@ export interface DocumentVectorMatch {
 export interface DocumentVectorQueryOptions {
   topK?: number
   threshold?: number
+  /** Hard scope resolved before semantic document selection. */
+  documentIds?: string[]
 }
 
 export class SQLiteDocumentVectorStore {
@@ -81,12 +83,13 @@ export class SQLiteDocumentVectorStore {
     vector: Float32Array,
     options: DocumentVectorQueryOptions = {}
   ): DocumentVectorMatch[] {
-    const { topK = 8, threshold } = options
+    const { topK = 8, threshold, documentIds } = options
 
     const sqlite = getSqlite()
     if (!sqlite) return []
     if (vector.length !== DOCUMENT_VECTOR_DIMENSIONS) return []
 
+    const knnTopK = documentIds?.length ? this.count(notebookId) : topK
     const rows = sqlite
       .prepare(
         `SELECT document_id, distance
@@ -94,9 +97,16 @@ export class SQLiteDocumentVectorStore {
          WHERE embedding MATCH ? AND k = ? AND notebook_id = ?
          ORDER BY distance ASC`
       )
-      .all(vector, topK, notebookId) as Array<{ document_id: string; distance: number }>
+      .all(vector, Math.max(knnTopK, topK), notebookId) as Array<{
+      document_id: string
+      distance: number
+    }>
+
+    const documentScope = documentIds ? new Set(documentIds) : null
 
     return rows
+      .filter((row) => !documentScope || documentScope.has(row.document_id))
+      .slice(0, topK)
       .map((row) => ({
         documentId: row.document_id,
         distance: row.distance,
@@ -105,9 +115,21 @@ export class SQLiteDocumentVectorStore {
       .filter((row) => (threshold === undefined ? true : row.score >= threshold))
   }
 
-  count(notebookId: string): number {
+  count(notebookId: string, documentIds?: string[]): number {
     const sqlite = getSqlite()
     if (!sqlite) return 0
+
+    if (documentIds) {
+      if (documentIds.length === 0) return 0
+      const placeholders = documentIds.map(() => '?').join(',')
+      const row = sqlite
+        .prepare(
+          `SELECT COUNT(*) as count FROM vec_documents
+           WHERE notebook_id = ? AND document_id IN (${placeholders})`
+        )
+        .get(notebookId, ...documentIds) as { count: number } | undefined
+      return row?.count || 0
+    }
 
     const row = sqlite
       .prepare('SELECT COUNT(*) as count FROM vec_documents WHERE notebook_id = ?')

@@ -20,7 +20,11 @@ import Logger from '../../shared/utils/logger'
 
 const MAX_KEYWORDS = 12
 const MAX_ENTITIES = 12
-const CONTENT_EXCERPT_CHARS = 3000
+// Keep enrichment bounded while sampling the beginning, middle, and end of a
+// document. Metadata often appears in a preamble, while conclusions, annexes,
+// and signatures can contain the only occurrence of a relevant entity.
+const MAX_CONTENT_SAMPLE_CHARS = 7200
+const CONTENT_SAMPLE_COUNT = 6
 
 export interface EnrichmentTocEntry {
   level: number
@@ -107,6 +111,7 @@ export class DocumentEnrichmentService {
       })
       .where(eq(documents.id, documentId))
       .run()
+    this.knowledgeService.syncDocumentRetrievalMetadata(documentId)
 
     // Summary mới → cập nhật vector cấp tài liệu (best-effort, không làm hỏng enrichment)
     await this.knowledgeService.refreshDocumentVector(documentId)
@@ -167,14 +172,15 @@ export class DocumentEnrichmentService {
     }
 
     const tocLine = toc.length > 0 ? toc.map((entry) => entry.title).join(' | ') : '(không có mục)'
+    const contentSample = this.buildContentSample(content)
     const prompt = `Bạn là công cụ trích xuất dữ liệu. Đọc tài liệu rồi trả về DUY NHẤT một đối tượng JSON, không giải thích gì thêm:
 {"summary":"tóm tắt 2-3 câu bằng cùng ngôn ngữ với tài liệu","keywords":["tối đa ${MAX_KEYWORDS} từ khoá quan trọng"],"entities":["tối đa ${MAX_ENTITIES} tên riêng/tổ chức/số hiệu văn bản/mốc thời gian"]}
 
 Tiêu đề: ${title}
 Các mục: ${tocLine}
 
-Nội dung (trích):
-${content.slice(0, CONTENT_EXCERPT_CHARS)}`
+Nội dung (các trích đoạn phủ đều toàn bộ tài liệu):
+${contentSample}`
 
     if (signal?.aborted) throw new EnrichmentCancelledError()
 
@@ -235,6 +241,23 @@ ${content.slice(0, CONTENT_EXCERPT_CHARS)}`
       entities: this.normalizeList(parsed.entities, MAX_ENTITIES),
       model: provider.getDefaultChatModel()
     }
+  }
+
+  private buildContentSample(content: string): string {
+    if (content.length <= MAX_CONTENT_SAMPLE_CHARS) return content
+
+    const sampleLength = Math.floor(MAX_CONTENT_SAMPLE_CHARS / CONTENT_SAMPLE_COUNT)
+    const maxStart = content.length - sampleLength
+    const starts = Array.from({ length: CONTENT_SAMPLE_COUNT }, (_, index) =>
+      Math.round((maxStart * index) / (CONTENT_SAMPLE_COUNT - 1))
+    )
+
+    return starts
+      .map(
+        (start, index) =>
+          `[Trích đoạn ${index + 1}/${CONTENT_SAMPLE_COUNT}]\n${content.slice(start, start + sampleLength)}`
+      )
+      .join('\n\n')
   }
 
   private parseJsonObject(raw: string): Record<string, unknown> | null {

@@ -85,20 +85,6 @@ export function isPathInsideDirectory(targetPath: string, directoryPath: string)
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
-/**
- * Guard cho các thao tác ĐỌC tài liệu Office: chỉ cho phép file đã đăng ký là
- * tài liệu do MiChat tạo (vd qua office export/generate) hoặc file nằm trong
- * thư mục quản lý của kho tri thức (knowledge-files). Renderer không được đọc
- * đường dẫn tuỳ ý trên máy.
- */
-export function isAllowedOfficeReadPath(
-  filePath: string,
-  knownDocumentPaths: ReadonlySet<string>,
-  isManagedLocalFilePath: (filePath: string) => boolean
-): boolean {
-  return knownDocumentPaths.has(filePath) || isManagedLocalFilePath(filePath)
-}
-
 export function assertLoopbackHttpUrl(url: string, label: string): URL {
   const parsed = assertHttpUrl(url, label)
   const hostname = normalizeHostname(parsed.hostname)

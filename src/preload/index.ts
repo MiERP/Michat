@@ -177,6 +177,8 @@ const api = {
       ipcRenderer.invoke('knowledge:add-document', { notebookId, options }),
     addDocumentFromFile: (notebookId: string, filePath: string) =>
       ipcRenderer.invoke('knowledge:add-document-from-file', { notebookId, filePath }),
+    addDocumentFromUrl: (notebookId: string, url: string) =>
+      ipcRenderer.invoke('knowledge:add-document-from-url', { notebookId, url }),
     addDocumentsFromFolder: (notebookId: string, folderPath: string) =>
       ipcRenderer.invoke('knowledge:add-documents-from-folder', { notebookId, folderPath }),
     addNote: (notebookId: string, noteId: string) =>
@@ -217,6 +219,9 @@ const api = {
     // 统计
     getStats: (notebookId: string) => ipcRenderer.invoke('knowledge:get-stats', { notebookId }),
 
+    // Kiểm tra số chiều embedding trước khi giữ lựa chọn model mới
+    probeEmbeddingDimensions: () => ipcRenderer.invoke('knowledge:probe-embedding-dimensions'),
+
     // 文件选择
     selectFiles: () => ipcRenderer.invoke('knowledge:select-files'),
     selectFolder: () => ipcRenderer.invoke('knowledge:select-folder'),
@@ -238,7 +243,7 @@ const api = {
       return () => ipcRenderer.removeListener('knowledge:auto-synced', listener)
     },
 
-    // 监听 tài liệu mới được nạp vào KB (vd: office export tự import lại)
+    // 监听 tài liệu mới được nạp vào KB
     onDocumentsChanged: (callback: (data: { notebookId: string }) => void) => {
       const listener = (_event: any, data: any) => callback(data)
       ipcRenderer.on('knowledge:documents-changed', listener)
@@ -254,46 +259,6 @@ const api = {
       ipcRenderer.invoke('knowledge:get-links', { notebookId, documentId }),
     generateLinks: (documentId: string) =>
       ipcRenderer.invoke('knowledge:generate-links', { documentId })
-  },
-
-  // Office document engine (officecli: Word / Excel / PowerPoint)
-  office: {
-    status: () => ipcRenderer.invoke('office:status'),
-    workspaceDir: () => ipcRenderer.invoke('office:workspace-dir'),
-    defaultOutputPath: (kind: 'docx' | 'xlsx' | 'pptx', name: string) =>
-      ipcRenderer.invoke('office:default-output-path', { kind, name }),
-    selectOutput: (kind: 'docx' | 'xlsx' | 'pptx', defaultName: string) =>
-      ipcRenderer.invoke('office:select-output', { kind, defaultName }),
-    exportDocument: (payload: {
-      kind: 'docx' | 'xlsx' | 'pptx'
-      title: string
-      markdown: string
-      outputPath: string
-      notebookId: string
-    }) => invokeWithTimeout('office:export', 300000, payload),
-    generate: (payload: {
-      kind: 'docx' | 'xlsx' | 'pptx'
-      title: string
-      skill?: string
-      instruction?: string
-      markdown: string
-      outputPath: string
-      notebookId: string
-      templatePath?: string
-    }) => invokeWithTimeout('office:generate', 900000, payload),
-    onGenerateProgress: (
-      callback: (data: { outputPath: string; stage: string; progress: number }) => void
-    ) => {
-      const listener = (_event: any, data: any) => callback(data)
-      ipcRenderer.on('office:generate-progress', listener)
-      return () => ipcRenderer.removeListener('office:generate-progress', listener)
-    },
-    renderPreview: (filePath: string) =>
-      invokeWithTimeout('office:render-preview', 180000, { filePath }),
-    validate: (filePath: string) => invokeWithTimeout('office:validate', 120000, { filePath }),
-    issues: (filePath: string) => invokeWithTimeout('office:issues', 120000, { filePath }),
-    openFile: (filePath: string) => ipcRenderer.invoke('office:open-file', { filePath }),
-    openWindow: (notebookId: string) => ipcRenderer.invoke('office:open-window', { notebookId })
   },
 
   // Quiz 答题相关

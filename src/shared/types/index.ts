@@ -5,6 +5,7 @@
 
 // 导出知识库类型
 export * from './knowledge'
+export * from './retrieval'
 
 // 导出聊天类型
 export * from './chat'
@@ -108,6 +109,10 @@ export interface AppSettings {
   ragHierarchicalEnabled?: boolean
   /** Số tài liệu lấy ở tầng chọn tài liệu. */
   ragDocTopK?: number
+  /** Bật metadata-aware planning và safe preferred→broad fallback cho RAG. */
+  ragMetadataAwareEnabled?: boolean
+  /** Chỉ bật log trace truy hồi chi tiết để chẩn đoán. */
+  ragRetrievalDebugEnabled?: boolean
   allowRemoteProviders?: boolean
   prompts?: {
     quiz?: {
@@ -115,10 +120,6 @@ export interface AppSettings {
       'en-US'?: string // 英文答题生成提示词
     }
     chat?: {
-      'vi-VN'?: string
-      'en-US'?: string
-    }
-    office?: {
       'vi-VN'?: string
       'en-US'?: string
     }

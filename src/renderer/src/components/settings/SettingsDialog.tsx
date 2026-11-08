@@ -18,6 +18,7 @@ import {
   SidebarProvider
 } from '../ui/sidebar'
 import type { AppSettings } from '../../../../shared/types'
+import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../../../shared/types/knowledge'
 
 interface ProviderConfig {
   providerName: string
@@ -128,7 +129,30 @@ export default function SettingsDialog(): ReactElement {
     // 保存通用设置
     if (pendingSettings) {
       await window.api.settings.update(pendingSettings)
-      setOriginalSettings(pendingSettings)
+      let resolvedSettings = pendingSettings
+
+      // Model embedding phải khớp schema vector 1024 chiều; nếu không thì giữ model cũ.
+      if (pendingSettings.defaultEmbeddingModel !== originalSettings?.defaultEmbeddingModel) {
+        const probe = await window.api.knowledge.probeEmbeddingDimensions()
+        if (
+          probe.success &&
+          probe.dimensions &&
+          probe.dimensions !== REQUIRED_EMBEDDING_DIMENSIONS
+        ) {
+          const fallback = originalSettings?.defaultEmbeddingModel ?? ''
+          resolvedSettings = { ...pendingSettings, defaultEmbeddingModel: fallback }
+          await window.api.settings.update({ defaultEmbeddingModel: fallback })
+          alert(
+            t('embeddingDimensionMismatch', {
+              dimensions: probe.dimensions,
+              required: REQUIRED_EMBEDDING_DIMENSIONS
+            })
+          )
+        }
+      }
+
+      setPendingSettings(resolvedSettings)
+      setOriginalSettings(resolvedSettings)
     }
 
     // 保存提供商配置（新增/删除已经立即保存，这里只保存修改）

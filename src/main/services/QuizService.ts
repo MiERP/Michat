@@ -20,9 +20,11 @@ import type { QuizQuestion, QuizGenerationResult } from '../../shared/types/quiz
 import { eq, desc, and, inArray } from 'drizzle-orm'
 import { ProviderManager } from '../providers/ProviderManager'
 import { AISDKProvider } from '../providers/base/AISDKProvider'
-import { streamObject } from 'ai'
+import { generateText } from 'ai'
 import { z } from 'zod'
 import Logger from '../../shared/utils/logger'
+import { estimateTokens } from '../../shared/utils/tokenEstimate'
+import { parseQuizPayload, sanitizeQuizQuestions } from './quizPayload'
 import { settingsManager } from '../config'
 
 /**
@@ -38,7 +40,9 @@ const BATCH_SIZE = 5
 const MAX_BATCHES = 4
 // Model 4B+ trên CPU sinh chậm, nhưng timeout phải ngắn + huỷ được request
 // để user không chờ vô hạn; retry ở tầng batch bên dưới.
-const GENERATION_TIMEOUT_MS = 180000
+// Model local (đặc biệt 4B+ trên CPU) có thể cần vài phút cho một batch.
+// Cho phép override để môi trường nhanh/chậm tự chỉnh.
+const GENERATION_TIMEOUT_MS = Number(process.env.KN_QUIZ_TIMEOUT_MS) || 600000
 // Giới hạn output: một batch ~5 câu không cần quá 4k token
 const MAX_OUTPUT_TOKENS = 4096
 
@@ -141,11 +145,11 @@ function getDifficultyInstruction(
  */
 const QuizQuestionSchema: z.ZodType<QuizQuestion> = z.object({
   id: z.string().describe('题目唯一ID'),
-  questionText: z.string().max(200).describe('题目文本，不超过200字'),
-  options: z.array(z.string().max(100)).length(4).describe('4个选项'),
+  questionText: z.string().max(500).describe('题目文本'),
+  options: z.array(z.string().max(200)).length(4).describe('4个选项'),
   correctAnswer: z.number().min(0).max(3).describe('正确答案索引（0-3）'),
-  explanation: z.string().max(300).default('').describe('答案解释，不超过300字'),
-  hints: z.array(z.string().max(100)).max(2).default([]).describe('1-2个提示'),
+  explanation: z.string().max(500).default('').describe('答案解释'),
+  hints: z.array(z.string().max(200)).max(2).default([]).describe('1-2个提示'),
   metadata: z
     .object({
       chunkIds: z.array(z.string()).describe('关联的chunk ID列表')
@@ -175,8 +179,18 @@ function createQuizSchema(questionCount: number) {
 export class QuizService {
   constructor(
     private providerManager: ProviderManager,
-    private knowledgeService: KnowledgeService
+    private knowledgeService: KnowledgeService,
+    private getChatContextSize?: () => number
   ) {}
+
+  private contextSize(): number {
+    return this.getChatContextSize?.() ?? 8192
+  }
+
+  /** Nhỏ hơn cho model context 8k để prompt + output không vượt n_ctx. */
+  private contentCharCap(): number {
+    return this.contextSize() <= 8192 ? 5000 : MAX_PROMPT_CONTENT_CHARS
+  }
 
   /**
    * 聚合笔记本内容 — đọc qua KnowledgeService (pipeline dùng chung) thay vì
@@ -219,8 +233,9 @@ export class QuizService {
       })
 
       let mergedContent = contentParts.join('\n\n---\n\n')
-      if (mergedContent.length > MAX_PROMPT_CONTENT_CHARS) {
-        mergedContent = mergedContent.slice(0, MAX_PROMPT_CONTENT_CHARS)
+      const contentCap = this.contentCharCap()
+      if (mergedContent.length > contentCap) {
+        mergedContent = mergedContent.slice(0, contentCap)
       }
 
       return mergedContent
@@ -260,7 +275,9 @@ export class QuizService {
     const mode = getQualityMode()
     // Một lần sinh đã tốn nhiều phút; retry chỉ nhân thời gian chờ. Chỉ mode
     // accurate được retry (1 lần), balanced/fast không retry batch.
-    const maxAttempts = mode === 'accurate' ? 2 : 1
+    // A parse failure is cheap to retry compared with losing the whole quiz;
+    // only "fast" mode keeps a single attempt.
+    const maxAttempts = mode === 'fast' ? 1 : 2
 
     const maxBatchesByMode = { fast: 1, balanced: 2, accurate: 4 } as const
     const desiredBatches = Math.min(
@@ -337,35 +354,77 @@ export class QuizService {
       const correction =
         attempt === 1
           ? ''
-          : '\n\n【修正要求】必须严格输出 JSON；题目数量严格等于要求值；每题4个选项且只有1个正确答案；不要重复题干。若不确定，优先题目质量。'
+          : '\n\nLƯU Ý: lần trước JSON không hợp lệ. Hãy trả về JSON hợp lệ, đủ số câu, mỗi câu 4 lựa chọn và đúng 1 đáp án.'
 
-      let prompt = promptTemplate.replace(/\{\{QUESTION_COUNT\}\}/g, questionCount.toString())
-      prompt = prompt.replace(/\{\{DIFFICULTY_INSTRUCTION\}\}/g, difficultyInstruction)
-      prompt = prompt.replace(/\{\{CONTENT\}\}/g, contentPart)
-      prompt = `${prompt}${correction}`
+      const contextSize = this.contextSize()
+      const buildPrompt = (part: string): string => {
+        let next = promptTemplate.replace(/\{\{QUESTION_COUNT\}\}/g, questionCount.toString())
+        next = next.replace(/\{\{DIFFICULTY_INSTRUCTION\}\}/g, difficultyInstruction)
+        next = next.replace(/\{\{CONTENT\}\}/g, part)
+        return `${next}${correction}\n\nChỉ trả về một đối tượng JSON hợp lệ theo đúng định dạng trên; không markdown, không giải thích, không thêm chữ nào khác.`
+      }
+
+      // Keep the prompt inside the model context; otherwise llama.cpp rejects
+      // the whole request (or generates nothing) on 8k-context models.
+      let contentForBatch = contentPart
+      let prompt = buildPrompt(contentForBatch)
+      let promptTokens = estimateTokens(prompt)
+      for (let trim = 0; trim < 4 && promptTokens > contextSize - 1024; trim++) {
+        if (contentForBatch.length <= 500) break
+        contentForBatch = contentForBatch.slice(0, Math.floor(contentForBatch.length * 0.7))
+        prompt = buildPrompt(contentForBatch)
+        promptTokens = estimateTokens(prompt)
+      }
+
+      const maxOutputTokens = Math.max(
+        512,
+        Math.min(MAX_OUTPUT_TOKENS, contextSize - promptTokens - 256)
+      )
+      Logger.info(
+        'QuizService',
+        `Batch budget: promptTokens≈${promptTokens}, ctx=${contextSize}, maxOutput=${maxOutputTokens}`
+      )
 
       try {
-        const result = await withAbortTimeout(async (signal) => {
-          const { partialObjectStream, object } = streamObject({
-            model,
-            schema: BatchSchema,
-            prompt,
-            temperature: 0.5,
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
-            maxRetries: 0,
-            abortSignal: signal
-          })
+        // Heartbeat: local models may not stream partial JSON, so advance the
+        // progress bar on a timer while the request is in flight.
+        const heartbeat = setInterval(() => onPartialProgress?.(), 4000)
+        let text = ''
+        try {
+          const response = await withAbortTimeout(
+            (signal) =>
+              generateText({
+                model,
+                prompt,
+                temperature: 0.4,
+                maxOutputTokens,
+                maxRetries: 0,
+                abortSignal: signal
+              }),
+            GENERATION_TIMEOUT_MS
+          )
+          text = response.text
+        } finally {
+          clearInterval(heartbeat)
+        }
 
-          // Vừa drain stream vừa báo tiến độ: % nhích dần thay vì đứng im 30%
-          for await (const partialObject of partialObjectStream) {
-            void partialObject
-            onPartialProgress?.()
-          }
+        const parsed = parseQuizPayload(text)
+        if (!parsed) {
+          throw new Error('Model không trả về JSON hợp lệ')
+        }
 
-          return await object
-        }, GENERATION_TIMEOUT_MS)
+        const questionsRaw = sanitizeQuizQuestions(parsed, questionCount)
+        if (questionsRaw.length === 0) {
+          throw new Error('Model không trả về câu hỏi hợp lệ (cần câu hỏi + đúng 4 lựa chọn)')
+        }
 
-        const questions = result.questions
+        const validated = BatchSchema.safeParse({ questions: questionsRaw })
+        if (!validated.success) {
+          const detail = validated.error.issues[0]?.message || 'invalid structure'
+          throw new Error(`JSON không đúng cấu trúc: ${detail}`)
+        }
+
+        const questions = validated.data.questions
         if (!questions || questions.length < 1) {
           throw new Error('生成的题目数量不正确')
         }
@@ -380,7 +439,10 @@ export class QuizService {
       }
     }
 
-    throw new Error(`生成题目失败: ${lastError?.message || 'unknown error'}`)
+    throw new Error(
+      `Không tạo được câu hỏi: ${lastError?.message || 'model trả về dữ liệu không hợp lệ'}. ` +
+        'Hãy thử model khác (ví dụ Qwen) hoặc giảm số câu.'
+    )
   }
 
   /**
@@ -580,15 +642,14 @@ export class QuizService {
     } catch (error) {
       Logger.error('QuizService', 'Error generating quiz:', error)
 
-      // 更新状态为失败
-      db.update(quizzes)
-        .set({
-          status: 'failed',
-          errorMessage: (error as Error).message,
-          updatedAt: new Date()
-        })
-        .where(eq(quizzes.id, quizId))
-        .run()
+      // A failed generation leaves an empty quiz in the notebook list; remove
+      // both the item and the quiz row so retries don't accumulate ghosts.
+      try {
+        db.delete(items).where(eq(items.resourceId, quizId)).run()
+        db.delete(quizzes).where(eq(quizzes.id, quizId)).run()
+      } catch (cleanupError) {
+        Logger.warn('QuizService', 'Failed to clean up quiz after error:', cleanupError)
+      }
 
       throw error
     }

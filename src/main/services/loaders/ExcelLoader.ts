@@ -15,6 +15,9 @@ interface TableBlock {
   endOffset: number
   rowCount: number
   columnCount: number
+  headerRow: number
+  firstDataRow: number
+  lastDataRow: number
 }
 
 export class ExcelLoader implements IDocumentLoader {
@@ -62,8 +65,12 @@ export class ExcelLoader implements IDocumentLoader {
         const columnCount = Math.max(header.length, ...normalizedRows.map((r) => r.length))
 
         const lines: string[] = []
+        // Canonical Markdown heading makes a worksheet a first-class section.
+        // The table marker remains for row-aware chunking below.
+        lines.push(`# ${worksheet.name}`)
+        lines.push('')
         lines.push(
-          `[[TABLE_START:sheet=${worksheet.name};rows=${normalizedRows.length};cols=${columnCount}]]`
+          `[[TABLE_START:sheet=${worksheet.name};rows=${normalizedRows.length};cols=${columnCount};headerRow=1;firstDataRow=2]]`
         )
 
         if (header.length > 0) {
@@ -72,7 +79,7 @@ export class ExcelLoader implements IDocumentLoader {
 
         dataRows.forEach((row, rowIndex) => {
           const cols = row.map((cell) => String(cell ?? '').trim())
-          lines.push(`row ${rowIndex + 1}: ${cols.join(' | ')}`)
+          lines.push(`row ${rowIndex + 2}: ${cols.join(' | ')}`)
         })
 
         lines.push('[[TABLE_END]]')
@@ -85,7 +92,10 @@ export class ExcelLoader implements IDocumentLoader {
           startOffset: currentOffset,
           endOffset: currentOffset + blockText.length,
           rowCount: normalizedRows.length,
-          columnCount
+          columnCount,
+          headerRow: 1,
+          firstDataRow: dataRows.length > 0 ? 2 : 1,
+          lastDataRow: normalizedRows.length
         })
 
         currentOffset += blockText.length

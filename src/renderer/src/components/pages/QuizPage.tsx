@@ -9,6 +9,7 @@ import DocumentPicker from '../notebook/source/DocumentPicker'
 import QuizGenerating from '../notebook/quiz/QuizGenerating'
 import QuizQuestionView from '../notebook/quiz/QuizQuestionView'
 import QuizResultView from '../notebook/quiz/QuizResultView'
+import QuizStartDialog, { type QuizStartParams } from '../notebook/quiz/QuizStartDialog'
 
 export default function QuizPage() {
   const { notebookId, quizId } = useParams<{ notebookId?: string; quizId?: string }>()
@@ -32,6 +33,7 @@ export default function QuizPage() {
   // Tạo mới: chọn tài liệu (rỗng = tất cả)
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [showPicker, setShowPicker] = useState(false)
+  const [isStartDialogOpen, setIsStartDialogOpen] = useState(false)
 
   // 获取平台信息
   useEffect(() => {
@@ -75,12 +77,15 @@ export default function QuizPage() {
     return cleanup
   }, [])
 
-  const handleGenerate = async () => {
+  const handleStartGeneration = async (params: QuizStartParams) => {
     if (!notebookId) return
     setError('')
     setShowPicker(false)
     try {
       await generateQuiz(notebookId, {
+        questionCount: params.questionCount,
+        difficulty: params.difficulty,
+        customPrompt: params.customPrompt,
         documentIds: selectedDocIds.length > 0 ? selectedDocIds : undefined
       })
     } catch (err) {
@@ -131,12 +136,22 @@ export default function QuizPage() {
           </Button>
 
           {currentQuiz ? (
-            <Button size="sm" onClick={handleGenerate} disabled={isGenerating} className="h-8">
+            <Button
+              size="sm"
+              onClick={() => setIsStartDialogOpen(true)}
+              disabled={isGenerating}
+              className="h-8"
+            >
               <RefreshCw className="h-4 w-4" />
               Làm lại
             </Button>
           ) : (
-            <Button size="sm" onClick={handleGenerate} disabled={isGenerating} className="h-8">
+            <Button
+              size="sm"
+              onClick={() => setIsStartDialogOpen(true)}
+              disabled={isGenerating}
+              className="h-8"
+            >
               <Plus className="h-4 w-4" />
               Tạo mới
             </Button>
@@ -194,6 +209,12 @@ export default function QuizPage() {
           </div>
         )}
       </div>
+
+      <QuizStartDialog
+        isOpen={isStartDialogOpen}
+        onClose={() => setIsStartDialogOpen(false)}
+        onStart={(params) => void handleStartGeneration(params)}
+      />
     </div>
   )
 }

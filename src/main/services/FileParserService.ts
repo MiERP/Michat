@@ -11,8 +11,6 @@ import { DocxLoader } from './loaders/DocxLoader'
 import { PptLoader } from './loaders/PptLoader'
 import { ExcelLoader } from './loaders/ExcelLoader'
 import { WebLoader } from './loaders/WebLoader'
-import { OfficeCliLoader } from './loaders/OfficeCliLoader'
-import type { OfficeCliService } from './officecli/OfficeCliService'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions } from './loaders/types'
 
 /**
@@ -38,7 +36,7 @@ export class FileParserService {
   private loaders: Map<string, IDocumentLoader>
   private allLoaders: IDocumentLoader[]
 
-  constructor(officeCliService?: OfficeCliService) {
+  constructor() {
     // 初始化所有 Loader
     this.allLoaders = [
       new PdfLoader(),
@@ -48,13 +46,6 @@ export class FileParserService {
       new ExcelLoader(),
       new WebLoader()
     ]
-
-    // Registered last so it wins for .docx/.pptx when the engine is available.
-    // OfficeCliLoader falls back to the legacy loaders on any failure, so
-    // ingestion never depends on the binary being present.
-    if (officeCliService) {
-      this.allLoaders.push(new OfficeCliLoader(officeCliService))
-    }
 
     // 按扩展名和 MIME 类型注册 Loader
     this.loaders = new Map()

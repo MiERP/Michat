@@ -20,7 +20,6 @@ export default function PromptsSettings({
   const currentLanguage = settings.language
   // 后端的 mergeSettings 已经确保所有字段都有默认值，前端直接使用
   const currentQuizPrompt = settings.prompts?.quiz?.[currentLanguage] || ''
-  const currentOfficePrompt = settings.prompts?.office?.[currentLanguage] || ''
 
   const handleQuizPromptChange = (value: string) => {
     onSettingsChange({
@@ -28,18 +27,6 @@ export default function PromptsSettings({
         ...settings.prompts,
         quiz: {
           ...settings.prompts?.quiz,
-          [currentLanguage]: value
-        }
-      }
-    })
-  }
-
-  const handleOfficePromptChange = (value: string) => {
-    onSettingsChange({
-      prompts: {
-        ...settings.prompts,
-        office: {
-          ...settings.prompts?.office,
           [currentLanguage]: value
         }
       }
@@ -56,27 +43,6 @@ export default function PromptsSettings({
 
   return (
     <div className="max-w-2xl flex flex-col gap-4">
-      <SettingItem
-        title={t('officePrompt')}
-        description=""
-        layout="vertical"
-        action={
-          <Button variant="outline" size="sm" onClick={handleResetToDefault}>
-            <RotateCcw className="w-4 h-4 mr-2" />
-            {t('resetToDefault')}
-          </Button>
-        }
-      >
-        <div className="relative">
-          <Textarea
-            value={currentOfficePrompt}
-            onChange={(e) => handleOfficePromptChange(e.target.value)}
-            placeholder={t('promptPlaceholder')}
-            className="w-full h-[400px] max-h-[400px] resize-none bg-input border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring font-mono text-sm leading-relaxed overflow-y-auto"
-          />
-        </div>
-      </SettingItem>
-
       <SettingItem
         title={t('quizPrompt')}
         description=""

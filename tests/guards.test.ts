@@ -3,8 +3,7 @@ import {
   normalizeFsPath,
   isPathInsideDirectory,
   assertLoopbackHttpUrl,
-  isAllowedExternalOpenUrl,
-  isAllowedOfficeReadPath
+  isAllowedExternalOpenUrl
 } from '../src/main/security/guards'
 
 describe('guards', () => {
@@ -63,46 +62,4 @@ describe('guards', () => {
     })
   })
 
-  describe('isAllowedOfficeReadPath', () => {
-    const kbFile = 'C:/Users/Admin/AppData/Roaming/michat/knowledge-files/abc/doc.docx'
-    const knownDocuments = new Set<string>([normalizeFsPath(kbFile)])
-
-    it('rejects arbitrary paths outside MiChat-managed files', () => {
-      expect(
-        isAllowedOfficeReadPath(
-          normalizeFsPath('C:/Users/someone/Documents/secret.docx'),
-          knownDocuments,
-          () => false
-        )
-      ).toBe(false)
-      expect(
-        isAllowedOfficeReadPath(
-          normalizeFsPath('C:/Windows/System32/drivers/etc/hosts'),
-          knownDocuments,
-          () => false
-        )
-      ).toBe(false)
-    })
-
-    it('allows registered MiChat-produced documents', () => {
-      const generated = normalizeFsPath('C:/Users/Admin/Documents/report.docx')
-      const known = new Set<string>([generated])
-
-      expect(isAllowedOfficeReadPath(generated, known, () => false)).toBe(true)
-      expect(isAllowedOfficeReadPath(normalizeFsPath('C:/temp/other.docx'), known, () => false)).toBe(
-        false
-      )
-    })
-
-    it('allows files inside the knowledge-files directory but nothing else', () => {
-      const managed = (filePath: string) => normalizeFsPath(filePath) === normalizeFsPath(kbFile)
-
-      expect(
-        isAllowedOfficeReadPath(normalizeFsPath(kbFile), new Set<string>(), managed)
-      ).toBe(true)
-      expect(
-        isAllowedOfficeReadPath(normalizeFsPath('C:/temp/other.docx'), new Set<string>(), managed)
-      ).toBe(false)
-    })
-  })
 })

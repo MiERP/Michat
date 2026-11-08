@@ -3,6 +3,7 @@ import { HardDrive, Download, Trash2, Cpu, Database, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
+import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../../../shared/types/knowledge'
 
 interface GgufModel {
   filename: string
@@ -95,7 +96,22 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
       if (model.type === 'chat') {
         await window.api.settings.update({ defaultChatModel: `llama:${model.filename}` })
       } else if (model.type === 'embedding') {
+        const previous = await window.api.settings.get('defaultEmbeddingModel')
         await window.api.settings.update({ defaultEmbeddingModel: `llama:${model.filename}` })
+        const probe = await window.api.knowledge.probeEmbeddingDimensions()
+        if (
+          probe.success &&
+          probe.dimensions &&
+          probe.dimensions !== REQUIRED_EMBEDDING_DIMENSIONS
+        ) {
+          await window.api.settings.update({ defaultEmbeddingModel: previous ?? '' })
+          alert(
+            t('embeddingDimensionMismatch', {
+              dimensions: probe.dimensions,
+              required: REQUIRED_EMBEDDING_DIMENSIONS
+            })
+          )
+        }
       } else {
         return
       }

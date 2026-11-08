@@ -145,6 +145,35 @@ describe('Metadata-aware hierarchical retrieval', () => {
     expect(await service.search(notebookId, 'bảng giá', { threshold: 0 })).toBeTruthy()
   })
 
+  it('imports web content through canonical Markdown and structured indexes', async () => {
+    const { service, notebookId, db, schema } = await context
+    ;(service as any).webFetchService.fetchUrl = vi.fn().mockResolvedValue({
+      title: 'Hướng dẫn thanh toán',
+      description: 'Quy trình thanh toán trực tuyến',
+      url: 'https://example.com/guide',
+      mimeType: 'text/html',
+      content: '# Hướng dẫn thanh toán\n\n## Điều kiện\nKhách hàng thanh toán trong vòng mười ngày.'
+    })
+
+    const documentId = await service.addDocumentFromUrl(notebookId, 'https://example.com/guide')
+    const document = service.getDocument(documentId)
+    expect(document).toMatchObject({
+      type: 'url',
+      sourceUri: 'https://example.com/guide',
+      status: 'indexed'
+    })
+    expect((document.metadata as any).structure.sections).toHaveLength(2)
+
+    const { eq } = await import('drizzle-orm')
+    const sectionRows = db
+      .select()
+      .from(schema.sections)
+      .where(eq(schema.sections.documentId, documentId))
+      .all()
+    expect(sectionRows.map((row: any) => row.title)).toContain('Điều kiện')
+    expect(service.getDocumentChunks(documentId).length).toBeGreaterThan(0)
+  })
+
   it('restricts retrieval to the documents selected by the doc-level stage', async () => {
     const { service, notebookId } = await context
     const { contractId, pricingId } = await seedCorpus()
@@ -165,6 +194,25 @@ describe('Metadata-aware hierarchical retrieval', () => {
 
     expect(hierarchicalResults.length).toBeGreaterThan(0)
     expect(hierarchicalResults.every((result: any) => result.documentId === contractId)).toBe(true)
+  })
+
+  it('runs document retrieval inside an explicit hard document scope', async () => {
+    const { service, notebookId, dbModule } = await context
+    const { contractId, pricingId } = await seedCorpus()
+
+    // Cô lập tầng document: khi section vectors chưa phủ đủ, hệ thống phải
+    // fallback ở section nhưng vẫn thu hẹp candidate bằng document retrieval.
+    dbModule.getSqlite().prepare('DELETE FROM vec_sections').run()
+
+    const results = await service.search(notebookId, 'hợp đồng', {
+      topK: 10,
+      threshold: 0,
+      metadataFilter: { documentIds: [contractId, pricingId] },
+      hierarchical: { enabled: true, docTopK: 1, threshold: 0.9 }
+    })
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results.every((result: any) => result.documentId === contractId)).toBe(true)
   })
 
   it('filters chunks by section path', async () => {
@@ -334,9 +382,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
     const contractChunks = service.getDocumentChunks(contractId)
     const pricingChunks = service.getDocumentChunks(pricingId)
     // Chunk nằm trong mục Termination (chứa từ khoá truy vấn) và một chunk của Bảng giá.
-    const terminationChunk = contractChunks.find((chunk: any) =>
-      chunk.content.includes('chấm dứt')
-    )
+    const terminationChunk = contractChunks.find((chunk: any) => chunk.content.includes('chấm dứt'))
     expect(terminationChunk).toBeTruthy()
     expect(pricingChunks.length).toBeGreaterThan(0)
 
@@ -444,5 +490,21 @@ describe('Metadata-aware hierarchical retrieval', () => {
       expect(result.documentId).toBe(contractId)
       expect(result.sectionPath).toContain('2. Termination')
     }
+  })
+
+  it('keeps section retrieval available when another document has stale section vectors', async () => {
+    const { service, notebookId, dbModule } = await context
+    const { contractId, pricingId } = await seedCorpus()
+    dbModule.getSqlite().prepare('DELETE FROM vec_sections WHERE document_id = ?').run(pricingId)
+
+    const results = await service.search(notebookId, 'chấm dứt hợp đồng', {
+      topK: 10,
+      threshold: 0,
+      metadataFilter: { documentIds: [contractId] },
+      hierarchical: { enabled: true, docTopK: 4, sectionTopK: 5, threshold: 0.9 }
+    })
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results.every((result: any) => result.sectionPath.includes('2. Termination'))).toBe(true)
   })
 })

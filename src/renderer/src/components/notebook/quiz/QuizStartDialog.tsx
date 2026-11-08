@@ -31,7 +31,7 @@ export default function QuizStartDialog({
   onStart
 }: QuizStartDialogProps): ReactElement {
   const { t } = useTranslation('quiz')
-  const [questionCount, setQuestionCount] = useState(10)
+  const [questionCount, setQuestionCount] = useState(5)
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium')
   const [customPrompt, setCustomPrompt] = useState('')
 
@@ -43,7 +43,7 @@ export default function QuizStartDialog({
     }
     onStart(params)
     // 重置状态
-    setQuestionCount(10)
+    setQuestionCount(5)
     setDifficulty('medium')
     setCustomPrompt('')
     onClose()

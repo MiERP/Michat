@@ -203,6 +203,38 @@ export function registerKnowledgeHandlers(
   )
 
   // 从 URL 添加文档
+  ipcMain.handle(
+    'knowledge:add-document-from-url',
+    async (event: IpcMainInvokeEvent, args: unknown) => {
+      const validated = await validate(KnowledgeSchemas.addDocumentFromUrl, async (params) => {
+        try {
+          const embeddingReadyError = await ensureEmbeddingServiceReady()
+          if (embeddingReadyError) return { success: false, error: embeddingReadyError }
+
+          const documentId = await knowledgeService.addDocumentFromUrl(
+            params.notebookId,
+            params.url,
+            (stage, progress) => {
+              event.sender.send('knowledge:index-progress', {
+                notebookId: params.notebookId,
+                stage,
+                progress
+              })
+            }
+          )
+          backgroundJobService.enqueueGenerateLinks(documentId, params.notebookId)
+          backgroundJobService.enqueueEnrich(documentId, params.notebookId)
+          return { success: true, documentId }
+        } catch (error) {
+          Logger.error('KnowledgeHandlers', 'Error adding document from URL:', error)
+          return { success: false, error: (error as Error).message }
+        }
+      })(event, args)
+
+      return validated
+    }
+  )
+
   // 从 Note 添加到知识库
   ipcMain.handle('knowledge:add-note', async (event: IpcMainInvokeEvent, args: unknown) => {
     const validated = await validate(KnowledgeSchemas.addNote, async (params) => {
@@ -563,6 +595,19 @@ export function registerKnowledgeHandlers(
       }
     })
   )
+
+  // Kiểm tra số chiều embedding của model đang cấu hình (chặn model không khớp schema).
+  ipcMain.handle('knowledge:probe-embedding-dimensions', async () => {
+    try {
+      return {
+        success: true,
+        dimensions: await knowledgeService.probeEmbeddingDimensions()
+      }
+    } catch (error) {
+      Logger.error('KnowledgeHandlers', 'Probe embedding dimensions failed:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
 
   // 打开文件选择对话框
   ipcMain.handle('knowledge:select-files', async () => {

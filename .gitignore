@@ -41,6 +41,7 @@ desktop.ini
 *.tmp
 *.temp
 *.bak
+*.tsbuildinfo
 *.swp
 *~
 

@@ -96,6 +96,12 @@ export interface AddDocumentOptions {
 }
 
 /**
+ * Số chiều vector mà schema sqlite-vec hiện tại yêu cầu (`vec0(... FLOAT[1024])`).
+ * Model embedding trả về số chiều khác sẽ bị từ chối trước khi ghi dữ liệu.
+ */
+export const REQUIRED_EMBEDDING_DIMENSIONS = 1024
+
+/**
  * 搜索选项
  */
 export interface SearchOptions {
@@ -107,7 +113,14 @@ export interface SearchOptions {
   hierarchical?: {
     enabled?: boolean
     docTopK?: number
+    sectionTopK?: number
     threshold?: number
+  }
+  /** Run metadata planning before retrieval. Query-derived constraints are conservative. */
+  metadataAware?: {
+    enabled?: boolean
+    debug?: boolean
+    minPreferredResults?: number
   }
   rerank?: {
     enabled?: boolean

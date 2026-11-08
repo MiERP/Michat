@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { LlamaService } from './services/LlamaService'
-import { officeCliService } from './services/officecli/OfficeCliService'
 import {
   initDatabase,
   runMigrations,
@@ -101,17 +100,6 @@ app.whenReady().then(async () => {
 
     await llamaService.ensureStarted()
 
-    // Office document engine (bundled officecli binary; degrades gracefully).
-    // The module singleton is shared with the agent tools.
-    officeCliService.setUserDataDir(app.getPath('userData'))
-    const officeStatus = await officeCliService.initialize()
-    Logger.info(
-      'Main',
-      officeStatus.available
-        ? `Office engine ready (v${officeStatus.version})`
-        : `Office engine unavailable: ${officeStatus.error}`
-    )
-
     // Set app user model id for windows
     electronApp.setAppUserModelId('com.michat.app')
 
@@ -137,11 +125,7 @@ app.whenReady().then(async () => {
 
     // Initialize Knowledge Service
     Logger.info('Main', 'Initializing Knowledge Service...')
-    knowledgeService = new KnowledgeService(
-      providerManager,
-      llamaService ?? undefined,
-      officeCliService
-    )
+    knowledgeService = new KnowledgeService(providerManager, llamaService ?? undefined)
     Logger.info('Main', 'Knowledge Service initialized')
 
     // Initialize Session Auto Switch Service (cần knowledgeService để lưu memory)
@@ -191,6 +175,9 @@ app.whenReady().then(async () => {
     const maintenanceNotebooks = getAllNotebooks()
     const vectorIndexRebuilt = wasVectorIndexRebuilt()
     for (const notebook of maintenanceNotebooks) {
+      void knowledgeService.reconcileNotebookIndexes(notebook.id).catch((error) =>
+        Logger.warn('Main', `Knowledge index reconciliation failed for ${notebook.id}:`, error)
+      )
       if (vectorIndexRebuilt) {
         backgroundJobService.enqueueRebuildVectors(notebook.id)
       }
@@ -198,6 +185,30 @@ app.whenReady().then(async () => {
       // Tóm tắt notebook cũ/stale → tự tổng hợp lại khi app rảnh (skip nếu tươi).
       backgroundJobService.enqueueSummarizeNotebook(notebook.id)
     }
+    // Một lần: tài liệu được index trước khi có metadata-aware retrieval chưa
+    // có metadata trong chunk/FTS. Chạy nền sau khi cửa sổ đã hiện để không
+    // chặn khởi động; các lần sau sẽ thấy đủ metadata và bỏ qua.
+    setTimeout(() => {
+      void knowledgeService
+        ?.backfillLegalMetadataToIndex()
+        .catch((error) =>
+          Logger.warn('Main', 'Legal metadata backfill failed:', error)
+        )
+    }, 10000)
+
+    // Tài liệu pháp lý bị parser cũ làm mất phần đầu (DOCX table) → reindex lại
+    // để trích được số hiệu/loại/cơ quan. Chỉ chạy khi metadata còn trống.
+    const legalMetadataReindexIds = knowledgeService.findDocumentsNeedingLegalMetadataReindex()
+    for (const documentId of legalMetadataReindexIds) {
+      backgroundJobService.enqueueReindex(documentId)
+    }
+    if (legalMetadataReindexIds.length > 0) {
+      Logger.info(
+        'Main',
+        `Queued metadata reindex for ${legalMetadataReindexIds.length} legal document(s)`
+      )
+    }
+
     if (maintenanceNotebooks.length > 0) {
       Logger.info(
         'Main',
@@ -231,7 +242,6 @@ app.whenReady().then(async () => {
       store,
       llamaService,
       backgroundJobService,
-      officeCliService,
       notebookSummaryService
     )
 
@@ -357,12 +367,11 @@ app.on('before-quit', (event) => {
 
   void (async () => {
     try {
-      // Shutdown barrier: chờ llama.cpp, officecli và job nền dừng hẳn
+      // Shutdown barrier: chờ llama.cpp và job nền dừng hẳn
       // TRƯỚC KHI đóng DB — tránh ghi dở dang hoặc truy vấn vào DB đã đóng.
       // Có trần tổng 10 giây để một thành phần treo không chặn app thoát.
       const tasks: Promise<unknown>[] = []
       if (llamaService) tasks.push(llamaService.stop())
-      tasks.push(officeCliService.closeAll())
       if (backgroundJobService) tasks.push(backgroundJobService.shutdown())
       const cap = new Promise<void>((resolve) => setTimeout(resolve, 10000))
       await Promise.race([Promise.allSettled(tasks), cap])

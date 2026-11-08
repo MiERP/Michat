@@ -153,6 +153,32 @@ export const documents = sqliteTable(
 export type Document = typeof documents.$inferSelect
 export type NewDocument = typeof documents.$inferInsert
 
+/** Queryable projection of document metadata. JSON remains the source of truth. */
+export const documentMetadataValues = sqliteTable(
+  'document_metadata_values',
+  {
+    documentId: text('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    notebookId: text('notebook_id')
+      .notNull()
+      .references(() => notebooks.id, { onDelete: 'cascade' }),
+    field: text('field').notNull(),
+    valueNormalized: text('value_normalized').notNull(),
+    valueDisplay: text('value_display').notNull(),
+    source: text('source').notNull().default('extractor'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
+  },
+  (table) => ({
+    lookupIdx: index('idx_document_metadata_lookup').on(
+      table.notebookId,
+      table.field,
+      table.valueNormalized
+    ),
+    documentIdx: index('idx_document_metadata_document').on(table.documentId)
+  })
+)
+
 /**
  * 文档分块表
  * 存储分块后的文本内容（RAG 的最小知识单元）

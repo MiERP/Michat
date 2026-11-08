@@ -63,6 +63,40 @@ describe('DocxLoader DOCX support', () => {
       }
     })
   })
+
+  it('preserves Word table rows and columns as canonical GFM markdown', async () => {
+    officeParserMock.parseOffice.mockResolvedValue({
+      to: async () => ({
+        value:
+          '<html><body><h1>Báo cáo</h1><table><tr><th>Mã</th><th>Nội dung</th></tr><tr><td>A-01</td><td>Dữ liệu quan trọng</td></tr></table></body></html>'
+      }),
+      toText: () => 'Báo cáo Mã Nội dung A-01 Dữ liệu quan trọng',
+      warnings: []
+    })
+
+    const result = await new DocxLoader().loadFromBuffer(Buffer.from('docx-table'))
+
+    expect(result.content).toContain('| Mã | Nội dung |')
+    expect(result.content).toContain('| --- | --- |')
+    expect(result.content).toContain('| A-01 | Dữ liệu quan trọng |')
+  })
+
+  it('keeps a rectangular grid when a Word table uses merged cells', async () => {
+    officeParserMock.parseOffice.mockResolvedValue({
+      to: async () => ({
+        value:
+          '<body><table><tr><th colspan="2">Phạm vi</th><th>Ghi chú</th></tr><tr><td rowspan="2">A</td><td>Điều 1</td><td>Áp dụng</td></tr><tr><td>Điều 2</td><td>Tiếp tục</td></tr></table></body>'
+      }),
+      toText: () => 'Phạm vi Ghi chú A Điều 1 Áp dụng Điều 2 Tiếp tục',
+      warnings: []
+    })
+
+    const result = await new DocxLoader().loadFromBuffer(Buffer.from('docx-merged-table'))
+
+    expect(result.content).toContain('| Phạm vi |  | Ghi chú |')
+    expect(result.content).toContain('| A | Điều 1 | Áp dụng |')
+    expect(result.content).toContain('| A | Điều 2 | Tiếp tục |')
+  })
 })
 
 describe('DocxLoader legacy DOC support', () => {

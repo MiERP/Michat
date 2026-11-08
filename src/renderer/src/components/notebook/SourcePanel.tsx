@@ -9,8 +9,10 @@ import {
   StickyNote,
   ArrowLeft,
   FolderUp,
+  Globe,
   Pencil,
-  RefreshCw
+  RefreshCw,
+  X
 } from 'lucide-react'
 import { useKnowledgeStore, setupKnowledgeListeners } from '../../store/knowledgeStore'
 import { useItemStore } from '../../store/itemStore'
@@ -24,7 +26,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Card } from '../ui/card'
 import { PanelHeader } from '../ui/panel-header'
 import DocumentList from './source/DocumentList'
-import KnowledgeLinksPanel from './source/KnowledgeLinksPanel'
 import type { KnowledgeDocument } from '../../../../shared/types/knowledge'
 import type {
   DocumentMetadata,
@@ -33,7 +34,7 @@ import type {
 } from '../../../../main/services/DocumentMetadataExtractionService'
 import { isOriginalLegalDocument } from '../../../../main/services/DocumentMetadataExtractionService'
 
-type AddSourceType = 'text' | 'note'
+type AddSourceType = 'text' | 'note' | 'url'
 
 // 添加来源类型
 
@@ -42,7 +43,7 @@ interface AddSourceModalProps {
   type: AddSourceType
   isOpen: boolean
   onClose: () => void
-  onSubmit: (data: { title?: string; content?: string; noteId?: string }) => void
+  onSubmit: (data: { title?: string; content?: string; noteId?: string; url?: string }) => void
   isLoading: boolean
   notes: { id: string; title: string }[]
 }
@@ -59,6 +60,7 @@ function AddSourceModal({
   // 状态会在组件重新挂载时自动重置（通过父组件的 key 属性）
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [url, setUrl] = useState('')
 
   const [selectedNoteId, setSelectedNoteId] = useState('')
 
@@ -68,17 +70,22 @@ function AddSourceModal({
       onSubmit({ title, content })
     } else if (type === 'note' && selectedNoteId) {
       onSubmit({ noteId: selectedNoteId })
+    } else if (type === 'url' && url.trim()) {
+      onSubmit({ url: url.trim() })
     }
   }
 
   // 判断是否可以提交
   const canSubmit =
     !isLoading &&
-    ((type === 'text' && title.trim() && content.trim()) || (type === 'note' && selectedNoteId))
+    ((type === 'text' && title.trim() && content.trim()) ||
+      (type === 'note' && selectedNoteId) ||
+      (type === 'url' && /^https?:\/\//i.test(url.trim())))
 
   const getTitle = () => {
     if (type === 'text') return t('pasteText')
     if (type === 'note') return t('importNote')
+    if (type === 'url') return t('importUrl')
     return ''
   }
 
@@ -126,6 +133,19 @@ function AddSourceModal({
                 ))}
               </SelectContent>
             </Select>
+          )}
+
+          {type === 'url' && (
+            <Input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder={t('urlPlaceholder')}
+              className="text-base"
+              required
+              autoFocus
+              disabled={isLoading}
+            />
           )}
 
           <DialogFooter>
@@ -223,28 +243,24 @@ function MetadataSummaryField({
 function MetadataSummaryPanel({
   document,
   onEdit,
-  onReextract
+  onReextract,
+  onReindex,
+  onClose
 }: {
   document: KnowledgeDocument | null
   onEdit: (document: KnowledgeDocument) => void
   onReextract: (document: KnowledgeDocument) => Promise<void>
+  onReindex: (document: KnowledgeDocument) => Promise<void>
+  onClose: () => void
 }): ReactElement {
   const [isReextracting, setIsReextracting] = useState(false)
+  const [isReindexing, setIsReindexing] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => setError(''), [document?.id])
 
   if (!document) {
-    return (
-      <section
-        className="shrink-0 border-t border-border bg-muted/20 p-4"
-        aria-label="Thông tin pháp lý"
-      >
-        <p className="text-center text-xs text-muted-foreground">
-          Chọn tài liệu để xem thông tin pháp lý
-        </p>
-      </section>
-    )
+    return <></>
   }
 
   const rootMetadata = (document.metadata as Record<string, unknown> | null) || {}
@@ -262,23 +278,26 @@ function MetadataSummaryPanel({
     }
   }
 
-  if (!isOriginalLegalDocument(document.content || '')) {
-    if (document.mimeType !== 'application/pdf') return <></>
-    return (
-      <section
-        className="shrink-0 border-t border-border bg-muted/20 px-3 py-2"
-        aria-label="Kiểm tra PDF"
-      >
-        <p className="text-xs text-muted-foreground">
-          Thông tin pháp lý chỉ hiển thị cho văn bản gốc.
-        </p>
-      </section>
-    )
+  const handleReindex = async () => {
+    try {
+      setIsReindexing(true)
+      setError('')
+      await onReindex(document)
+    } catch (reindexError) {
+      setError((reindexError as Error).message || 'Không thể xử lý lại tài liệu.')
+    } finally {
+      setIsReindexing(false)
+    }
   }
+
+  const isOriginal = isOriginalLegalDocument(document.content || '')
+  const hasMetadata = Object.values(existing).some(
+    (value) => typeof value === 'string' && value.trim().length > 0
+  )
 
   return (
     <section
-      className="max-h-[48%] shrink-0 overflow-y-auto border-t border-border bg-muted/20"
+      className="max-h-1/2 shrink-0 overflow-y-auto border-t border-border bg-muted/20"
       aria-label="Thông tin pháp lý"
     >
       <div className="sticky top-0 z-[1] flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">
@@ -289,17 +308,32 @@ function MetadataSummaryPanel({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={handleReextract}
-            disabled={isReextracting}
-            title="Trích xuất lại thông tin pháp lý"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isReextracting ? 'animate-spin' : ''}`} />
-            Trích xuất lại
-          </Button>
+          {!hasMetadata && document.localFilePath && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={handleReindex}
+              disabled={isReindexing}
+              title="Phân tích lại file gốc để trích metadata"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isReindexing ? 'animate-spin' : ''}`} />
+              Xử lý lại
+            </Button>
+          )}
+          {isOriginal && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={handleReextract}
+              disabled={isReextracting}
+              title="Trích xuất lại thông tin pháp lý"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isReextracting ? 'animate-spin' : ''}`} />
+              Trích xuất lại
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -309,9 +343,27 @@ function MetadataSummaryPanel({
             <Pencil className="h-3.5 w-3.5" />
             Chỉnh sửa
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onClose}
+            aria-label="Đóng thông tin pháp lý"
+            title="Đóng thông tin pháp lý"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
         </div>
       </div>
       <div className="space-y-2 p-3">
+        {!hasMetadata && (
+          <p className="rounded-md border border-border bg-background/60 p-2 text-xs text-muted-foreground">
+            Chưa có thông tin pháp lý cho tài liệu này.
+            {isOriginal
+              ? ' Bấm “Trích xuất lại” để trích tự động hoặc “Chỉnh sửa” để nhập tay.'
+              : ' Bấm “Chỉnh sửa” để nhập tay.'}
+          </p>
+        )}
         <div className="grid grid-cols-1 gap-2">
           <MetadataSummaryField
             label="Số, ký hiệu"
@@ -572,6 +624,7 @@ export default function SourcePanel(): ReactElement {
   const [defaultEmbeddingModel, setDefaultEmbeddingModel] = useState<string | undefined>(undefined)
   const [openedDocument, setOpenedDocument] = useState<KnowledgeDocument | null>(null)
   const [metadataDocument, setMetadataDocument] = useState<KnowledgeDocument | null>(null)
+  const [isLegalMetadataOpen, setIsLegalMetadataOpen] = useState(false)
 
   const {
     documents,
@@ -583,6 +636,7 @@ export default function SourcePanel(): ReactElement {
     loadStats,
     addDocument,
     addDocumentFromFile,
+    addDocumentFromUrl,
     addDocumentsFromFolder,
     addNoteToKnowledge,
     deleteDocument,
@@ -629,7 +683,7 @@ export default function SourcePanel(): ReactElement {
   }, [notebookId])
 
   // Lắng nghe auto-sync (watcher reindex file ngoài app) và tài liệu mới được
-  // nạp lại vào KB (vd office export tự import) → refresh danh sách + thống kê.
+  // nạp vào KB → refresh danh sách + thống kê.
   useEffect(() => {
     if (!notebookId) return
     const reload = () => {
@@ -653,6 +707,7 @@ export default function SourcePanel(): ReactElement {
     setOpenedDocument(null)
     setInspectedDocumentId(null)
     setMetadataDocument(null)
+    setIsLegalMetadataOpen(false)
   }, [notebookId])
 
   useEffect(() => {
@@ -729,6 +784,16 @@ export default function SourcePanel(): ReactElement {
     [notebookId, defaultEmbeddingModel, addDocument, t]
   )
 
+  const handleUrlImport = useCallback(
+    async (data: { url?: string }) => {
+      if (!notebookId || !data.url) return
+      const result = await addDocumentFromUrl(notebookId, data.url)
+      if (!result.success) alert(result.error || t('operationFailed'))
+      setModalType(null)
+    },
+    [notebookId, addDocumentFromUrl, t]
+  )
+
   // 处理笔记导入
   const handleNoteImport = useCallback(
     async (data: { noteId?: string }) => {
@@ -794,6 +859,7 @@ export default function SourcePanel(): ReactElement {
 
   const handleInspectDocument = useCallback((document: KnowledgeDocument) => {
     setInspectedDocumentId(document.id)
+    setIsLegalMetadataOpen(true)
   }, [])
 
   // 双击或按 Enter 时打开文档
@@ -826,16 +892,29 @@ export default function SourcePanel(): ReactElement {
     [notebookId, loadDocuments]
   )
 
+  const handleReindexMetadata = useCallback(
+    async (document: KnowledgeDocument) => {
+      const result = await window.api.knowledge.reindexDocument(document.id)
+      if (!result.success) {
+        throw new Error(result.error || 'Không thể xử lý lại tài liệu.')
+      }
+      if (notebookId) await loadDocuments(notebookId)
+    },
+    [notebookId, loadDocuments]
+  )
+
   // 处理弹窗提交
   const handleModalSubmit = useCallback(
-    (data: { title?: string; content?: string; noteId?: string }) => {
+    (data: { title?: string; content?: string; noteId?: string; url?: string }) => {
       if (modalType === 'text') {
         handleTextPaste(data)
       } else if (modalType === 'note') {
         handleNoteImport(data)
+      } else if (modalType === 'url') {
+        handleUrlImport(data)
       }
     },
-    [modalType, handleTextPaste, handleNoteImport]
+    [modalType, handleTextPaste, handleNoteImport, handleUrlImport]
   )
 
   return (
@@ -910,6 +989,17 @@ export default function SourcePanel(): ReactElement {
                       <StickyNote className="w-4 h-4" />
                       {t('importNote')}
                     </Button>
+                    <Button
+                      onClick={() => {
+                        setModalType('url')
+                        setShowAddMenu(false)
+                      }}
+                      variant="ghost"
+                      className="w-full justify-start text-sm font-normal rounded-none"
+                    >
+                      <Globe className="w-4 h-4" />
+                      {t('importUrl')}
+                    </Button>
                   </div>
                 )}
               </div>
@@ -937,20 +1027,15 @@ export default function SourcePanel(): ReactElement {
                   onOpenSettings={handleOpenSettings}
                 />
               </ScrollArea>
-              {notebookId && (
-                <KnowledgeLinksPanel
-                  notebookId={notebookId}
+              {isLegalMetadataOpen && (
+                <MetadataSummaryPanel
                   document={inspectedDocument}
-                  onDocumentChanged={() => {
-                    if (notebookId) void loadDocuments(notebookId)
-                  }}
+                  onEdit={setMetadataDocument}
+                  onReextract={handleReextractMetadata}
+                  onReindex={handleReindexMetadata}
+                  onClose={() => setIsLegalMetadataOpen(false)}
                 />
               )}
-              <MetadataSummaryPanel
-                document={inspectedDocument}
-                onEdit={setMetadataDocument}
-                onReextract={handleReextractMetadata}
-              />
             </div>
           )}
         </>

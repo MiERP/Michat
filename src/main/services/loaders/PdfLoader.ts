@@ -129,6 +129,13 @@ export class PdfLoader implements IDocumentLoader {
       await pdfDoc.cleanup()
       await pdfDoc.destroy()
 
+      if (!fullText.trim()) {
+        const ocrMessage = opts.ocrEnabled
+          ? 'OCR was requested but no bundled offline OCR engine is configured'
+          : 'PDF contains no extractable text and requires OCR before it can be indexed'
+        throw new Error(ocrMessage)
+      }
+
       return {
         content: fullText.trim(),
         title,

@@ -24,9 +24,12 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
       stored.ragSkipShortQueryLength ?? defaultSettings.ragSkipShortQueryLength,
     ragEnableChitChatHeuristic:
       stored.ragEnableChitChatHeuristic ?? defaultSettings.ragEnableChitChatHeuristic,
-    ragHierarchicalEnabled:
-      stored.ragHierarchicalEnabled ?? defaultSettings.ragHierarchicalEnabled,
+    ragHierarchicalEnabled: stored.ragHierarchicalEnabled ?? defaultSettings.ragHierarchicalEnabled,
     ragDocTopK: stored.ragDocTopK ?? defaultSettings.ragDocTopK,
+    ragMetadataAwareEnabled:
+      stored.ragMetadataAwareEnabled ?? defaultSettings.ragMetadataAwareEnabled,
+    ragRetrievalDebugEnabled:
+      stored.ragRetrievalDebugEnabled ?? defaultSettings.ragRetrievalDebugEnabled,
     allowRemoteProviders: stored.allowRemoteProviders ?? defaultSettings.allowRemoteProviders,
     prompts: {
       quiz: {
@@ -36,10 +39,6 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
       chat: {
         'vi-VN': stored.prompts?.chat?.['vi-VN'] ?? defaultSettings.prompts!.chat!['vi-VN'],
         'en-US': stored.prompts?.chat?.['en-US'] ?? defaultSettings.prompts!.chat!['en-US']
-      },
-      office: {
-        'vi-VN': stored.prompts?.office?.['vi-VN'] ?? defaultSettings.prompts!.office!['vi-VN'],
-        'en-US': stored.prompts?.office?.['en-US'] ?? defaultSettings.prompts!.office!['en-US']
       }
     }
   }

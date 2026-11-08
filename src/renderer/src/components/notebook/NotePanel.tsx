@@ -8,7 +8,6 @@ import {
   ExternalLink,
   Loader2,
   ClipboardList,
-  Presentation,
   ThumbsUp,
   ThumbsDown,
   PenLine,
@@ -279,16 +278,6 @@ export default function NotePanel(): ReactElement {
     }
   }
 
-  // Open the Office assistant window (Word / Excel / PowerPoint)
-  const handleOpenOfficeWindow = async () => {
-    if (!notebookId) return
-    try {
-      await window.api.office.openWindow(notebookId)
-    } catch (error) {
-      console.error('[NotePanel] Failed to open office window:', error)
-    }
-  }
-
   const handleOpenCitationSource = async () => {
     if (!selected?.citation?.documentId) return
     try {
@@ -378,23 +367,19 @@ export default function NotePanel(): ReactElement {
                 >
                   <ClipboardList className="w-4 h-4" />
                 </Button>
-                <Button
-                  onClick={handleOpenOfficeWindow}
-                  variant="ghost"
-                  size="icon"
-                  className="w-8 h-8"
-                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                  title="Office"
-                >
-                  <Presentation className="w-4 h-4" />
-                </Button>
               </>
             }
           />
 
-          {/* Items 列表（上半） + Citation 预览（下半） */}
+          {/* Citation preview stays out of the way until a [n] marker is opened. */}
           <div className="flex-1 min-h-0 flex flex-col">
-            <div className="basis-1/2 min-h-[180px] border-b border-border">
+            <div
+              className={
+                selected || isLoading
+                  ? 'basis-1/2 min-h-[180px] border-b border-border'
+                  : 'flex-1 min-h-0'
+              }
+            >
               <ScrollArea className="h-full">
                 <ItemList
                   items={visibleItems}
@@ -407,168 +392,173 @@ export default function NotePanel(): ReactElement {
               </ScrollArea>
             </div>
 
-            <div className="basis-1/2 min-h-[180px] flex flex-col">
-              <div className="px-4 py-2 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-foreground">
-                  <BookOpenText className="w-4 h-4" />
-                  <span>Trích dẫn nguồn</span>
+            {(selected || isLoading) && (
+              <div className="basis-1/2 min-h-[180px] flex flex-col">
+                <div className="px-4 py-2 border-b border-border flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm text-foreground">
+                    <BookOpenText className="w-4 h-4" />
+                    <span>Trích dẫn nguồn</span>
+                  </div>
+                  {selected && (
+                    <Button
+                      onClick={clearCitation}
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                    >
+                      Ẩn
+                    </Button>
+                  )}
                 </div>
-                {selected && (
-                  <Button
-                    onClick={clearCitation}
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs"
-                    style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                  >
-                    Ẩn
-                  </Button>
-                )}
-              </div>
 
-              <div className="flex-1 min-h-0">
-                {isLoading ? (
-                  <div className="h-full flex items-center justify-center text-muted-foreground">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  </div>
-                ) : selected ? (
-                  <div className="h-full flex flex-col">
-                    <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
-                      <div>
-                        [{selected.citation.index}] {selected.citation.documentTitle}
-                        {selected.pageNumber ? ` (trang ${selected.pageNumber})` : ''}
-                      </div>
-                      {selected.citation.sectionPath?.length ? (
-                        <div className="truncate" title={selected.citation.sectionPath.join(' › ')}>
-                          Mục: {selected.citation.sectionPath.join(' › ')}
+                <div className="flex-1 min-h-0">
+                  {isLoading ? (
+                    <div className="h-full flex items-center justify-center text-muted-foreground">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    </div>
+                  ) : selected ? (
+                    <div className="h-full flex flex-col">
+                      <div className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
+                        <div>
+                          [{selected.citation.index}] {selected.citation.documentTitle}
+                          {selected.pageNumber ? ` (trang ${selected.pageNumber})` : ''}
                         </div>
-                      ) : null}
-                      <div>ID tài liệu: {selected.citation.documentId}</div>
-                    </div>
-                    <ScrollArea className="flex-1">
-                      <div className="p-4" ref={citationContentRef}>
-                        <pre className="whitespace-pre-wrap text-xs leading-relaxed text-foreground font-sans">
-                          {selected.prevContent && (
-                            <>
-                              <span className="text-muted-foreground select-none">
-                                — Văn cảnh trước —
-                              </span>
-                              {'\n'}
-                              <span className="text-muted-foreground/80">
-                                {selected.prevContent}
-                              </span>
-                              {'\n\n'}
-                            </>
-                          )}
-                          {selected.chunkContent && (
-                            <>
-                              <span className="text-primary select-none">
-                                — Đoạn trích dẫn được LLM sử dụng —
-                              </span>
-                              {'\n'}
-                              <mark className="bg-yellow-300/60 text-foreground rounded-sm px-0.5">
-                                {selected.chunkContent}
-                              </mark>
-                              {'\n\n'}
-                            </>
-                          )}
-                          {selected.nextContent && (
-                            <>
-                              <span className="text-muted-foreground select-none">
-                                — Văn cảnh sau —
-                              </span>
-                              {'\n'}
-                              <span className="text-muted-foreground/80">
-                                {selected.nextContent}
-                              </span>
-                            </>
-                          )}
-                          {!selected.prevContent &&
-                            !selected.chunkContent &&
-                            !selected.nextContent &&
-                            renderHighlightedText(
-                              selected.documentContent || selected.citation.snippet,
-                              selected.highlightText
-                            )}
-                        </pre>
+                        {selected.citation.sectionPath?.length ? (
+                          <div
+                            className="truncate"
+                            title={selected.citation.sectionPath.join(' › ')}
+                          >
+                            Mục: {selected.citation.sectionPath.join(' › ')}
+                          </div>
+                        ) : null}
+                        <div>ID tài liệu: {selected.citation.documentId}</div>
                       </div>
-                    </ScrollArea>
-                    <div className="px-4 py-2 border-t border-border flex items-center gap-2">
-                      <Button
-                        onClick={handleOpenCitationSource}
-                        variant="secondary"
-                        size="sm"
-                        className="h-8 text-xs"
-                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Mở nguồn gốc
-                      </Button>
-                      {selected.citation.sectionPath?.length ? (
+                      <ScrollArea className="flex-1">
+                        <div className="p-4" ref={citationContentRef}>
+                          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-foreground font-sans">
+                            {selected.prevContent && (
+                              <>
+                                <span className="text-muted-foreground select-none">
+                                  — Văn cảnh trước —
+                                </span>
+                                {'\n'}
+                                <span className="text-muted-foreground/80">
+                                  {selected.prevContent}
+                                </span>
+                                {'\n\n'}
+                              </>
+                            )}
+                            {selected.chunkContent && (
+                              <>
+                                <span className="text-primary select-none">
+                                  — Đoạn trích dẫn được LLM sử dụng —
+                                </span>
+                                {'\n'}
+                                <mark className="bg-yellow-300/60 text-foreground rounded-sm px-0.5">
+                                  {selected.chunkContent}
+                                </mark>
+                                {'\n\n'}
+                              </>
+                            )}
+                            {selected.nextContent && (
+                              <>
+                                <span className="text-muted-foreground select-none">
+                                  — Văn cảnh sau —
+                                </span>
+                                {'\n'}
+                                <span className="text-muted-foreground/80">
+                                  {selected.nextContent}
+                                </span>
+                              </>
+                            )}
+                            {!selected.prevContent &&
+                              !selected.chunkContent &&
+                              !selected.nextContent &&
+                              renderHighlightedText(
+                                selected.documentContent || selected.citation.snippet,
+                                selected.highlightText
+                              )}
+                          </pre>
+                        </div>
+                      </ScrollArea>
+                      <div className="px-4 py-2 border-t border-border flex items-center gap-2">
                         <Button
-                          onClick={handleScopeToSection}
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="Chỉ hỏi trong mục này"
+                          onClick={handleOpenCitationSource}
+                          variant="secondary"
+                          size="sm"
+                          className="h-8 text-xs"
                           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                         >
-                          <Filter className="w-3 h-3" />
+                          <ExternalLink className="w-3 h-3" />
+                          Mở nguồn gốc
                         </Button>
-                      ) : null}
-                      {selected.pageNumber ? (
+                        {selected.citation.sectionPath?.length ? (
+                          <Button
+                            onClick={handleScopeToSection}
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Chỉ hỏi trong mục này"
+                            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                          >
+                            <Filter className="w-3 h-3" />
+                          </Button>
+                        ) : null}
+                        {selected.pageNumber ? (
+                          <Button
+                            onClick={handleScopeToPage}
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Chỉ hỏi trong trang này"
+                            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                          >
+                            <Filter className="w-3 h-3" />
+                          </Button>
+                        ) : null}
+                        <div className="flex-1" />
+                        <span className="text-xs text-muted-foreground">Đánh giá trích dẫn:</span>
                         <Button
-                          onClick={handleScopeToPage}
+                          onClick={() => handleRecordFeedback('citation_good')}
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="Chỉ hỏi trong trang này"
+                          size="sm"
+                          className={`h-8 px-2 text-xs ${feedbackSent === 'citation_good' ? 'text-green-600' : ''}`}
+                          title="Trích dẫn chính xác"
                           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                         >
-                          <Filter className="w-3 h-3" />
+                          <ThumbsUp className="w-3 h-3" />
                         </Button>
-                      ) : null}
-                      <div className="flex-1" />
-                      <span className="text-xs text-muted-foreground">Đánh giá trích dẫn:</span>
-                      <Button
-                        onClick={() => handleRecordFeedback('citation_good')}
-                        variant="ghost"
-                        size="sm"
-                        className={`h-8 px-2 text-xs ${feedbackSent === 'citation_good' ? 'text-green-600' : ''}`}
-                        title="Trích dẫn chính xác"
-                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                      >
-                        <ThumbsUp className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        onClick={() => handleRecordFeedback('citation_bad')}
-                        variant="ghost"
-                        size="sm"
-                        className={`h-8 px-2 text-xs ${feedbackSent === 'citation_bad' ? 'text-destructive' : ''}`}
-                        title="Trích dẫn không liên quan/sai"
-                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                      >
-                        <ThumbsDown className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        onClick={() => handleRecordFeedback('user_correction')}
-                        variant="ghost"
-                        size="sm"
-                        className={`h-8 px-2 text-xs ${feedbackSent === 'user_correction' ? 'text-blue-600' : ''}`}
-                        title="Sửa nội dung sai"
-                        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                      >
-                        <PenLine className="w-3 h-3" />
-                      </Button>
+                        <Button
+                          onClick={() => handleRecordFeedback('citation_bad')}
+                          variant="ghost"
+                          size="sm"
+                          className={`h-8 px-2 text-xs ${feedbackSent === 'citation_bad' ? 'text-destructive' : ''}`}
+                          title="Trích dẫn không liên quan/sai"
+                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                        >
+                          <ThumbsDown className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          onClick={() => handleRecordFeedback('user_correction')}
+                          variant="ghost"
+                          size="sm"
+                          className={`h-8 px-2 text-xs ${feedbackSent === 'user_correction' ? 'text-blue-600' : ''}`}
+                          title="Sửa nội dung sai"
+                          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                        >
+                          <PenLine className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="h-full flex items-center justify-center px-4 text-center text-sm text-muted-foreground">
-                    Chọn chỉ mục citation [n] trong câu trả lời để xem đoạn trích.
-                  </div>
-                )}
+                  ) : (
+                    <div className="h-full flex items-center justify-center px-4 text-center text-sm text-muted-foreground">
+                      Chọn chỉ mục citation [n] trong câu trả lời để xem đoạn trích.
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </>
       )}

@@ -34,6 +34,7 @@ export interface FetchOptions {
  * 网页抓取服务
  */
 export class WebFetchService {
+  private static readonly MAX_REDIRECTS = 5
   private turndown: TurndownService
   private defaultOptions: Required<FetchOptions> = {
     timeout: 30000,
@@ -62,7 +63,7 @@ export class WebFetchService {
     const opts = { ...this.defaultOptions, ...options }
 
     try {
-      const parsedUrl = await assertSafePublicHttpUrl(url, 'Knowledge URL')
+      let parsedUrl = await assertSafePublicHttpUrl(url, 'Knowledge URL')
 
       Logger.info('WebFetchService', `Fetching: ${parsedUrl.toString()}`)
 
@@ -71,15 +72,37 @@ export class WebFetchService {
       const timeoutId = setTimeout(() => controller.abort(), opts.timeout)
 
       try {
-        const response = await fetch(parsedUrl, {
-          headers: {
-            'User-Agent': opts.userAgent,
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'vi-VN,zh;q=0.9,en;q=0.8'
-          },
-          signal: controller.signal,
-          redirect: 'follow'
-        })
+        let response: Response | undefined
+        for (
+          let redirectCount = 0;
+          redirectCount <= WebFetchService.MAX_REDIRECTS;
+          redirectCount++
+        ) {
+          response = await fetch(parsedUrl, {
+            headers: {
+              'User-Agent': opts.userAgent,
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'vi-VN,zh;q=0.9,en;q=0.8'
+            },
+            signal: controller.signal,
+            redirect: 'manual'
+          })
+
+          if (![301, 302, 303, 307, 308].includes(response.status)) break
+          const location = response.headers.get('location')
+          if (!location) throw new Error('Web redirect is missing its Location header')
+          if (redirectCount === WebFetchService.MAX_REDIRECTS) {
+            throw new Error(`Too many redirects (maximum ${WebFetchService.MAX_REDIRECTS})`)
+          }
+
+          const redirectUrl = new URL(location, parsedUrl)
+          parsedUrl = await assertSafePublicHttpUrl(
+            redirectUrl.toString(),
+            'Knowledge redirect URL'
+          )
+        }
+
+        if (!response) throw new Error('Web request did not return a response')
 
         clearTimeout(timeoutId)
 

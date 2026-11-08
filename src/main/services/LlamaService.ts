@@ -275,7 +275,9 @@ export class LlamaService {
     const profile: RuntimeProfile = {
       backend,
       chatCtxSize,
-      embeddingCtxSize: 1024,
+      // bge-m3 handles long inputs; a larger ctx/ubatch also lets the embedding
+      // server process whole document-level texts instead of rejecting them.
+      embeddingCtxSize: 2048,
       threads,
       batchSize: isLowSpec ? 128 : 512,
       ubatchSize: isLowSpec ? 64 : 256,
@@ -497,10 +499,13 @@ export class LlamaService {
       return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
     }
 
+    // llama.cpp requires every embedding input to fit in one physical batch, so
+    // the embedding ubatch must cover realistic text lengths (not just 256).
+    const embeddingBatch = 1024
     const defaultBatchSize =
-      kind === 'embedding' ? Math.max(runtime.batchSize, 256) : runtime.batchSize
+      kind === 'embedding' ? Math.max(runtime.batchSize, embeddingBatch) : runtime.batchSize
     const defaultUbatchSize =
-      kind === 'embedding' ? Math.max(runtime.ubatchSize, 256) : runtime.ubatchSize
+      kind === 'embedding' ? Math.max(runtime.ubatchSize, embeddingBatch) : runtime.ubatchSize
 
     const batchSize =
       kind === 'embedding'
@@ -665,6 +670,8 @@ export class LlamaService {
       // ignore
     }
     this.chatProc = null
+    // Model changed → recompute ctx/ubatch profile for the new model.
+    this.runtimeProfile = null
     // Chờ OS giải phóng port trước khi spawn process mới
     await new Promise((r) => setTimeout(r, 1500))
 
@@ -713,6 +720,8 @@ export class LlamaService {
       // ignore
     }
     this.embedProc = null
+    // Model changed → recompute ctx/ubatch profile for the new model.
+    this.runtimeProfile = null
     // Chờ OS giải phóng port trước khi spawn process mới
     await new Promise((r) => setTimeout(r, 1500))
 
@@ -755,43 +764,20 @@ export class LlamaService {
       return
     }
 
-    if (!chatUp) {
-      const chatModel = this.getDefaultModelFile('chat')
-      if (!chatModel) {
-        Logger.warn(
-          'LlamaService',
-          'Cannot locate chat model (.gguf). Set KN_LLAMA_AUTO_ROOT/models or KN_LLAMA_CHAT_MODEL.'
-        )
-      } else {
-        this.spawnServer('chat', bin, chatModel)
-      }
+    // Delegate to the ensure* methods so a stale process running a different
+    // model is killed before spawning the configured one.
+    if (!chatUp && !(await this.ensureChatStarted())) {
+      Logger.warn('LlamaService', 'Chat server did not become ready within timeout')
+    }
+    if (!embUp && !(await this.ensureEmbeddingStarted())) {
+      Logger.warn('LlamaService', 'Embedding server did not become ready within timeout')
     }
 
-    if (!embUp) {
-      const embModel = this.getDefaultModelFile('embedding')
-      if (!embModel) {
-        Logger.warn(
-          'LlamaService',
-          'Cannot locate embedding model (.gguf). Set KN_LLAMA_AUTO_ROOT/models or KN_LLAMA_EMBED_MODEL.'
-        )
-      } else {
-        this.spawnServer('embedding', bin, embModel)
-      }
+    if ((await this.isServerUp('chat')) && (await this.isServerUp('embedding'))) {
+      Logger.info('LlamaService', 'llama.cpp servers are up')
+    } else {
+      Logger.warn('LlamaService', 'llama.cpp servers did not become ready within timeout')
     }
-
-    // Wait up to ~30s for readiness
-    const start = Date.now()
-    while (Date.now() - start < 30000) {
-      const okChat = await this.isServerUp('chat')
-      const okEmb = await this.isServerUp('embedding')
-      if (okChat && okEmb) {
-        Logger.info('LlamaService', 'llama.cpp servers are up')
-        return
-      }
-      await new Promise((r) => setTimeout(r, 500))
-    }
-
-    Logger.warn('LlamaService', 'llama.cpp servers did not become ready within timeout')
   }
 
   async stop(): Promise<void> {

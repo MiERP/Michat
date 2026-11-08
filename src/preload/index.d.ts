@@ -39,40 +39,6 @@ export type {
 export type { UpdateState, UpdateCheckResult, UpdateOperationResult }
 export type { LicenseStatus }
 
-/** Word / Excel / PowerPoint document kinds handled by the office engine. */
-export type OfficeDocumentKind = 'docx' | 'xlsx' | 'pptx'
-
-/** officecli skill the office assistant can follow ('auto' = pick by format). */
-export type OfficeAgentSkill =
-  | 'auto'
-  | 'officecli-docx'
-  | 'officecli-word-form'
-  | 'officecli-academic-paper'
-  | 'officecli-xlsx'
-  | 'officecli-financial-model'
-  | 'officecli-data-dashboard'
-  | 'officecli-pptx'
-  | 'officecli-pitch-deck'
-  | 'morph-ppt'
-  | 'morph-ppt-3d'
-
-export interface OfficeStatus {
-  available: boolean
-  version: string | null
-  binaryPath: string | null
-  workspaceDir: string | null
-  error?: string
-}
-
-export interface OfficeIssue {
-  id: string
-  type: string
-  severity: string
-  path: string
-  message: string
-  suggestion?: string
-}
-
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -235,6 +201,10 @@ declare global {
           notebookId: string,
           filePath: string
         ) => Promise<{ success: boolean; documentId?: string; error?: string }>
+        addDocumentFromUrl: (
+          notebookId: string,
+          url: string
+        ) => Promise<{ success: boolean; documentId?: string; error?: string }>
         addDocumentsFromFolder: (
           notebookId: string,
           folderPath: string
@@ -341,6 +311,11 @@ declare global {
 
         // 统计
         getStats: (notebookId: string) => Promise<KnowledgeStats>
+        probeEmbeddingDimensions: () => Promise<{
+          success: boolean
+          dimensions?: number
+          error?: string
+        }>
 
         // 文件选择对话框
         selectFiles: () => Promise<string[]>
@@ -355,51 +330,6 @@ declare global {
         onAutoSynced: (callback: (data: any) => void) => () => void
         // 监听 tài liệu mới được nạp lại vào KB
         onDocumentsChanged: (callback: (data: { notebookId: string }) => void) => () => void
-      }
-
-      // Office document engine (Word / Excel / PowerPoint via officecli)
-      office: {
-        status: () => Promise<OfficeStatus>
-        workspaceDir: () => Promise<string>
-        defaultOutputPath: (kind: OfficeDocumentKind, name: string) => Promise<string>
-        selectOutput: (kind: OfficeDocumentKind, defaultName: string) => Promise<string | null>
-        exportDocument: (payload: {
-          kind: OfficeDocumentKind
-          title: string
-          markdown: string
-          outputPath: string
-          notebookId: string
-        }) => Promise<{ success: boolean; outputPath?: string; error?: string }>
-        generate: (payload: {
-          kind: OfficeDocumentKind
-          title: string
-          skill?: OfficeAgentSkill
-          instruction?: string
-          markdown: string
-          outputPath: string
-          notebookId: string
-          templatePath?: string
-        }) => Promise<{
-          success: boolean
-          status?: 'ok' | 'no_provider' | 'engine_unavailable'
-          outputPath?: string
-          usedFallback?: boolean
-          toolCalls?: number
-          attempts?: number
-          error?: string
-        }>
-        onGenerateProgress: (
-          callback: (data: { outputPath: string; stage: string; progress: number }) => void
-        ) => () => void
-        renderPreview: (
-          filePath: string
-        ) => Promise<{ success: boolean; html?: string; error?: string }>
-        validate: (filePath: string) => Promise<{ success: boolean; message: string | null }>
-        issues: (
-          filePath: string
-        ) => Promise<{ success: boolean; count: number; issues: OfficeIssue[] }>
-        openFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
-        openWindow: (notebookId: string) => Promise<{ success: boolean }>
       }
 
       // Llama model management

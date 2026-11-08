@@ -231,6 +231,25 @@ describe('vector rebuild and knowledge backfill', () => {
     expect(results.length).toBeGreaterThan(0)
   })
 
+  it('backfills FTS rows that are missing while vectors are intact', async () => {
+    const { knowledgeService, notebookId, dbModule } = context
+    const documentId = await seedDocument()
+    const chunkCount = knowledgeService.getDocumentChunks(documentId).length
+
+    // Bảng FTS bị xoá/tạo lại nhưng chunk + vector vẫn còn.
+    dbModule.getSqlite().prepare('DELETE FROM fts_chunks WHERE notebook_id = ?').run(notebookId)
+
+    const result = await knowledgeService.rebuildMissingVectors(notebookId, 500)
+
+    expect(result.ftsRebuilt).toBe(chunkCount)
+    expect(
+      dbModule
+        .getSqlite()
+        .prepare('SELECT count(*) as c FROM fts_chunks WHERE notebook_id = ?')
+        .get(notebookId)
+    ).toMatchObject({ c: chunkCount })
+  })
+
   it('queues a backfill job for documents missing structure or document vector', async () => {
     const { knowledgeService, notebookId, jobService, dbModule, schema, db } = context
     const { eq } = await import('drizzle-orm')

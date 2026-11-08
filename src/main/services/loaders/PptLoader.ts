@@ -11,9 +11,37 @@ import type { IDocumentLoader, DocumentLoadResult, LoadOptions, PageInfo } from 
 /** officeparser chỉ hỗ trợ .pptx (OOXML); .ppt nhị phân cũ không nằm trong SupportedFileType. */
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 
-interface ExtractedSlide {
+export interface ExtractedSlide {
   slideNumber: number
   text: string
+}
+
+/**
+ * Makes slide boundaries visible to the common Markdown normalizer. This keeps
+ * page citations and hierarchical section retrieval on the same offset system.
+ */
+export function canonicalizeSlides(slides: ExtractedSlide[]): { content: string; pages: PageInfo[] } {
+  const blocks: string[] = []
+  const pages: PageInfo[] = []
+  let offset = 0
+
+  for (const slide of slides) {
+    const body = slide.text.trim()
+    if (!body) continue
+    const title = body.split('\n')[0].trim().slice(0, 160) || `Slide ${slide.slideNumber}`
+    const block = `# Slide ${slide.slideNumber}: ${title}\n\n${body}`
+    blocks.push(block)
+    pages.push({
+      pageNumber: slide.slideNumber,
+      content: block,
+      startOffset: offset,
+      endOffset: offset + block.length,
+      metadata: { slideNumber: slide.slideNumber, title }
+    })
+    offset += block.length + 2
+  }
+
+  return { content: blocks.join('\n\n'), pages }
 }
 
 /**
@@ -52,14 +80,15 @@ export class PptLoader implements IDocumentLoader {
 
     try {
       const document = await OfficeParser.parseOffice(source, { fileType: 'pptx' })
-      const content = document.toText().trim()
+      const slides = opts.preserveStructure ? this.extractSlides(document.content) : []
+      const canonical = canonicalizeSlides(slides)
+      const content = canonical.content || document.toText().trim()
 
       if (!content) {
         throw new Error('No readable text content found in PowerPoint document')
       }
 
-      const slides = opts.preserveStructure ? this.extractSlides(document.content) : []
-      const pages = this.buildPages(slides, content)
+      const pages = canonical.pages.length > 0 ? canonical.pages : this.buildPages(slides, content)
 
       const title = this.extractTitle(slides, content)
       const slideCount = pages.length || slides.length

@@ -7,6 +7,14 @@ import { createHash } from 'crypto'
 import { ProviderManager } from '../providers/ProviderManager'
 import type { EmbeddingResult, EmbeddingConfig } from '../providers/types'
 import Logger from '../../shared/utils/logger'
+import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../shared/types/knowledge'
+
+/**
+ * Texts longer than this are split before hitting the embedding server. The
+ * local llama.cpp embedding batch must hold a whole input; splitting here avoids
+ * a failed round-trip for documents, enrichment summaries, etc.
+ */
+const MAX_EMBED_TEXT_CHARS = 1200
 
 /**
  * Cấu hình dịch vụ Embedding
@@ -30,6 +38,7 @@ export class EmbeddingService {
   private cache = new Map<string, EmbeddingResult>()
   private cacheHits = 0
   private cacheMisses = 0
+  private probedDimensions: number | null = null
 
   constructor(providerManager: ProviderManager, config?: EmbeddingServiceConfig) {
     this.providerManager = providerManager
@@ -49,7 +58,21 @@ export class EmbeddingService {
   clearCache(): void {
     const size = this.cache.size
     this.cache.clear()
+    this.probedDimensions = null
     Logger.info('EmbeddingService', `Embedding cache cleared (${size} entries)`)
+  }
+
+  /**
+   * Số chiều vector thực tế của model embedding đang cấu hình.
+   * Kết quả được cache cho tới khi cache bị xoá (đổi model).
+   */
+  async probeDimensions(): Promise<number> {
+    if (this.probedDimensions !== null) return this.probedDimensions
+    const result = await this.embed('dimension probe', {
+      dimensions: REQUIRED_EMBEDDING_DIMENSIONS
+    })
+    this.probedDimensions = result.dimensions
+    return result.dimensions
   }
 
   getCacheStats(): { entries: number; hits: number; misses: number } {
@@ -297,6 +320,13 @@ export class EmbeddingService {
   ): Promise<EmbeddingResult> {
     const maxDepth = 6
 
+    // Split proactively: a failed request costs a round-trip even with retries
+    // disabled, and long document-level texts are common.
+    if (text.length > MAX_EMBED_TEXT_CHARS && depth < maxDepth) {
+      const proactive = this.splitTextForEmbedding(text)
+      if (proactive) return this.poolEmbeddings(provider, proactive, config, depth)
+    }
+
     try {
       return await this.withRetry(() => provider.createEmbedding(text, config))
     } catch (error) {
@@ -304,30 +334,55 @@ export class EmbeddingService {
         throw error
       }
 
-      const splitPos = Math.floor(text.length / 2)
-      const left = text.slice(0, splitPos).trim()
-      const right = text.slice(splitPos).trim()
+      const split = this.splitTextForEmbedding(text)
+      if (!split) throw error
+      return this.poolEmbeddings(provider, split, config, depth)
+    }
+  }
 
-      if (!left || !right) {
-        throw error
+  /** Split a text near the middle, preferring paragraph/sentence boundaries. */
+  private splitTextForEmbedding(text: string): [string, string] | null {
+    const middle = Math.floor(text.length / 2)
+    const separators = ['\n\n', '\n', '. ', ' ']
+
+    for (const separator of separators) {
+      const before = text.lastIndexOf(separator, middle)
+      const after = text.indexOf(separator, middle)
+      const index =
+        before >= 0 && (after < 0 || middle - before <= after - middle) ? before : after
+      if (index > 40 && index < text.length - 40) {
+        const left = text.slice(0, index).trim()
+        const right = text.slice(index + separator.length).trim()
+        if (left && right) return [left, right]
       }
+    }
 
-      const [leftEmbedding, rightEmbedding] = await Promise.all([
-        this.embedSingleWithAdaptiveSplit(provider, left, config, depth + 1),
-        this.embedSingleWithAdaptiveSplit(provider, right, config, depth + 1)
-      ])
+    const left = text.slice(0, middle).trim()
+    const right = text.slice(middle).trim()
+    return left && right ? [left, right] : null
+  }
 
-      const pooled = new Float32Array(leftEmbedding.embedding.length)
-      for (let i = 0; i < pooled.length; i++) {
-        pooled[i] = (leftEmbedding.embedding[i] + rightEmbedding.embedding[i]) / 2
-      }
+  private async poolEmbeddings(
+    provider: NonNullable<Awaited<ReturnType<ProviderManager['getActiveEmbeddingProvider']>>>,
+    parts: [string, string],
+    config: EmbeddingConfig | undefined,
+    depth: number
+  ): Promise<EmbeddingResult> {
+    const [leftEmbedding, rightEmbedding] = await Promise.all([
+      this.embedSingleWithAdaptiveSplit(provider, parts[0], config, depth + 1),
+      this.embedSingleWithAdaptiveSplit(provider, parts[1], config, depth + 1)
+    ])
 
-      return {
-        embedding: pooled,
-        model: leftEmbedding.model,
-        dimensions: pooled.length,
-        tokensUsed: (leftEmbedding.tokensUsed || 0) + (rightEmbedding.tokensUsed || 0)
-      }
+    const pooled = new Float32Array(leftEmbedding.embedding.length)
+    for (let i = 0; i < pooled.length; i++) {
+      pooled[i] = (leftEmbedding.embedding[i] + rightEmbedding.embedding[i]) / 2
+    }
+
+    return {
+      embedding: pooled,
+      model: leftEmbedding.model,
+      dimensions: pooled.length,
+      tokensUsed: (leftEmbedding.tokensUsed || 0) + (rightEmbedding.tokensUsed || 0)
     }
   }
 

@@ -141,6 +141,13 @@
       "when": 1784041872000,
       "tag": "0019_notebook_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792535340000,
+      "tag": "0020_document_metadata_index",
+      "breakpoints": true
     }
   ]
 }

@@ -12,8 +12,10 @@ import ReasoningContent from './ReasoningContent'
 import { useItemStore } from '../../../store/itemStore'
 import { useNotebookStore } from '../../../store/notebookStore'
 import { useCitationStore } from '../../../store/citationStore'
+import { ensureInlineCitationPlacement } from './citationFormatting'
 import { Button } from '../../ui/button'
 import { ScrollArea, ScrollBar } from '../../ui/scroll-area'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../ui/tooltip'
 import 'highlight.js/styles/github-dark.css'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
@@ -207,19 +209,41 @@ export default function MessageItem({ message }: MessageItemProps): ReactElement
                 a: ({ children, href, ...props }) => {
                   if (href?.startsWith('citation:')) {
                     const index = Number(href.replace('citation:', ''))
+                    const citation = visibleCitations.find((item) => item.index === index)
                     return (
-                      <a
-                        className="underline text-xs align-super mx-0.5 hover:text-foreground"
-                        href={`citation:${index}`}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          void handleCitationClick(index)
-                        }}
-                        title={`Open citation [${index}]`}
-                      >
-                        [{children}]
-                      </a>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <a
+                            className="underline text-xs align-super mx-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            href={`citation:${index}`}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              void handleCitationClick(index)
+                            }}
+                            aria-label={`Mở trích dẫn ${index}: ${citation?.documentTitle || 'nguồn'}`}
+                          >
+                            [{children}]
+                          </a>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-sm space-y-1 p-3 text-xs">
+                          <p className="font-medium text-popover-foreground">
+                            [{index}] {citation?.documentTitle || 'Nguồn trích dẫn'}
+                          </p>
+                          {citation?.sectionPath?.length ? (
+                            <p className="text-muted-foreground">
+                              Mục: {citation.sectionPath.join(' › ')}
+                            </p>
+                          ) : null}
+                          {citation?.pageNumber ? (
+                            <p className="text-muted-foreground">Trang {citation.pageNumber}</p>
+                          ) : null}
+                          {citation?.snippet ? (
+                            <p className="line-clamp-3 text-muted-foreground">{citation.snippet}</p>
+                          ) : null}
+                          <p className="text-muted-foreground">Nhấp để mở nguồn.</p>
+                        </TooltipContent>
+                      </Tooltip>
                     )
                   }
 
@@ -340,53 +364,6 @@ function linkifyCitationMarkers(content: string, citations: ChatCitation[]): str
       })
     })
     .join('')
-}
-
-function ensureInlineCitationPlacement(content: string, citations: ChatCitation[]): string {
-  if (!content || citations.length === 0) return content
-
-  const cleaned = removeCitationBoilerplateLines(content)
-  const validIndexes = new Set(citations.map((citation) => citation.index))
-  const hasValidMarker = [...cleaned.matchAll(/\[(\d+)\](?!\s*\()/g)].some((match) =>
-    validIndexes.has(Number(match[1]))
-  )
-
-  if (hasValidMarker) return cleaned
-
-  // Do not inject synthetic citation indexes.
-  // Forced fallback like [1] can point to an unrelated chunk and creates false provenance.
-  return cleaned
-}
-
-/** Bỏ dấu tiếng Việt để khớp cả "thông tin" lẫn "thong tin". */
-function stripVietnameseDiacritics(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-}
-
-function removeCitationBoilerplateLines(content: string): string {
-  const boilerplatePrefixes = [
-    'thong tin nay duoc tim thay',
-    'thong tin tren duoc tim thay',
-    'nguon thong tin nay',
-    'this information was found',
-    'the information was found',
-    'source:'
-  ]
-
-  const filtered = content
-    .split('\n')
-    .filter((line) => {
-      const trimmed = line.trim()
-      if (!trimmed) return true
-      const ascii = stripVietnameseDiacritics(trimmed.toLowerCase())
-      return !boilerplatePrefixes.some((prefix) => ascii.startsWith(prefix))
-    })
-    .join('\n')
-
-  return filtered.replace(/\n{3,}/g, '\n\n').trim()
 }
 
 function buildChatNoteTitle(content: string): string {
