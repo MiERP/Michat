@@ -1,7 +1,7 @@
 /* eslint-disable no-irregular-whitespace */
 /**
  * DocxLoader
- * Ã¤Â½Â¿Ã§â€Â¨ mammoth Ã¨Â§Â£Ã¦Å¾Â Word Ã¦â€“â€¡Ã¦Â¡Â£Ã¯Â¼Å’Ã¥Â¹Â¶Ã¦ÂÂÃ¥Ââ€“Ã§Â»â€œÃ¦Å¾â€žÃ¤Â¿Â¡Ã¦ÂÂ¯
+ * 使用 mammoth 解析 Word 文档，并提取结构信息
  */
 
 import { readFile } from 'fs/promises'
@@ -13,8 +13,8 @@ import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
 
 /**
- * Word Ã¦â€"â€¡Ã¦Â¡Â£Ã¥Å Â Ã¨Â½Â½Ã¥â„¢Â¨
- * Ã¥Å¸ÂºÃ¤ÂºÅ½ mammothÃ¯Â¼Å'Ã¦â€Â¯Ã¦Å'Â DOCX Ã¥â€™Å' DOC
+ * Word document loader.
+ * Uses mammoth/officeparser for DOCX and word-extractor for legacy DOC.
  */
 export class DocxLoader implements IDocumentLoader {
   readonly supportedMimeTypes = [
@@ -207,23 +207,23 @@ export class DocxLoader implements IDocumentLoader {
   }
 
   /**
-   * Ã¦Å¾â€žÃ¥Â»ÂºÃ§Â«Â Ã¨Å â€šÃ¥Â±â€šÃ§ÂºÂ§Ã¥â€¦Â³Ã§Â³Â»
+   * Build the section hierarchy from flat headings.
    */
   private buildHierarchy(flatSections: SectionInfo[]): SectionInfo[] {
     const root: SectionInfo[] = []
     const stack: SectionInfo[] = []
 
     for (const section of flatSections) {
-      // Ã¥Â¼Â¹Ã¥â€¡ÂºÃ¦Â¯â€Ã¥Â½â€œÃ¥â€°ÂÃ§Â«Â Ã¨Å â€šÃ§ÂºÂ§Ã¥Ë†Â«Ã©Â«ËœÃ§Å¡â€žÃ¨Å â€šÃ§â€šÂ¹
+      // Pop headings at the same or deeper level before attaching this one.
       while (stack.length > 0 && stack[stack.length - 1].level >= section.level) {
         stack.pop()
       }
 
       if (stack.length === 0) {
-        // Ã©Â¡Â¶Ã§ÂºÂ§Ã§Â«Â Ã¨Å â€š
+        // Top-level heading.
         root.push(section)
       } else {
-        // Ã¥Â­ÂÃ§Â«Â Ã¨Å â€š
+        // Child heading.
         const parent = stack[stack.length - 1]
         if (!parent.children) {
           parent.children = []

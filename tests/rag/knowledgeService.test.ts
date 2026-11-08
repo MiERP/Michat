@@ -26,8 +26,8 @@ function vectorFor(text: string): Float32Array {
   if (lower.includes('local-first') || lower.includes('local first')) vector[0] = 1
   if (
     lower.includes('privacy') ||
-    lower.includes('riÃªng tÆ°') ||
-    lower.includes('quyá»n riÃªng tÆ°')
+    lower.includes('riêng tư') ||
+    lower.includes('quyền riêng tư')
   )
     vector[1] = 1
   if (lower.includes('embedding') || lower.includes('embeddings')) vector[2] = 1
@@ -203,14 +203,14 @@ describe('KnowledgeService RAG regression', () => {
     const filePath = join(userDataDir, 'local-first.md')
     await writeFile(
       filePath,
-      '# ChÃ­nh sÃ¡ch Local First\n\nMiChat giá»¯ tÃ i liá»‡u, embeddings vÃ  truy váº¥n RAG trÃªn mÃ¡y.\n\n| Dá»¯ liá»‡u | Máº·c Ä‘á»‹nh |\n| --- | --- |\n| Query RAG | Local |',
+      '# Chính sách Local First\n\nMiChat giữ tài liệu, embeddings và truy vấn RAG trên máy.\n\n| Dữ liệu | Mặc định |\n| --- | --- |\n| Query RAG | Local |',
       'utf8'
     )
 
     const documentId = await service.addDocumentFromFile(notebookId, filePath)
     const results = await service.search(
       notebookId,
-      'local-first embeddings truy váº¥n trÃªn mÃ¡y',
+      'local-first embeddings truy vấn trên máy',
       {
         topK: 3,
         threshold: 0,

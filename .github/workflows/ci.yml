@@ -43,6 +43,9 @@ jobs:
       - name: Production audit
         run: pnpm security:audit
 
+      - name: Encoding check
+        run: pnpm check:encoding
+
       - name: Typecheck
         run: pnpm typecheck
 
