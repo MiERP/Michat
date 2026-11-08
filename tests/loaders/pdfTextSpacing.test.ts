@@ -3,6 +3,7 @@ import { PdfLoader } from '../../src/main/services/loaders/PdfLoader'
 
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   getDocument: () => ({
+    destroy: async () => {},
     promise: Promise.resolve({
       numPages: 1,
       getMetadata: async () => ({ info: {} }),

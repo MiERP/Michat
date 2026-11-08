@@ -125,9 +125,9 @@ export class PdfLoader implements IDocumentLoader {
         page.cleanup()
       }
 
-      // Dọn dẹp tài liệu
+      // Dọn dẹp tài liệu (PDF.js 6 chuyển destroy() lên loading task)
       await pdfDoc.cleanup()
-      await pdfDoc.destroy()
+      await loadingTask.destroy()
 
       if (!fullText.trim()) {
         const ocrMessage = opts.ocrEnabled

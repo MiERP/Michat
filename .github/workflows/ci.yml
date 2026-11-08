@@ -37,6 +37,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Dependency floors
+        run: pnpm check:deps
+
+      - name: Production audit
+        run: pnpm security:audit
+
       - name: Typecheck
         run: pnpm typecheck
 

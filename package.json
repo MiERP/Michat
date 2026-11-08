@@ -1,7 +1,7 @@
 {
     "name": "michat",
     "version": "1.1.1",
-    "description": "Ứng dụng máy tính local-first giúp biến tài liệu thành cơ sở tri thức có thể truy vấn bằng AI.",
+    "description": "á»¨ng dá»¥ng mÃ¡y tÃ­nh local-first giÃºp biáº¿n tÃ i liá»‡u thÃ nh cÆ¡ sá»Ÿ tri thá»©c cÃ³ thá»ƒ truy váº¥n báº±ng AI.",
     "main": "./out/main/index.js",
     "author": "HAVS",
     "license": "GPL-3.0-only",
@@ -41,9 +41,10 @@
         "test:coverage": "vitest run --coverage",
         "smoke:packaged": "powershell -ExecutionPolicy Bypass -File scripts/smoke-packaged.ps1",
         "release:check": "npm run typecheck && npm run lint && npm test && npm run test:rag && npm run test:coverage && npm run check:security && npm run check:package",
-        "security:audit": "pnpm audit --prod",
+        "security:audit": "pnpm audit --prod --audit-level=high",
         "security:test": "vitest run tests/guards.test.ts tests/ipcValidation.test.ts tests/providerPolicy.test.ts",
-        "check:security": "npm run security:audit && npm run security:test",
+        "check:deps": "node scripts/check-dependency-floor.cjs",
+        "check:security": "npm run security:audit && npm run check:deps && npm run security:test",
         "test:rag": "vitest run tests/rag tests/evals",
         "package:deps": "electron-rebuild -v 39.8.10 -w better-sqlite3 -f",
         "check:package": "npm run resources:check && npm run build && npm run package:deps && electron-builder --dir --config.npmRebuild=false && npm run smoke:packaged",
@@ -77,10 +78,10 @@
         "@radix-ui/react-tooltip": "^1.2.8",
         "@tesseract.js-data/eng": "1.0.0",
         "@tesseract.js-data/vie": "1.0.0",
-        "@tiptap/extensions": "^3.13.0",
-        "@tiptap/pm": "^3.13.0",
-        "@tiptap/react": "^3.13.0",
-        "@tiptap/starter-kit": "^3.13.0",
+        "@tiptap/extensions": "^3.33.0",
+        "@tiptap/pm": "^3.33.0",
+        "@tiptap/react": "^3.33.0",
+        "@tiptap/starter-kit": "^3.33.0",
         "ai": "^5.0.115",
         "better-sqlite3": "^12.5.0",
         "cheerio": "^1.2.0",
@@ -104,7 +105,7 @@
         "officeparser": "^7.1.0",
         "ollama-ai-provider": "^1.2.0",
         "ollama-ai-provider-v2": "^1.5.5",
-        "pdfjs-dist": "^5.4.449",
+        "pdfjs-dist": "^6.2.108",
         "pend": "1.2.0",
         "qwen-ai-provider": "^0.1.1",
         "react": "^19.2.1",
@@ -112,7 +113,7 @@
         "react-i18next": "^16.5.0",
         "react-markdown": "^10.1.0",
         "react-resizable-panels": "^4.5.2",
-        "react-router-dom": "^7.15.1",
+        "react-router-dom": "^7.18.2",
         "rehype-highlight": "^7.0.2",
         "rehype-katex": "^7.0.1",
         "remark": "^15.0.1",
@@ -127,7 +128,7 @@
         "unified": "^11.0.5",
         "unist-util-visit": "^5.0.0",
         "word-extractor": "^1.0.4",
-        "zod": "^4.1.13",
+        "zod": "^4.6.7",
         "zustand": "^5.0.9"
     },
     "devDependencies": {
@@ -147,7 +148,7 @@
         "@vitest/coverage-v8": "^4.1.7",
         "autoprefixer": "^10.4.22",
         "drizzle-kit": "^0.31.8",
-        "electron": "^39.8.10",
+        "electron": "^42.11.16",
         "electron-builder": "^26.0.12",
         "electron-vite": "^5.0.0",
         "eslint": "^9.39.1",
@@ -163,3 +164,4 @@
         "vitest": "^4.1.7"
     }
 }
+
