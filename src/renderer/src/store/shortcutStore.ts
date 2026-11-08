@@ -15,27 +15,27 @@ export const useShortcutStore = create<ShortcutStore>((set, get) => ({
   shortcuts: [],
 
   loadShortcuts: async () => {
-    const shortcuts = await window.electron.ipcRenderer.invoke('shortcuts:getAll')
+    const shortcuts = await window.api.shortcuts.getAll()
     set({ shortcuts })
   },
 
   updateShortcut: async (action: ShortcutAction, accelerator: string) => {
-    await window.electron.ipcRenderer.invoke('shortcuts:update', action, accelerator)
+    await window.api.shortcuts.update(action, accelerator)
     await get().loadShortcuts()
   },
 
   toggleShortcut: async (action: ShortcutAction, enabled: boolean) => {
-    await window.electron.ipcRenderer.invoke('shortcuts:toggle', action, enabled)
+    await window.api.shortcuts.toggle(action, enabled)
     await get().loadShortcuts()
   },
 
   resetSingle: async (action: ShortcutAction) => {
-    await window.electron.ipcRenderer.invoke('shortcuts:resetSingle', action)
+    await window.api.shortcuts.resetSingle(action)
     await get().loadShortcuts()
   },
 
   resetToDefaults: async () => {
-    await window.electron.ipcRenderer.invoke('shortcuts:reset')
+    await window.api.shortcuts.reset()
     await get().loadShortcuts()
   },
 

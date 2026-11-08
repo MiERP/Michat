@@ -3,14 +3,11 @@ import { ShortcutAction } from '../../../shared/types'
 
 /**
  * Shortcut Executor Hook
- * Listens for shortcut trigger events from main process and dispatches CustomEvents.
+ * Listens for shortcut trigger events from the main process and dispatches CustomEvents.
  */
-export function useShortcutExecutor() {
+export function useShortcutExecutor(): void {
   useEffect(() => {
-    const ipc = window.electron?.ipcRenderer
-    if (!ipc) return
-
-    const handleShortcut = (_event: any, action: ShortcutAction) => {
+    const unsubscribe = window.api?.shortcuts?.onTriggered((action) => {
       switch (action) {
         case ShortcutAction.CREATE_NOTEBOOK:
           window.dispatchEvent(new CustomEvent('shortcut:create-notebook'))
@@ -31,12 +28,8 @@ export function useShortcutExecutor() {
         default:
           console.warn('[ShortcutExecutor] Unknown shortcut action:', action)
       }
-    }
+    })
 
-    ipc.on('shortcut:triggered', handleShortcut)
-
-    return () => {
-      ipc.removeAllListeners('shortcut:triggered')
-    }
+    return unsubscribe
   }, [])
 }

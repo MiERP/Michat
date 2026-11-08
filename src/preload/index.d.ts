@@ -1,6 +1,12 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
 import type { ChatSession, ChatMessage, ChatScope } from '../shared/types/chat'
-import type { Notebook, Note, ProviderConfig, AppSettings } from '../shared/types'
+import type {
+  Notebook,
+  Note,
+  ProviderConfig,
+  AppSettings,
+  ShortcutAction,
+  ShortcutConfig
+} from '../shared/types'
 import type {
   KnowledgeDocument,
   KnowledgeChunk,
@@ -41,7 +47,6 @@ export type { LicenseStatus }
 
 declare global {
   interface Window {
-    electron: ElectronAPI
     api: {
       // 获取平台信息
       getPlatform: () => Promise<string>
@@ -359,6 +364,16 @@ declare global {
           embeddingCtxSize: number
           threads: number
         }>
+      }
+
+      // Keyboard shortcuts
+      shortcuts: {
+        getAll: () => Promise<ShortcutConfig[]>
+        update: (action: ShortcutAction, accelerator: string) => Promise<void>
+        toggle: (action: ShortcutAction, enabled: boolean) => Promise<void>
+        resetSingle: (action: ShortcutAction) => Promise<void>
+        reset: () => Promise<void>
+        onTriggered: (callback: (action: ShortcutAction) => void) => () => void
       }
 
       // 应用更新相关

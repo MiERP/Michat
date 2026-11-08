@@ -1,35 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DocumentMetadata } from '../main/services/DocumentMetadataExtractionService'
+import type { ShortcutAction, ShortcutConfig } from '../shared/types'
 
-/**
- * IPC 调用超时包装函数
- * @param channel IPC 频道名称
- * @param timeout 超时时间（毫秒）
- * @param args 参数
- * @returns Promise
- */
-
-type IpcListener = (event: unknown, ...args: unknown[]) => void
-
-const electronAPI = {
-  process: {
-    versions: process.versions
-  },
-  ipcRenderer: {
-    invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),
-    send: (channel: string, ...args: unknown[]) => ipcRenderer.send(channel, ...args),
-    on: (channel: string, listener: IpcListener) => {
-      const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
-        listener(undefined, ...args)
-      ipcRenderer.on(channel, subscription)
-      return () => ipcRenderer.removeListener(channel, subscription)
-    },
-    once: (channel: string, listener: IpcListener) => {
-      ipcRenderer.once(channel, (_event, ...args) => listener(undefined, ...args))
-    },
-    removeAllListeners: (channel: string) => ipcRenderer.removeAllListeners(channel)
-  }
-}
 async function invokeWithTimeout<T>(channel: string, timeout: number, ...args: any[]): Promise<T> {
   return Promise.race([
     ipcRenderer.invoke(channel, ...args),
@@ -302,6 +274,24 @@ const api = {
     }
   },
 
+  // Keyboard shortcuts
+  shortcuts: {
+    getAll: (): Promise<ShortcutConfig[]> => ipcRenderer.invoke('shortcuts:getAll'),
+    update: (action: ShortcutAction, accelerator: string): Promise<void> =>
+      ipcRenderer.invoke('shortcuts:update', action, accelerator),
+    toggle: (action: ShortcutAction, enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke('shortcuts:toggle', action, enabled),
+    resetSingle: (action: ShortcutAction): Promise<void> =>
+      ipcRenderer.invoke('shortcuts:resetSingle', action),
+    reset: (): Promise<void> => ipcRenderer.invoke('shortcuts:reset'),
+    onTriggered: (callback: (action: ShortcutAction) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, action: ShortcutAction): void =>
+        callback(action)
+      ipcRenderer.on('shortcut:triggered', listener)
+      return () => ipcRenderer.removeListener('shortcut:triggered', listener)
+    }
+  },
+
   // 应用更新相关
   update: {
     // 检查更新
@@ -321,19 +311,14 @@ const api = {
   }
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
+// Fail closed: the renderer must run with context isolation. Never fall back
+// to assigning Node-backed objects directly on `window`.
+if (!process.contextIsolated) {
+  throw new Error('MiChat requires context isolation; refusing to expose the preload API')
+}
+
+try {
+  contextBridge.exposeInMainWorld('api', api)
+} catch (error) {
+  console.error(error)
 }
