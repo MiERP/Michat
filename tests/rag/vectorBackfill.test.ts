@@ -1,7 +1,5 @@
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
 import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
 
 let userDataDir = ''
@@ -57,25 +55,21 @@ const LEGACY_VEC_DDL = `
   );
 `
 
-async function freshUserDataDir(prefix: string): Promise<void> {
-  userDataDir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-  await mkdir(userDataDir, { recursive: true })
-}
-
 describe('vec_embeddings migration', () => {
   let dbModule: any
 
   beforeEach(async () => {
-    await freshUserDataDir('michat-vecmig')
+    userDataDir = await createTempUserData('michat-vecmig')
     dbModule = await import('../../src/main/db')
     dbModule.initDatabase()
     dbModule.runMigrations()
   })
 
   afterEach(async () => {
-    dbModule?.closeDatabase()
+    if (userDataDir) {
+      await closeAndRemove(userDataDir, () => dbModule?.closeDatabase())
+    }
     vi.resetModules()
-    if (userDataDir) await rm(userDataDir, { recursive: true, force: true })
   })
 
   it('rebuilds a legacy vector table that has no document_id column', () => {
@@ -113,7 +107,7 @@ describe('vector rebuild and knowledge backfill', () => {
   let context: any
 
   beforeEach(async () => {
-    await freshUserDataDir('michat-backfill')
+    userDataDir = await createTempUserData('michat-backfill')
 
     const dbModule = await import('../../src/main/db')
     const schema = await import('../../src/main/db/schema')
@@ -149,9 +143,10 @@ describe('vector rebuild and knowledge backfill', () => {
 
   afterEach(async () => {
     context?.jobService?.stop()
-    context?.dbModule.closeDatabase()
+    if (userDataDir) {
+      await closeAndRemove(userDataDir, () => context?.dbModule.closeDatabase())
+    }
     vi.resetModules()
-    if (userDataDir) await rm(userDataDir, { recursive: true, force: true })
   })
 
   async function seedDocument(): Promise<string> {

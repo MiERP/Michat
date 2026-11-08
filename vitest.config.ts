@@ -8,6 +8,9 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     // Native SQLite and Office integration tests otherwise contend for CPU on Windows.
     maxWorkers: 2,
+    // Migration + extension setup can exceed 10s on a cold Windows machine.
+    hookTimeout: 30_000,
+    testTimeout: 60_000,
     coverage: {
       provider: 'v8',
       include: ['src/main/**/*.ts', 'src/shared/**/*.ts'],

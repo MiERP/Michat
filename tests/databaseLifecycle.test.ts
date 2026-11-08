@@ -1,7 +1,5 @@
-import { mkdtemp, rm } from 'fs/promises'
-import { tmpdir } from 'os'
-import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createTempUserData, closeAndRemove } from './helpers/tempUserData'
 
 let userDataDir = ''
 vi.mock('electron', () => ({
@@ -12,15 +10,18 @@ import { closeDatabase, getDatabase, getSqlite, initDatabase } from '../src/main
 
 describe('database connection lifecycle', () => {
   beforeEach(async () => {
-    userDataDir = await mkdtemp(join(tmpdir(), 'michat-lifecycle-'))
+    userDataDir = await createTempUserData('michat-lifecycle')
   })
 
   afterEach(async () => {
-    // Also release a leaked connection when the regression assertion fails.
-    const connection = getSqlite()
-    closeDatabase()
-    if (connection?.open) connection.close()
-    await rm(userDataDir, { recursive: true, force: true })
+    if (userDataDir) {
+      await closeAndRemove(userDataDir, () => {
+        const connection = getSqlite()
+        closeDatabase()
+        // Also release a leaked connection when the regression assertion fails.
+        if (connection?.open) connection.close()
+      })
+    }
   })
 
   it('closes a reopened database and invalidates its ORM handle', () => {

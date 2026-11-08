@@ -1,7 +1,7 @@
-import { mkdir, rm, writeFile } from 'fs/promises'
+import { writeFile } from 'fs/promises'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
 import ExcelJS from 'exceljs'
 import type {
   EmbeddingConfig,
@@ -86,8 +86,7 @@ class FakeProviderManager {
 type TestContext = Awaited<ReturnType<typeof createContext>>
 
 async function createContext() {
-  userDataDir = join(tmpdir(), `michat-rag-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-  await mkdir(userDataDir, { recursive: true })
+  userDataDir = await createTempUserData('michat-rag')
 
   const dbModule = await import('../../src/main/db')
   const schema = await import('../../src/main/db/schema')
@@ -110,11 +109,8 @@ async function createContext() {
 }
 
 async function cleanup(context: TestContext | undefined) {
-  if (context) {
-    context.dbModule.closeDatabase()
-  }
   if (userDataDir) {
-    await rm(userDataDir, { recursive: true, force: true })
+    await closeAndRemove(userDataDir, () => context?.dbModule.closeDatabase())
   }
   vi.resetModules()
 }

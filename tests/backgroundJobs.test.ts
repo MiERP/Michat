@@ -1,7 +1,5 @@
-import { mkdir, rm } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { createTempUserData, closeAndRemove } from './helpers/tempUserData'
 
 let userDataDir = ''
 
@@ -16,11 +14,7 @@ describe('BackgroundJobService durability', () => {
   let context: any
 
   beforeEach(async () => {
-    userDataDir = join(
-      tmpdir(),
-      `michat-jobs-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    )
-    await mkdir(userDataDir, { recursive: true })
+    userDataDir = await createTempUserData('michat-jobs')
 
     const dbModule = await import('../../src/main/db')
     const schema = await import('../../src/main/db/schema')
@@ -49,9 +43,10 @@ describe('BackgroundJobService durability', () => {
   })
 
   afterEach(async () => {
-    context?.dbModule.closeDatabase()
+    if (userDataDir) {
+      await closeAndRemove(userDataDir, () => context?.dbModule.closeDatabase())
+    }
     vi.resetModules()
-    if (userDataDir) await rm(userDataDir, { recursive: true, force: true })
   })
 
   it('deduplicates identical pending jobs', () => {

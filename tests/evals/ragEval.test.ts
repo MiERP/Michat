@@ -1,7 +1,7 @@
-import { mkdir, rm, readFile } from 'fs/promises'
+import { readFile } from 'fs/promises'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
 import type { EmbeddingConfig, EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
 
 let userDataDir = ''
@@ -70,8 +70,7 @@ describe('RAG eval — real document → section → chunk pipeline', () => {
   let context: any
 
   beforeEach(async () => {
-    userDataDir = join(tmpdir(), `michat-eval-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    await mkdir(userDataDir, { recursive: true })
+    userDataDir = await createTempUserData('michat-eval')
 
     const dbModule = await import('../../src/main/db')
     const schema = await import('../../src/main/db/schema')
@@ -92,9 +91,10 @@ describe('RAG eval — real document → section → chunk pipeline', () => {
   })
 
   afterEach(async () => {
-    context?.dbModule.closeDatabase()
+    if (userDataDir) {
+      await closeAndRemove(userDataDir, () => context?.dbModule.closeDatabase())
+    }
     vi.resetModules()
-    if (userDataDir) await rm(userDataDir, { recursive: true, force: true })
   })
 
   it('ranks citation chunks in top 3 through the real retrieval pipeline', async () => {
