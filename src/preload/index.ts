@@ -278,11 +278,11 @@ const api = {
   shortcuts: {
     getAll: (): Promise<ShortcutConfig[]> => ipcRenderer.invoke('shortcuts:getAll'),
     update: (action: ShortcutAction, accelerator: string): Promise<void> =>
-      ipcRenderer.invoke('shortcuts:update', action, accelerator),
+      ipcRenderer.invoke('shortcuts:update', { action, accelerator }),
     toggle: (action: ShortcutAction, enabled: boolean): Promise<void> =>
-      ipcRenderer.invoke('shortcuts:toggle', action, enabled),
+      ipcRenderer.invoke('shortcuts:toggle', { action, enabled }),
     resetSingle: (action: ShortcutAction): Promise<void> =>
-      ipcRenderer.invoke('shortcuts:resetSingle', action),
+      ipcRenderer.invoke('shortcuts:resetSingle', { action }),
     reset: (): Promise<void> => ipcRenderer.invoke('shortcuts:reset'),
     onTriggered: (callback: (action: ShortcutAction) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, action: ShortcutAction): void =>

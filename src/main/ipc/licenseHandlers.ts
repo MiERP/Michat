@@ -1,8 +1,8 @@
-import { ipcMain } from 'electron'
 import { LicenseService } from '../services/LicenseService'
+import { registerNoArgHandler } from './handlerRegistry'
 
 export function registerLicenseHandlers(): void {
-  ipcMain.handle('license:get-status', () => {
+  registerNoArgHandler('license:get-status', async () => {
     return LicenseService.getStatus()
   })
 }

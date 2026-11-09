@@ -13,6 +13,7 @@ import { LlamaService } from '../services/LlamaService'
 import { ProviderManager } from '../providers/ProviderManager'
 import Logger from '../../shared/utils/logger'
 import { KnowledgeSchemas, validate, validateWithEvent } from './validation'
+import { registerNoArgHandler } from './handlerRegistry'
 import { isAllowedExternalOpenUrl, normalizeFsPath } from '../security/guards'
 
 /**
@@ -597,7 +598,7 @@ export function registerKnowledgeHandlers(
   )
 
   // Kiểm tra số chiều embedding của model đang cấu hình (chặn model không khớp schema).
-  ipcMain.handle('knowledge:probe-embedding-dimensions', async () => {
+  registerNoArgHandler('knowledge:probe-embedding-dimensions', async () => {
     try {
       return {
         success: true,
@@ -610,7 +611,7 @@ export function registerKnowledgeHandlers(
   })
 
   // 打开文件选择对话框
-  ipcMain.handle('knowledge:select-files', async () => {
+  registerNoArgHandler('knowledge:select-files', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       filters: [
@@ -638,7 +639,7 @@ export function registerKnowledgeHandlers(
   })
 
   // 打开文件夹选择对话框
-  ipcMain.handle('knowledge:select-folder', async () => {
+  registerNoArgHandler('knowledge:select-folder', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory']
     })

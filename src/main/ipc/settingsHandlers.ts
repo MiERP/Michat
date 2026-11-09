@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { settingsManager, type AppSettings, defaultSettings } from '../config'
 import { SettingsSchemas, validate } from './validation'
+import { registerNoArgHandler } from './handlerRegistry'
 
 /**
  * 向所有窗口广播设置变化
@@ -18,7 +19,7 @@ function broadcastSettingsChange(newSettings: AppSettings, oldSettings: AppSetti
  */
 export function registerSettingsHandlers(): void {
   // 获取所有设置
-  ipcMain.handle('settings:getAll', async () => {
+  registerNoArgHandler('settings:getAll', async () => {
     return await settingsManager.getAllSettings()
   })
 
@@ -51,13 +52,13 @@ export function registerSettingsHandlers(): void {
   )
 
   // 重置设置
-  ipcMain.handle('settings:reset', async () => {
+  registerNoArgHandler('settings:reset', async () => {
     await settingsManager.resetSettings()
     return await settingsManager.getAllSettings()
   })
 
   // 获取默认提示词
-  ipcMain.handle('settings:getDefaultPrompts', async () => {
+  registerNoArgHandler('settings:getDefaultPrompts', async () => {
     return defaultSettings.prompts
   })
 

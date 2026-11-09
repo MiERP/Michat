@@ -5,6 +5,7 @@ import { providersManager } from '../config'
 import { isEncryptionAvailable } from '../config/secureStorage'
 import { enrichModelsWithType } from '../../shared/utils/modelClassifier'
 import { ProviderSchemas, validate } from './validation'
+import { registerNoArgHandler } from './handlerRegistry'
 import Logger from '../../shared/utils/logger'
 import { assertLoopbackHttpUrl } from '../security/guards'
 
@@ -80,7 +81,7 @@ export function registerProviderHandlers(
   )
 
   // Get all provider configs (inject local model list for settings UI)
-  ipcMain.handle('get-all-provider-configs', async () => {
+  registerNoArgHandler('get-all-provider-configs', async () => {
     const providers = await providersManager.getPublicProviderConfigs()
 
     const llamaConfig = providers.find((p) => p.providerName === 'llama')
@@ -130,7 +131,7 @@ export function registerProviderHandlers(
   )
 
   // Check if secure storage encryption is available
-  ipcMain.handle('check-encryption', () => {
+  registerNoArgHandler('check-encryption', async () => {
     return { encrypted: isEncryptionAvailable() }
   })
 

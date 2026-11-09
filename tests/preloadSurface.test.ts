@@ -55,7 +55,10 @@ describe('preload surface', () => {
 
     await api.shortcuts.update('newChat', 'Ctrl+N')
 
-    expect(electron.invoke).toHaveBeenCalledWith('shortcuts:update', 'newChat', 'Ctrl+N')
+    expect(electron.invoke).toHaveBeenCalledWith('shortcuts:update', {
+      action: 'newChat',
+      accelerator: 'Ctrl+N'
+    })
   })
 
   it('fails closed when context isolation is disabled', async () => {

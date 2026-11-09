@@ -1,8 +1,24 @@
-import { ipcMain } from 'electron'
+import { z } from 'zod'
 import type Store from 'electron-store'
-import { ShortcutConfig, ShortcutAction } from '../../shared/types'
+import { ShortcutAction } from '../../shared/types'
+import type { ShortcutConfig } from '../../shared/types'
 import { ShortcutManager } from '../services/ShortcutManager'
 import type { StoreSchema } from '../config/types'
+import { registerNoArgHandler, registerValidatedHandler } from './handlerRegistry'
+
+const ShortcutSchemas = {
+  update: z.object({
+    action: z.nativeEnum(ShortcutAction),
+    accelerator: z.string().min(1).max(100)
+  }),
+  toggle: z.object({
+    action: z.nativeEnum(ShortcutAction),
+    enabled: z.boolean()
+  }),
+  resetSingle: z.object({
+    action: z.nativeEnum(ShortcutAction)
+  })
+}
 
 /**
  * 注册快捷键相关的 IPC Handlers
@@ -11,31 +27,23 @@ export function registerShortcutHandlers(
   shortcutManager: ShortcutManager,
   store: Store<StoreSchema>
 ): void {
-  // 获取所有快捷键
-  ipcMain.handle('shortcuts:getAll', (): ShortcutConfig[] => {
+  registerNoArgHandler('shortcuts:getAll', async () => {
     return (store.get('shortcuts') as ShortcutConfig[]) || []
   })
 
-  // 更新快捷键
-  ipcMain.handle(
-    'shortcuts:update',
-    (_event, action: ShortcutAction, accelerator: string): void => {
-      shortcutManager.updateShortcut(action, accelerator)
-    }
-  )
-
-  // 切换快捷键的启用/禁用状态
-  ipcMain.handle('shortcuts:toggle', (_event, action: ShortcutAction, enabled: boolean): void => {
-    shortcutManager.toggleShortcut(action, enabled)
+  registerValidatedHandler('shortcuts:update', ShortcutSchemas.update, async (args) => {
+    shortcutManager.updateShortcut(args.action, args.accelerator)
   })
 
-  // 重置单个快捷键为默认值
-  ipcMain.handle('shortcuts:resetSingle', (_event, action: ShortcutAction): void => {
-    shortcutManager.resetSingle(action)
+  registerValidatedHandler('shortcuts:toggle', ShortcutSchemas.toggle, async (args) => {
+    shortcutManager.toggleShortcut(args.action, args.enabled)
   })
 
-  // 重置为默认配置
-  ipcMain.handle('shortcuts:reset', (): void => {
+  registerValidatedHandler('shortcuts:resetSingle', ShortcutSchemas.resetSingle, async (args) => {
+    shortcutManager.resetSingle(args.action)
+  })
+
+  registerNoArgHandler('shortcuts:reset', async () => {
     shortcutManager.resetToDefaults()
   })
 

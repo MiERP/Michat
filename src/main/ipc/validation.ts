@@ -433,6 +433,20 @@ export const ChatSchemas = {
   })
 }
 
+/** Reject IPC calls from frames that are not part of the app. */
+function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
+  const url = event.senderFrame?.url
+  if (!url) return
+  const trusted =
+    url.startsWith('file://') ||
+    url.startsWith('app://') ||
+    url.startsWith('http://localhost:') ||
+    url.startsWith('http://127.0.0.1:')
+  if (!trusted) {
+    throw new Error(`Untrusted IPC sender: ${url}`)
+  }
+}
+
 /**
  * 验证函数包装器
  * 将 IPC handler 包装为自动验证参数的函数
@@ -456,6 +470,7 @@ export function validate<TSchema extends z.ZodType, TResult>(
 ): (_event: Electron.IpcMainInvokeEvent, ...args: any[]) => Promise<TResult> {
   return async (_event: Electron.IpcMainInvokeEvent, ...args: any[]): Promise<TResult> => {
     try {
+      assertTrustedSender(_event)
       if (args.length === 0) {
         throw new Error('IPC call missing arguments')
       }
@@ -489,6 +504,7 @@ export function validateWithEvent<TSchema extends z.ZodType, TResult>(
 ): (_event: Electron.IpcMainInvokeEvent, ...args: any[]) => Promise<TResult> {
   return async (event: Electron.IpcMainInvokeEvent, ...args: any[]): Promise<TResult> => {
     try {
+      assertTrustedSender(event)
       if (args.length === 0) {
         throw new Error('IPC call missing arguments')
       }
@@ -509,6 +525,18 @@ export function validateWithEvent<TSchema extends z.ZodType, TResult>(
       }
       throw error
     }
+  }
+}
+
+/**
+ * Wrapper for handlers that intentionally take no arguments.
+ */
+export function validateNoArgs<TResult>(
+  handler: (event: Electron.IpcMainInvokeEvent) => Promise<TResult>
+): (event: Electron.IpcMainInvokeEvent) => Promise<TResult> {
+  return async (event: Electron.IpcMainInvokeEvent): Promise<TResult> => {
+    assertTrustedSender(event)
+    return handler(event)
   }
 }
 

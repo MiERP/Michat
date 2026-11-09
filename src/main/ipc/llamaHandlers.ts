@@ -1,13 +1,19 @@
-import { ipcMain, dialog } from 'electron'
+import { dialog } from 'electron'
+import { z } from 'zod'
 import { LlamaService } from '../services/LlamaService'
 import Logger from '../../shared/utils/logger'
+import { registerNoArgHandler, registerValidatedHandler } from './handlerRegistry'
+
+const LlamaSchemas = {
+  importModel: z.object({ type: z.enum(['chat', 'embedding']) }),
+  removeModel: z.object({ filename: z.string().min(1).max(255) })
+}
 
 /**
  * Register Llama model management IPC handlers.
  */
-export function registerLlamaHandlers(llamaService: LlamaService) {
-  // List all .gguf models in the models directory
-  ipcMain.handle('llama:list-models', async () => {
+export function registerLlamaHandlers(llamaService: LlamaService): void {
+  registerNoArgHandler('llama:list-models', async () => {
     try {
       return llamaService.listModels()
     } catch (error) {
@@ -16,8 +22,7 @@ export function registerLlamaHandlers(llamaService: LlamaService) {
     }
   })
 
-  // Import a .gguf model file (opens file dialog, copies to models dir)
-  ipcMain.handle('llama:import-model', async (_event, args: { type: 'chat' | 'embedding' }) => {
+  registerValidatedHandler('llama:import-model', LlamaSchemas.importModel, async (args) => {
     try {
       const result = await dialog.showOpenDialog({
         title: `Select ${args.type} model (.gguf)`,
@@ -44,8 +49,7 @@ export function registerLlamaHandlers(llamaService: LlamaService) {
     }
   })
 
-  // Remove a model from the models directory
-  ipcMain.handle('llama:remove-model', async (_event, args: { filename: string }) => {
+  registerValidatedHandler('llama:remove-model', LlamaSchemas.removeModel, async (args) => {
     try {
       llamaService.removeModel(args.filename)
       return { success: true }
@@ -55,9 +59,8 @@ export function registerLlamaHandlers(llamaService: LlamaService) {
     }
   })
 
-  // Get llama runtime info (for status display)
-  ipcMain.handle('llama:get-server-info', async () => {
-    const runtime = llamaService.getRuntimeInfo()
+  registerNoArgHandler('llama:get-server-info', async () => {
+    const runtime = await llamaService.getRuntimeInfo()
     return {
       binary: llamaService.getLlamaServerBin(),
       chatPort: runtime.chatPort,

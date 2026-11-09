@@ -7,6 +7,7 @@ import {
   deleteNotebook
 } from '../db/queries'
 import { NotebookSchemas, validate } from './validation'
+import { registerNoArgHandler } from './handlerRegistry'
 
 /**
  * 注册笔记本相关的 IPC handlers
@@ -29,7 +30,7 @@ export function registerNotebookHandlers() {
   )
 
   // 获取所有笔记本
-  ipcMain.handle('get-all-notebooks', async () => {
+  registerNoArgHandler('get-all-notebooks', async () => {
     console.log('[IPC] get-all-notebooks')
     try {
       const notebooks = getAllNotebooks()
