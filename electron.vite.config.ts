@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
+import { buildContentSecurityPolicy } from './src/main/security/csp'
 
 // 复制迁移文件的插件
 function copyMigrationsPlugin() {
@@ -46,6 +47,19 @@ function copyMigrationsPlugin() {
   }
 }
 
+function injectCspPlugin() {
+  let isDev = false
+  return {
+    name: 'inject-csp',
+    configResolved(config: { command: string }) {
+      isDev = config.command === 'serve'
+    },
+    transformIndexHtml(html: string) {
+      return html.replace('%CSP%', buildContentSecurityPolicy({ isDev }))
+    }
+  }
+}
+
 export default defineConfig({
   main: {
     plugins: [copyMigrationsPlugin()],
@@ -72,7 +86,7 @@ export default defineConfig({
         '@': resolve('src/renderer/src')
       }
     },
-    plugins: [tailwindcss(), react()],
+    plugins: [tailwindcss(), react(), injectCspPlugin()],
     build: {
       emptyOutDir: false
     }

@@ -44,9 +44,9 @@
   --brand-selection-gradient: linear-gradient(135deg, #0b9444, #20aa58);
   --brand-selection-border: #078a3e;
   --brand-shadow: 0 10px 28px rgb(11 105 51 / 18%);
-  --font-sans: 'Inter', sans-serif;
-  --font-serif: 'Lora', serif;
-  --font-mono: 'Fira Code', monospace;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: Georgia, 'Times New Roman', serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius: 0.5rem;
   --shadow-x: 0px;
   --shadow-y: 2px;
@@ -111,9 +111,9 @@
   --brand-selection-gradient: linear-gradient(135deg, rgb(11 148 68 / 25%), rgb(11 148 68 / 12%));
   --brand-selection-border: rgb(22 184 93 / 72%);
   --brand-shadow: none;
-  --font-sans: 'Inter', sans-serif;
-  --font-serif: 'Lora', serif;
-  --font-mono: 'Fira Code', monospace;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: Georgia, 'Times New Roman', serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius: 0.5rem;
   --shadow-x: 0px;
   --shadow-y: 6px;
@@ -171,9 +171,9 @@
   --color-brand-green: var(--brand-green);
   --color-brand-orange: var(--brand-orange);
 
-  --font-sans: 'Inter', sans-serif;
-  --font-mono: 'Fira Code', monospace;
-  --font-serif: 'Lora', serif;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-serif: Georgia, 'Times New Roman', serif;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
