@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto'
 import { getDatabase } from '../db'
 import { backgroundJobs } from '../db/schema'
 import type { NewBackgroundJob } from '../db/schema'
-import { and, asc, eq, inArray, isNull, lt } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
 import { KnowledgeService } from './KnowledgeService'
 import { KnowledgeLinkService } from './KnowledgeLinkService'
 import { NotebookSummaryService } from './NotebookSummaryService'
@@ -192,7 +192,12 @@ export class BackgroundJobService {
 
   getPendingCount(): number {
     const db = getDatabase()
-    return db.select().from(backgroundJobs).where(eq(backgroundJobs.status, 'pending')).all().length
+    const row = db
+      .select({ count: sql<number>`count(*)` })
+      .from(backgroundJobs)
+      .where(eq(backgroundJobs.status, 'pending'))
+      .get()
+    return row?.count ?? 0
   }
 
   /**

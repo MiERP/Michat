@@ -31,7 +31,7 @@ import type {
   NewChunkFeedback,
   NewSection
 } from '../db/schema'
-import { and, eq, desc, inArray, isNull, sql } from 'drizzle-orm'
+import { and, eq, desc, inArray, isNull, sql, gte, lte } from 'drizzle-orm'
 import { EmbeddingService } from './EmbeddingService'
 import { ChunkingService, type ChunkOptions, type ChunkStructureContext } from './ChunkingService'
 import { FileParserService } from './FileParserService'
@@ -1027,6 +1027,65 @@ export class KnowledgeService {
     contents.push(currentChunk.content)
     if (nextChunk) contents.push(nextChunk.content)
     return contents
+  }
+
+  /**
+   * Load only the chunks needed to expand a result: its section, or its
+   * immediate neighbours when the document has no section index. Fetching
+   * every chunk of every hit document is too expensive for large files.
+   */
+  private loadContextChunks(chunkDetails: Chunk[]): Map<string, Chunk[]> {
+    const db = getDatabase()
+    const byDocument = new Map<string, Chunk[]>()
+    const seen = new Set<string>()
+
+    const add = (chunk: Chunk): void => {
+      if (seen.has(chunk.id)) return
+      seen.add(chunk.id)
+      const list = byDocument.get(chunk.documentId) ?? []
+      list.push(chunk)
+      byDocument.set(chunk.documentId, list)
+    }
+
+    const documentIds = [...new Set(chunkDetails.map((chunk) => chunk.documentId))]
+    const sectionIds = [...new Set(chunkDetails.map((chunk) => chunk.sectionId).filter(Boolean))] as string[]
+
+    if (documentIds.length > 0 && sectionIds.length > 0) {
+      const sectionRows = db
+        .select()
+        .from(chunks)
+        .where(and(inArray(chunks.documentId, documentIds), inArray(chunks.sectionId, sectionIds)))
+        .all()
+      sectionRows.forEach(add)
+    }
+
+    for (const chunk of chunkDetails) {
+      const hasSectionRows =
+        chunk.sectionId !== null &&
+        chunk.sectionId !== undefined &&
+        (byDocument.get(chunk.documentId) ?? []).some(
+          (candidate) => candidate.sectionId === chunk.sectionId
+        )
+      if (hasSectionRows) continue
+
+      const neighbours = db
+        .select()
+        .from(chunks)
+        .where(
+          and(
+            eq(chunks.documentId, chunk.documentId),
+            gte(chunks.chunkIndex, chunk.chunkIndex - 1),
+            lte(chunks.chunkIndex, chunk.chunkIndex + 1)
+          )
+        )
+        .all()
+      neighbours.forEach(add)
+    }
+
+    for (const list of byDocument.values()) {
+      list.sort((a, b) => a.chunkIndex - b.chunkIndex)
+    }
+    return byDocument
   }
 
   /**
@@ -2828,19 +2887,8 @@ export class KnowledgeService {
       .all()
     const documentMap = new Map(documentDetails.map((d) => [d.id, d]))
 
-    // Get all chunks for these documents to support context expansion
-    const allDocChunks = db
-      .select()
-      .from(chunks)
-      .where(inArray(chunks.documentId, documentIds))
-      .orderBy(chunks.chunkIndex)
-      .all()
-
-    const chunkListByDoc = new Map<string, (typeof chunks.$inferSelect)[]>()
-    allDocChunks.forEach((c) => {
-      if (!chunkListByDoc.has(c.documentId)) chunkListByDoc.set(c.documentId, [])
-      chunkListByDoc.get(c.documentId)!.push(c)
-    })
+    // Load only the section/neighbour chunks needed for context expansion.
+    const chunkListByDoc = this.loadContextChunks(chunkDetails)
 
     const results: SearchResult[] = []
 
