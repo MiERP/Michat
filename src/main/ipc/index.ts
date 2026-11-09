@@ -40,7 +40,7 @@ export function registerAllHandlers(
   const quizService = new QuizService(
     providerManager,
     knowledgeService,
-    () => llamaService.getRuntimeInfo().chatCtxSize
+    () => llamaService.getChatContextSizeSync()
   )
 
   registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)

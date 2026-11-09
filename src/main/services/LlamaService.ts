@@ -1,10 +1,13 @@
 // import { app } from 'electron'
-import { spawn, spawnSync, ChildProcess } from 'child_process'
+import { spawn, ChildProcess } from 'child_process'
 import { join, basename } from 'path'
 import fs from 'fs'
 import Logger from '../../shared/utils/logger'
 import { settingsManager } from '../config'
 import { shouldOffloadChatModelToGpu } from './llama/runtimeProfile'
+import { detectMachineInfo as detectMachineInfoImpl, type MachineInfo } from './llama/machineInfo'
+
+export type { MachineInfo } from './llama/machineInfo'
 
 type ServerKind = 'chat' | 'embedding'
 type Backend = string
@@ -75,22 +78,15 @@ function detectModelContextWindow(filename: string): number | null {
   return null
 }
 
-export type MachineInfo = {
-  cpuCores: number
-  cpuThreads: number
-  ramMB: number
-  gpuName: string
-  gpuVendor: 'NVIDIA' | 'AMD' | 'Intel' | 'Unknown'
-  gpuType: 'Discrete' | 'Onboard' | 'Unknown'
-  gpuVramMB: number
-  hasDGPU: boolean
-}
-
 export class LlamaService {
   private chatProc: ChildProcess | null = null
   private embedProc: ChildProcess | null = null
   private machine: MachineInfo | null = null
   private runtimeProfile: RuntimeProfile | null = null
+
+  constructor(
+    private readonly machineDetector: () => Promise<MachineInfo> = detectMachineInfoImpl
+  ) {}
 
   private isWin(): boolean {
     return process.platform === 'win32'
@@ -143,84 +139,13 @@ export class LlamaService {
   }
 
   /**
-   * Hardware detection (Windows):
-   * Outputs: cores|threads|ramMB|gpuName|vendor|type|vramMB|hasDGPU
-   * Mirrors the logic you used in the .bat (CIM + MSFT_VideoAdapter fallback).
+   * Hardware detection is asynchronous: PowerShell startup can take seconds
+   * and must never block the UI before the window is visible.
    */
-  private detectMachineInfoWin(): MachineInfo {
-    const ps = [
-      "$ErrorActionPreference='SilentlyContinue';",
-      '$cs = Get-CimInstance Win32_ComputerSystem;',
-      '$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1;',
-      '$ramMB = [math]::Round([double]$cs.TotalPhysicalMemory/1MB);',
-      '$gpus = Get-CimInstance Win32_VideoController;',
-      "function Get-GpuVendor([string]$name){ if($name -match 'NVIDIA'){ 'NVIDIA' } elseif($name -match 'AMD|Radeon'){ 'AMD' } elseif($name -match 'Intel'){ 'Intel' } else { 'Unknown' } }",
-      "function Get-GpuType([string]$name){ if($name -match 'Intel\\(R\\).*UHD|Intel\\(R\\).*HD|Intel\\(R\\).*Iris'){ 'Onboard' } else { 'Discrete' } }",
-      '$best = $null;',
-      'if($gpus){ $best = $gpus | Sort-Object @{e={ if($_.AdapterRAM){[double]$_.AdapterRAM}else{0} } } -Descending | Select-Object -First 1 }',
-      "$gpuName = if($best){ $best.Name } else { 'NONE' };",
-      "$vendor  = if($best){ Get-GpuVendor $best.Name } else { 'Unknown' };",
-      "$type    = if($best){ Get-GpuType $best.Name } else { 'Unknown' };",
-      '$vramMB  = 0;',
-      '$wmi = Get-CimInstance -Namespace root\\wmi -ClassName MSFT_VideoAdapter -ErrorAction SilentlyContinue | Sort-Object DedicatedVideoMemory -Descending | Select-Object -First 1;',
-      'if($wmi -and $wmi.DedicatedVideoMemory){ $vramMB = [math]::Round([double]$wmi.DedicatedVideoMemory/1MB) } elseif($best -and $best.AdapterRAM){ $vramMB = [math]::Round([double]$best.AdapterRAM/1MB) }',
-      "$hasDGPU = 0; if($best){ if( (Get-GpuType $best.Name) -eq 'Discrete' -and (Get-GpuVendor $best.Name) -ne 'Intel' ){ $hasDGPU = 1 } }",
-      "Write-Output ($cpu.NumberOfCores.ToString() + '|' + $cpu.NumberOfLogicalProcessors.ToString() + '|' + $ramMB.ToString() + '|' + $gpuName + '|' + $vendor + '|' + $type + '|' + $vramMB.ToString() + '|' + $hasDGPU.ToString())"
-    ].join(' ')
-
-    const r = spawnSync(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
-      {
-        windowsHide: true,
-        encoding: 'utf8'
-      }
-    )
-
-    const line = (r.stdout || '').trim().split(/\r?\n/).pop() || ''
-    const parts = line.split('|')
-    const safeNum = (x: string, d: number) => {
-      const n = Number(x)
-      return Number.isFinite(n) && n > 0 ? n : d
-    }
-
-    const info: MachineInfo = {
-      cpuCores: safeNum(parts[0] || '0', 4),
-      cpuThreads: safeNum(
-        parts[1] || '0',
-        safeNum(String(process.env.NUMBER_OF_PROCESSORS || ''), 4)
-      ),
-      ramMB: safeNum(parts[2] || '0', 0),
-      gpuName: (parts[3] || 'NONE').trim() || 'NONE',
-      gpuVendor: ((parts[4] || 'Unknown').trim() as any) || 'Unknown',
-      gpuType: ((parts[5] || 'Unknown').trim() as any) || 'Unknown',
-      gpuVramMB: safeNum(parts[6] || '0', 0),
-      hasDGPU: (parts[7] || '0').trim() === '1'
-    }
-
-    return info
-  }
-
-  private detectMachineInfo(): MachineInfo {
+  private async detectMachineInfo(): Promise<MachineInfo> {
     if (this.machine) return this.machine
 
-    let info: MachineInfo
-    if (this.isWin()) {
-      info = this.detectMachineInfoWin()
-    } else {
-      // Best-effort defaults for non-Windows (can be improved later)
-      info = {
-        cpuCores: 4,
-        cpuThreads: 4,
-        ramMB: 0,
-        gpuName: 'UNKNOWN',
-        gpuVendor: 'Unknown',
-        gpuType: 'Unknown',
-        gpuVramMB: 0,
-        hasDGPU: false
-      }
-    }
-
+    const info = await this.machineDetector()
     this.machine = info
     Logger.info(
       'LlamaService',
@@ -243,11 +168,11 @@ export class LlamaService {
     return 'llama-bin'
   }
 
-  private computeRuntimeProfile(): RuntimeProfile {
+  private async computeRuntimeProfile(): Promise<RuntimeProfile> {
     if (this.runtimeProfile) return this.runtimeProfile
 
     const backend = this.pickBackend()
-    const info = this.detectMachineInfo()
+    const info = await this.detectMachineInfo()
 
     const envProfile = process.env.KN_LLAMA_PROFILE
     const isLowSpec = envProfile === 'low' || (info.ramMB > 0 && info.ramMB <= 8192)
@@ -426,15 +351,15 @@ export class LlamaService {
     return Number.isFinite(v) ? v : kind === 'chat' ? 8000 : 8001
   }
 
-  getRuntimeInfo(): {
+  async getRuntimeInfo(): Promise<{
     backend: Backend
     chatPort: number
     embedPort: number
     chatCtxSize: number
     embeddingCtxSize: number
     threads: number
-  } {
-    const runtime = this.computeRuntimeProfile()
+  }> {
+    const runtime = await this.computeRuntimeProfile()
     return {
       backend: runtime.backend,
       chatPort: this.getPort('chat'),
@@ -443,6 +368,11 @@ export class LlamaService {
       embeddingCtxSize: runtime.embeddingCtxSize,
       threads: runtime.threads
     }
+  }
+
+  /** Non-blocking fallback used by services that cannot await (e.g. quiz sizing). */
+  getChatContextSizeSync(): number {
+    return this.runtimeProfile?.chatCtxSize ?? 8192
   }
 
   private getHost(): string {
@@ -488,11 +418,9 @@ export class LlamaService {
     }
   }
 
-  private buildArgs(kind: ServerKind, modelPath: string): string[] {
+  private buildArgs(kind: ServerKind, modelPath: string, runtime: RuntimeProfile): string[] {
     const host = this.getHost()
     const port = this.getPort(kind)
-
-    const runtime = this.computeRuntimeProfile()
 
     const parsePositiveInt = (value: string | undefined, fallback: number): number => {
       const parsed = Number(value)
@@ -572,8 +500,13 @@ export class LlamaService {
     return args
   }
 
-  private spawnServer(kind: ServerKind, bin: string, modelPath: string): void {
-    const args = this.buildArgs(kind, modelPath)
+  private async spawnServer(
+    kind: ServerKind,
+    bin: string,
+    modelPath: string
+  ): Promise<void> {
+    const runtime = await this.computeRuntimeProfile()
+    const args = this.buildArgs(kind, modelPath, runtime)
     const label = kind === 'chat' ? 'chat' : 'embedding'
 
     Logger.info('LlamaService', `Starting ${label} server: ${bin} ${args.join(' ')}`)
@@ -652,7 +585,7 @@ export class LlamaService {
 
     Logger.warn('LlamaService', 'Chat server is down (or model changed). Attempting restart...')
 
-    this.detectMachineInfo()
+    await this.detectMachineInfo()
 
     const bin = this.getLlamaServerBin()
     if (!bin) {
@@ -675,7 +608,7 @@ export class LlamaService {
     // Chờ OS giải phóng port trước khi spawn process mới
     await new Promise((r) => setTimeout(r, 1500))
 
-    this.spawnServer('chat', bin, chatModel)
+    await this.spawnServer('chat', bin, chatModel)
 
     // Model 4B+ trên CPU có thể mất tới ~1 phút để load
     const ready = await this.waitForServer('chat', 60000)
@@ -702,7 +635,7 @@ export class LlamaService {
 
     Logger.warn('LlamaService', 'Embedding server is down (or model changed). Attempting restart...')
 
-    this.detectMachineInfo()
+    await this.detectMachineInfo()
 
     const bin = this.getLlamaServerBin()
     if (!bin) {
@@ -725,7 +658,7 @@ export class LlamaService {
     // Chờ OS giải phóng port trước khi spawn process mới
     await new Promise((r) => setTimeout(r, 1500))
 
-    this.spawnServer('embedding', bin, embeddingModel)
+    await this.spawnServer('embedding', bin, embeddingModel)
 
     const ready = await this.waitForServer('embedding', 30000)
     if (!ready) {
@@ -751,7 +684,7 @@ export class LlamaService {
     }
 
     // trigger detection early so backend selection is meaningful
-    this.detectMachineInfo()
+    await this.detectMachineInfo()
 
     const bin = this.getLlamaServerBin()
     Logger.info('LlamaService', `Binary = ${bin || '(null)'}`)

@@ -37,6 +37,18 @@ export class SessionAutoSwitchService {
     )
   }
 
+  /** Update the threshold after the llama runtime profile becomes available. */
+  setChatCtxSize(chatCtxSize: number | null): void {
+    this.tokenThreshold =
+      chatCtxSize && chatCtxSize > 0
+        ? Math.min(
+            Math.max(Math.floor(chatCtxSize * 0.8), 2048),
+            SessionAutoSwitchService.MAX_TOKEN_THRESHOLD
+          )
+        : SessionAutoSwitchService.DEFAULT_TOKEN_THRESHOLD
+    Logger.info('SessionAutoSwitch', `Token threshold set to ${this.tokenThreshold}`)
+  }
+
   /**
    * Record token usage and check if session switch is needed
    * @returns If session was switched, returns new session ID; otherwise returns null

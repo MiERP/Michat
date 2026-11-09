@@ -108,7 +108,8 @@ app.whenReady().then(async () => {
       }
     }
 
-    await llamaService.ensureStarted()
+    // llama.cpp is started after the window is visible (see below); a cold
+    // model load must not block first paint.
 
     // Set app user model id for windows
     electronApp.setAppUserModelId('com.michat.app')
@@ -140,11 +141,10 @@ app.whenReady().then(async () => {
 
     // Initialize Session Auto Switch Service (cần knowledgeService để lưu memory)
     Logger.info('Main', 'Initializing Session Auto Switch Service...')
-    const chatCtxSize = llamaService?.getRuntimeInfo().chatCtxSize ?? null
     sessionAutoSwitchService = new SessionAutoSwitchService(
       providerManager,
       knowledgeService,
-      chatCtxSize
+      null
     )
     Logger.info('Main', 'Session Auto Switch Service initialized')
 
@@ -285,8 +285,18 @@ app.whenReady().then(async () => {
       }
     })
 
-    // Create main window
+    // Create main window before starting llama.cpp. The server/model load can
+    // take tens of seconds; the UI must be visible and responsive meanwhile.
     const mainWindow = createMainWindow()
+
+    void llamaService
+      .ensureStarted()
+      .then(async () => {
+        const runtime = await llamaService!.getRuntimeInfo()
+        sessionAutoSwitchService?.setChatCtxSize(runtime.chatCtxSize)
+        Logger.info('Main', 'llama.cpp servers are ready')
+      })
+      .catch((error) => Logger.warn('Main', 'llama.cpp background start failed:', error))
 
     // Start knowledge auto-sync (watcher + incremental reindex)
     knowledgeService.startAutoSync((payload) => {
