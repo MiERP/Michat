@@ -89,6 +89,7 @@
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "concat-map": "0.0.1",
+        "dompurify": "^3.4.17",
         "drizzle-orm": "^0.45.2",
         "electron-store": "^11.0.2",
         "electron-updater": "^6.3.9",
@@ -165,4 +166,3 @@
         "vitest": "^4.1.7"
     }
 }
-

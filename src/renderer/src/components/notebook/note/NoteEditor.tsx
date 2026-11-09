@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
 import { Placeholder } from '@tiptap/extensions'
 import { ScrollArea } from '../../ui/scroll-area'
+import { sanitizePastedHtml } from '../../../lib/sanitizePastedHtml'
 import './noteEditor.css'
 
 interface NoteEditorProps {
@@ -27,7 +28,8 @@ export default function NoteEditor({ content, onChange }: NoteEditorProps): Reac
     editorProps: {
       attributes: {
         class: 'tiptap-editor prose prose-sm max-w-none focus:outline-none'
-      }
+      },
+      transformPastedHTML: sanitizePastedHtml
     },
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as any).markdown.getMarkdown()
