@@ -175,7 +175,8 @@ export const ProviderSchemas = {
   saveProviderConfig: z.object({
     providerName: z.string().min(1, { message: 'Provider name cannot be empty' }),
     config: providerConfigSchema,
-    enabled: z.boolean()
+    enabled: z.boolean(),
+    clearApiKey: z.boolean().optional()
   }),
 
   getProviderConfig: z.object({

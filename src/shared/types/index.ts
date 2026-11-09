@@ -52,6 +52,15 @@ export interface ProviderConfig {
   updatedAt: number
 }
 
+/** Renderer-safe provider view: never contains the stored API key. */
+export interface PublicProviderConfig {
+  providerName: string
+  config: Record<string, unknown>
+  enabled: boolean
+  updatedAt: number
+  hasApiKey: boolean
+}
+
 /**
  * 模型类型枚举
  */

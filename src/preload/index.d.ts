@@ -3,6 +3,7 @@ import type {
   Notebook,
   Note,
   ProviderConfig,
+  PublicProviderConfig,
   AppSettings,
   ShortcutAction,
   ShortcutConfig
@@ -163,9 +164,11 @@ declare global {
       ) => () => void
 
       // Provider 配置相关
-      saveProviderConfig: (config: ProviderConfig) => Promise<{ encrypted: boolean }>
-      getProviderConfig: (providerName: string) => Promise<ProviderConfig | null>
-      getAllProviderConfigs: () => Promise<ProviderConfig[]>
+      saveProviderConfig: (
+        config: ProviderConfig & { clearApiKey?: boolean }
+      ) => Promise<{ encrypted: boolean }>
+      getProviderConfig: (providerName: string) => Promise<PublicProviderConfig | null>
+      getAllProviderConfigs: () => Promise<PublicProviderConfig[]>
       deleteProviderConfig: (providerName: string) => Promise<void>
       validateProviderConfig: (providerName: string, config: any) => Promise<boolean>
       fetchModels: (

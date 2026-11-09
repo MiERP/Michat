@@ -56,7 +56,12 @@ export function registerProviderHandlers(
         assertLoopbackHttpUrl(embeddingBaseUrl, 'Provider embedding base URL')
       }
 
-      const result = await providersManager.saveProviderConfig(args.providerName, args.config, args.enabled)
+      const result = await providersManager.saveProviderConfig(
+        args.providerName,
+        args.config,
+        args.enabled,
+        { clearApiKey: args.clearApiKey }
+      )
 
       BrowserWindow.getAllWindows().forEach((win) => {
         win.webContents.send('provider-config-changed')
@@ -70,13 +75,13 @@ export function registerProviderHandlers(
   ipcMain.handle(
     'get-provider-config',
     validate(ProviderSchemas.getProviderConfig, async (args) => {
-      return await providersManager.getProviderConfig(args.providerName)
+      return await providersManager.getPublicProviderConfig(args.providerName)
     })
   )
 
   // Get all provider configs (inject local model list for settings UI)
   ipcMain.handle('get-all-provider-configs', async () => {
-    const providers = await providersManager.getAllProviderConfigs()
+    const providers = await providersManager.getPublicProviderConfigs()
 
     const llamaConfig = providers.find((p) => p.providerName === 'llama')
     if (llamaConfig) {
