@@ -34,8 +34,9 @@ export class UpdateService {
     }
 
     // 生产环境配置
-    autoUpdater.autoDownload = false 
-    autoUpdater.autoInstallOnAppQuit = true 
+    autoUpdater.autoDownload = false
+    // Never install silently: the user must choose "Install" explicitly.
+    autoUpdater.autoInstallOnAppQuit = false
 
     Logger.info('UpdateService', 'Auto-updater configured')
 
@@ -85,16 +86,11 @@ export class UpdateService {
     })
 
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
-      Logger.info('UpdateService', 'Update downloaded:', info.version)
+      Logger.info('UpdateService', 'Update downloaded, waiting for user install:', info.version)
       this.updateState({
         status: UpdateStatus.DOWNLOADED,
         info
       })
-
-      Logger.info('UpdateService', 'Auto-installing update...')
-      setTimeout(() => {
-        this.quitAndInstall()
-      }, 1000)
     })
   }
 

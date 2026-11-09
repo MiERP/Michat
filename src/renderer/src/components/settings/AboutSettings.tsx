@@ -1,14 +1,18 @@
-import { ChevronRight, KeyRound } from 'lucide-react'
+import { ChevronRight, Download, KeyRound, RefreshCw } from 'lucide-react'
 import { ReactElement, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import logoImg from '../../assets/logo.png'
 import type { LicenseStatus } from '../../../../shared/types/license'
+import { UpdateStatus, type UpdateState } from '../../../../shared/types/update'
 import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
 
 export default function AboutSettings(): ReactElement {
   const { t } = useTranslation('settings')
   const [appVersion, setAppVersion] = useState<string>('')
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null)
+  const [updateState, setUpdateState] = useState<UpdateState>({ status: UpdateStatus.IDLE })
+  const [updateBusy, setUpdateBusy] = useState(false)
 
   const formatDate = (isoDate?: string): string => {
     if (!isoDate) return '-'
@@ -34,6 +38,43 @@ export default function AboutSettings(): ReactElement {
       })
   }, [])
 
+  useEffect(() => {
+    window.api.update
+      .getState()
+      .then((result) => {
+        if (result.state) setUpdateState(result.state)
+      })
+      .catch(() => {})
+    return window.api.update.onStateChanged((state) => setUpdateState(state))
+  }, [])
+
+  const handleCheckUpdate = async (): Promise<void> => {
+    setUpdateBusy(true)
+    try {
+      const result = await window.api.update.check()
+      if (result.state) setUpdateState(result.state)
+      if (!result.success && result.error) alert(result.error)
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
+  const handleDownloadUpdate = async (): Promise<void> => {
+    setUpdateBusy(true)
+    try {
+      const result = await window.api.update.download()
+      if (!result.success && result.error) alert(result.error)
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
+  const handleInstallUpdate = async (): Promise<void> => {
+    if (!confirm('Install the downloaded update now? MiChat will restart.')) return
+    const result = await window.api.update.install()
+    if (!result.success && result.error) alert(result.error)
+  }
+
   const handleOpenWebsite = async () => {
     await window.api.openExternalUrl('https://github.com/HAVS/MiChat')
   }
@@ -56,6 +97,46 @@ export default function AboutSettings(): ReactElement {
             {t('version')} {appVersion}
           </p>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <RefreshCw className="w-4 h-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-foreground">Updates</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Status: {updateState.status}
+          {updateState.info?.version ? ` · v${updateState.info.version}` : ''}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleCheckUpdate}
+            disabled={updateBusy || updateState.status === UpdateStatus.CHECKING}
+          >
+            Check for updates
+          </Button>
+          {updateState.status === UpdateStatus.AVAILABLE && (
+            <Button size="sm" onClick={handleDownloadUpdate} disabled={updateBusy}>
+              <Download className="w-3.5 h-3.5 mr-1" />
+              Download
+            </Button>
+          )}
+          {updateState.status === UpdateStatus.DOWNLOADED && (
+            <Button size="sm" onClick={handleInstallUpdate}>
+              Install and restart
+            </Button>
+          )}
+        </div>
+        {updateState.status === UpdateStatus.DOWNLOADING && (
+          <p className="text-xs text-muted-foreground">
+            Downloading… {Math.round(updateState.progress?.percent ?? 0)}%
+          </p>
+        )}
+        {updateState.status === UpdateStatus.ERROR && updateState.error && (
+          <p className="text-xs text-destructive">{updateState.error}</p>
+        )}
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-2">
