@@ -24,7 +24,6 @@ export const defaultSettings: AppSettings = {
   ragDocTopK: 8,
   ragMetadataAwareEnabled: true,
   ragRetrievalDebugEnabled: false,
-  allowRemoteProviders: false,
   prompts: {
     quiz: {
       'vi-VN': `Bạn là một chuyên gia tạo câu hỏi chuyên nghiệp. Dựa trên nội dung cơ sở tri thức dưới đây, hãy tạo {{QUESTION_COUNT}} câu hỏi trắc nghiệm một đáp án để kiểm tra kiến thức.

@@ -20,10 +20,10 @@ describe('ipc validation schemas', () => {
   })
   it('accepts known settings keys with correctly typed values', () => {
     expect(SettingsSchemas.set.parse({ key: 'language', value: 'vi-VN' }).key).toBe('language')
-    expect(
-      SettingsSchemas.update.parse({ updates: { allowRemoteProviders: false, ragTopK: 5 } }).updates
-        .ragTopK
-    ).toBe(5)
+    expect(SettingsSchemas.update.parse({ updates: { ragTopK: 5 } }).updates.ragTopK).toBe(5)
+    expect(() =>
+      SettingsSchemas.update.parse({ updates: { allowRemoteProviders: false } })
+    ).toThrow()
   })
 
   it('rejects unknown settings keys and invalid values', () => {

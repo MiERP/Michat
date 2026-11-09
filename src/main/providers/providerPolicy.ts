@@ -17,10 +17,8 @@ export function isLocalProviderConfig(config: ProviderConfig | null | undefined)
 
 export function canUseProviderForLocalFirst(
   descriptor: ProviderDescriptor,
-  config: ProviderConfig,
-  allowRemoteProviders: boolean
+  config: ProviderConfig
 ): boolean {
-  if (allowRemoteProviders) return true
   return isLocalProviderDescriptor(descriptor) && isLocalProviderConfig(config)
 }
 

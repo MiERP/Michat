@@ -2,7 +2,8 @@ import Logger from '../../shared/utils/logger'
 import type { LicenseStatus } from '../../shared/types/license'
 
 // ============================================================
-// HARDCODED LICENSE — Thay đổi giá trị tại đây khi cần cập nhật
+// INFORMATIONAL BUILD METADATA — not an access-control mechanism.
+// This value is compiled into the app and must never gate features.
 // ============================================================
 const HARDCODED_LICENSE_NAME = 'michat-fullversion'
 const HARDCODED_LICENSE_KEY = '991231' // Format YYMMDD → hết hạn 2099-12-31

@@ -30,7 +30,6 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
       stored.ragMetadataAwareEnabled ?? defaultSettings.ragMetadataAwareEnabled,
     ragRetrievalDebugEnabled:
       stored.ragRetrievalDebugEnabled ?? defaultSettings.ragRetrievalDebugEnabled,
-    allowRemoteProviders: stored.allowRemoteProviders ?? defaultSettings.allowRemoteProviders,
     prompts: {
       quiz: {
         'vi-VN': stored.prompts?.quiz?.['vi-VN'] ?? defaultSettings.prompts!.quiz!['vi-VN'],

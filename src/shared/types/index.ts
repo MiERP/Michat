@@ -122,7 +122,6 @@ export interface AppSettings {
   ragMetadataAwareEnabled?: boolean
   /** Chỉ bật log trace truy hồi chi tiết để chẩn đoán. */
   ragRetrievalDebugEnabled?: boolean
-  allowRemoteProviders?: boolean
   prompts?: {
     quiz?: {
       'vi-VN'?: string // 中文答题生成提示词

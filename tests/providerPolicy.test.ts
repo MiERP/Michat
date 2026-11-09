@@ -34,18 +34,20 @@ describe('providerPolicy', () => {
   it('allows local builtin providers by default', () => {
     expect(isLocalProviderDescriptor(descriptor())).toBe(true)
     expect(isLocalProviderConfig(config())).toBe(true)
-    expect(canUseProviderForLocalFirst(descriptor(), config(), false)).toBe(true)
+    expect(canUseProviderForLocalFirst(descriptor(), config())).toBe(true)
   })
 
-  it('blocks remote endpoints unless remote providers are explicitly enabled', () => {
-    const remoteDescriptor = descriptor({ locality: 'remote', defaultBaseUrl: 'https://api.example.com/v1' })
+  it('blocks remote endpoints unconditionally', () => {
+    const remoteDescriptor = descriptor({
+      locality: 'remote',
+      defaultBaseUrl: 'https://api.example.com/v1'
+    })
     const remoteConfig = config({ config: { baseUrl: 'https://api.example.com/v1' } })
 
-    expect(canUseProviderForLocalFirst(remoteDescriptor, remoteConfig, false)).toBe(false)
-    expect(canUseProviderForLocalFirst(remoteDescriptor, remoteConfig, true)).toBe(true)
+    expect(canUseProviderForLocalFirst(remoteDescriptor, remoteConfig)).toBe(false)
   })
 
-  it('blocks mixed local chat and remote embedding endpoints by default', () => {
+  it('blocks mixed local chat and remote embedding endpoints', () => {
     const mixedConfig = config({
       config: {
         baseUrl: 'http://127.0.0.1:8000/v1',
@@ -54,6 +56,6 @@ describe('providerPolicy', () => {
     })
 
     expect(isLocalProviderConfig(mixedConfig)).toBe(false)
-    expect(canUseProviderForLocalFirst(descriptor(), mixedConfig, false)).toBe(false)
+    expect(canUseProviderForLocalFirst(descriptor(), mixedConfig)).toBe(false)
   })
 })

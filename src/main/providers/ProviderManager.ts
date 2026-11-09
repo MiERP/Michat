@@ -60,12 +60,11 @@ export class ProviderManager {
     }
 
     // 配置 provider
-    const settings = await settingsManager.getAllSettings()
     const descriptor = this.registry.getDescriptor(name)
-    if (!descriptor || !canUseProviderForLocalFirst(descriptor, config, !!settings.allowRemoteProviders)) {
+    if (!descriptor || !canUseProviderForLocalFirst(descriptor, config)) {
       Logger.error(
         'ProviderManager',
-        `Provider ${name} is blocked by local-first policy. Enable remote providers explicitly to use non-local endpoints.`
+        `Provider ${name} is blocked by the local-first policy (loopback endpoints only).`
       )
       return null
     }

@@ -36,7 +36,6 @@ const appSettingsUpdateSchema = z
     ragDocTopK: z.number().int().min(1).max(50).optional(),
     ragMetadataAwareEnabled: z.boolean().optional(),
     ragRetrievalDebugEnabled: z.boolean().optional(),
-    allowRemoteProviders: z.boolean().optional(),
     prompts: promptsSchema.optional()
   })
   .strict()
@@ -59,7 +58,6 @@ const settingValueSchemas = {
   ragDocTopK: appSettingsUpdateSchema.shape.ragDocTopK.unwrap(),
   ragMetadataAwareEnabled: appSettingsUpdateSchema.shape.ragMetadataAwareEnabled.unwrap(),
   ragRetrievalDebugEnabled: appSettingsUpdateSchema.shape.ragRetrievalDebugEnabled.unwrap(),
-  allowRemoteProviders: appSettingsUpdateSchema.shape.allowRemoteProviders.unwrap(),
   prompts: appSettingsUpdateSchema.shape.prompts.unwrap()
 }
 

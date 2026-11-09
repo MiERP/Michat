@@ -1,5 +1,9 @@
 # System Map
 
+> Historical snapshot (2026-05-04). Office assistant, mind maps, React Flow and
+> cloud-provider sections below are obsolete; use README and the current source
+> as the source of truth.
+
 ## Snapshot
 - Updated at: `2026-05-04`
 - Repository path or name: `D:\MiChat\MiChat-1.1-know\MiChat-1.1.1-merge-llama`

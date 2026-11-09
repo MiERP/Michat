@@ -39,7 +39,7 @@ It’s still early, but the core idea works — and I’m excited to share it an
 
 - 📚 Build a local knowledge base from documents and notes
 - 💬 Chat, summarize, and reason with your content using LLMs
-- 🔌 Provider-based LLM design (OpenAI, DeepSeek, Ollama, and more)
+- 🔌 Local llama.cpp models served through an OpenAI-compatible endpoint
 - 🔍 RAG-powered retrieval with precise source traceability
 - 🖥️ Desktop app built with Electron — no Docker, no server setup
 
@@ -66,7 +66,7 @@ MiChat is for you if:
 ### 🤖 AI-Powered Q&A
 
 - Retrieval-Augmented Generation (RAG)
-- Multiple LLM providers
+- Local llama.cpp chat and embedding models (no cloud provider required)
 - Answers with precise source references
 
 ### 🔒 Local-First by Design
@@ -100,18 +100,25 @@ I’m sharing it mainly to:
 
 Feedback and suggestions are very welcome.
 
+### Current limitations
+
+- Only local llama.cpp models are supported; cloud providers are intentionally disabled.
+- Scanned/image-only PDFs need an OCR engine, which is not bundled yet.
+- Office document generation was removed; the note editor and quiz generation remain.
+- The existing Drizzle migration history has snapshots only from `0020` onward; see `docs/security/dependency-exceptions.md` for dependency exceptions.
+
 ---
 
 ## Roadmap
 
 ### ✅ Completed
 
-- AI LLM conversation with multiple providers
+- Local llama.cpp chat and embedding models
 - Structured note generation
-- RAG-based document retrieval
-- Multi-format document import (PDF / Word / PPT / Web)
+- Hierarchical, metadata-aware RAG with source citations
+- Multi-format document import (PDF / Word / PowerPoint / Excel / Markdown / Web)
 - Quiz generation from documents
-- One-click document generation (Word / Excel / PowerPoint) via the Office assistant
+- Local-first storage with no telemetry
 
 ### 🚧 In Development
 

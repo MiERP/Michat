@@ -5,7 +5,6 @@ import { ProviderManager } from '../providers/ProviderManager'
 import { SessionAutoSwitchService } from '../services/SessionAutoSwitchService'
 import { KnowledgeService } from '../services/KnowledgeService'
 import { LlamaService } from '../services/LlamaService'
-import { LicenseService } from '../services/LicenseService'
 import { validateAndCleanMessages } from '../utils/messageValidator'
 import { settingsManager } from '../config'
 import { markActive } from '../utils/activityTracker'
@@ -360,11 +359,6 @@ export function registerChatHandlers(
 
       // Fail before writing rows so the renderer never receives an error for a
       // placeholder it has not seen yet.
-      const licenseStatus = LicenseService.getStatus()
-      if (!licenseStatus.valid) {
-        return { messageId: '', error: `License invalid: ${licenseStatus.message}` }
-      }
-
       const provider = await providerManager.getActiveChatProvider()
       if (!provider) {
         return {
