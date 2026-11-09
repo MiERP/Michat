@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { I18nextProvider } from 'react-i18next'
 import NotebookLayout from './components/notebook/NotebookLayout'
 import NotebookListPage from './components/pages/NotebookListPage'
 import OnboardingPage from './components/pages/OnboardingPage'
-import QuizPage from './components/pages/QuizPage'
 import SettingsDialog from './components/settings/SettingsDialog'
+
+const QuizPage = lazy(() => import('./components/pages/QuizPage'))
 import { setupChatListeners } from './store/chatStore'
 import { useThemeStore } from './store/themeStore'
 import { useNotebookStore } from './store/notebookStore'
@@ -83,20 +84,22 @@ function App(): React.JSX.Element {
   return (
     <I18nextProvider i18n={i18n}>
       <HashRouter>
-        <Routes>
-          {/* 引导页路由 */}
-          {!hasCompletedOnboarding && <Route path="/onboarding" element={<OnboardingPage />} />}
-          {/* 主应用路由 */}
-          <Route
-            path="/"
-            element={
-              hasCompletedOnboarding ? <NotebookListPage /> : <Navigate to="/onboarding" replace />
-            }
-          />
-          <Route path="/notebook/:id" element={<NotebookLayout />} />
-          <Route path="/quiz/:notebookId" element={<QuizPage />} />
-          <Route path="/quiz/view/:quizId" element={<QuizPage />} />
-        </Routes>
+        <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading...</div>}>
+          <Routes>
+            {/* 引导页路由 */}
+            {!hasCompletedOnboarding && <Route path="/onboarding" element={<OnboardingPage />} />}
+            {/* 主应用路由 */}
+            <Route
+              path="/"
+              element={
+                hasCompletedOnboarding ? <NotebookListPage /> : <Navigate to="/onboarding" replace />
+              }
+            />
+            <Route path="/notebook/:id" element={<NotebookLayout />} />
+            <Route path="/quiz/:notebookId" element={<QuizPage />} />
+            <Route path="/quiz/view/:quizId" element={<QuizPage />} />
+          </Routes>
+        </Suspense>
         <SettingsDialog />
       </HashRouter>
     </I18nextProvider>

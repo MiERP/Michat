@@ -26,7 +26,7 @@ import type {
 import type { UpdateState, UpdateCheckResult, UpdateOperationResult } from '../shared/types/update'
 import type { LicenseStatus } from '../shared/types/license'
 import type { Quiz, QuizSession } from '../main/db/schema'
-import type { DocumentMetadata } from '../main/services/DocumentMetadataExtractionService'
+import type { DocumentMetadata } from '../shared/legalMetadata'
 import type { DocumentEnrichment } from '../main/services/DocumentEnrichmentService'
 
 // 重新导出共享类型

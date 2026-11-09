@@ -27,12 +27,12 @@ import { Card } from '../ui/card'
 import { PanelHeader } from '../ui/panel-header'
 import DocumentList from './source/DocumentList'
 import type { KnowledgeDocument } from '../../../../shared/types/knowledge'
-import type {
-  DocumentMetadata,
-  DocumentMetadataField,
-  DocumentMetadataInspector
-} from '../../../../main/services/DocumentMetadataExtractionService'
-import { isOriginalLegalDocument } from '../../../../main/services/DocumentMetadataExtractionService'
+import {
+  isOriginalLegalDocument,
+  type DocumentMetadata,
+  type DocumentMetadataField,
+  type DocumentMetadataInspector
+} from '../../../../shared/legalMetadata'
 
 type AddSourceType = 'text' | 'note' | 'url'
 

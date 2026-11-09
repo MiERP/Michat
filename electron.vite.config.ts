@@ -88,7 +88,26 @@ export default defineConfig({
     },
     plugins: [tailwindcss(), react(), injectCspPlugin()],
     build: {
-      emptyOutDir: false
+      emptyOutDir: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (id.includes('node_modules/katex') || id.includes('rehype-katex')) return 'katex'
+            if (id.includes('node_modules/remark-math')) return 'katex'
+            if (
+              id.includes('node_modules/@tiptap') ||
+              id.includes('node_modules/prosemirror') ||
+              id.includes('node_modules/tiptap-markdown')
+            ) {
+              return 'editor'
+            }
+            if (id.includes('node_modules/highlight.js') || id.includes('rehype-highlight')) {
+              return 'highlight'
+            }
+            return undefined
+          }
+        }
+      }
     }
   }
 })

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DocumentMetadata } from '../main/services/DocumentMetadataExtractionService'
+import type { DocumentMetadata } from '../shared/legalMetadata'
 import type {
   ChatMessageCreatedEvent,
   SendMessageResult,

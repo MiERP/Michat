@@ -98,12 +98,6 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: ^1.2.8
         version: 1.2.8(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
-      '@tesseract.js-data/eng':
-        specifier: 1.0.0
-        version: 1.0.0
-      '@tesseract.js-data/vie':
-        specifier: 1.0.0
-        version: 1.0.0
       '@tiptap/extensions':
         specifier: ^3.33.0
         version: 3.33.0(@tiptap/core@3.33.0(@tiptap/pm@3.33.0))(@tiptap/pm@3.33.0)
@@ -242,9 +236,6 @@ importers:
       tailwind-merge:
         specifier: ^3.4.0
         version: 3.4.0
-      tesseract.js:
-        specifier: 7.0.0
-        version: 7.0.0(encoding@0.1.13)
       tiptap-markdown:
         specifier: ^0.9.0
         version: 0.9.0(@tiptap/core@3.33.0(@tiptap/pm@3.33.0))
@@ -1951,12 +1942,6 @@ packages:
     resolution: {integrity: sha512-4+9w8ZHOiGnpcGI6z1TVVfWaX/koK7fKeSYF3qlYg2xpBtbteP2ddBxiarL+HVgfSJGeK5RIxRQmKm4rTJJAwA==}
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7
-
-  '@tesseract.js-data/eng@1.0.0':
-    resolution: {integrity: sha512-mbTumm6KQPUHyzTPQaF3ObXYnx0SqqfV2nabqFVQBwD6Kl7PhGSLSzOlfFTWy0P3BjghaSKA2W9GB19Jk+ZcTg==}
-
-  '@tesseract.js-data/vie@1.0.0':
-    resolution: {integrity: sha512-hFxBtxSiCw6+64uxf0psrlLvcYA5kQimYhTSx1RwjbD5jSxe1bWg3EmipAozkzELQIFAMkJC5vu+ONGRem7YLA==}
 
   '@tiptap/core@3.33.0':
     resolution: {integrity: sha512-sZjBCwK9+h0kbc/CZvkepX6RTJ2jOfeWY1aId9O3YnG0CAiOs/4DbqFmpcmv5BQAGPA6gC96gqdafa/9Dpg0tw==}
@@ -7273,10 +7258,6 @@ snapshots:
       '@tailwindcss/oxide': 4.1.17
       tailwindcss: 4.1.17
       vite: 7.2.7(@types/node@22.19.2)(jiti@2.6.1)(lightningcss@1.30.2)
-
-  '@tesseract.js-data/eng@1.0.0': {}
-
-  '@tesseract.js-data/vie@1.0.0': {}
 
   '@tiptap/core@3.33.0(@tiptap/pm@3.33.0)':
     dependencies:
