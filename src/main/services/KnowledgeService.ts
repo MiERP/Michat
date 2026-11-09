@@ -36,6 +36,7 @@ import { EmbeddingService } from './EmbeddingService'
 import { ChunkingService, type ChunkOptions, type ChunkStructureContext } from './ChunkingService'
 import { FileParserService } from './FileParserService'
 import type { SectionInfo } from './loaders/types'
+import { validateImportableFile } from './import/fileValidation'
 import {
   flattenSectionsWithPath,
   sanitizeCompactSections,
@@ -305,17 +306,22 @@ export class KnowledgeService {
 
   private async copyFileToKnowledgeDir(
     sourceFilePath: string,
-    documentId: string
+    documentId: string,
+    extension: string
   ): Promise<string> {
     await this.ensureKnowledgeFilesDir()
-    const extension = sourceFilePath.split('.').pop() || 'bin'
-    const localFilePath = join(this.knowledgeFilesDir, `${documentId}.${extension}`)
+    const safeExtension = /^[a-z0-9]{1,8}$/.test(extension) ? extension : 'bin'
+    const localFilePath = join(this.knowledgeFilesDir, `${documentId}.${safeExtension}`)
     await copyFile(sourceFilePath, localFilePath)
     Logger.info('KnowledgeService', `File copied: ${sourceFilePath} -> ${localFilePath}`)
     return localFilePath
   }
 
   private async deleteLocalFile(localFilePath: string): Promise<void> {
+    if (!this.isManagedLocalFilePath(localFilePath)) {
+      Logger.warn('KnowledgeService', `Refusing to delete unmanaged path: ${localFilePath}`)
+      return
+    }
     try {
       const exists = await stat(localFilePath)
         .then(() => true)
@@ -1910,7 +1916,12 @@ export class KnowledgeService {
 
     try {
       onProgress?.('parsing_file', 0)
-      localFilePath = await this.copyFileToKnowledgeDir(filePath, documentId)
+      const importInfo = await validateImportableFile(filePath)
+      localFilePath = await this.copyFileToKnowledgeDir(
+        importInfo.path,
+        documentId,
+        importInfo.extension
+      )
 
       db.insert(documents)
         .values({

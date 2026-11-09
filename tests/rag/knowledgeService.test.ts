@@ -655,19 +655,18 @@ describe('KnowledgeService RAG regression', () => {
     expect(outcome.results.every((result) => result.documentId === decreeId)).toBe(true)
   })
 
-  it('records corrupt file parse failures as failed documents', async () => {
+  it('rejects a corrupt PDF before creating a document row', async () => {
     const { service, notebookId } = context!
     const filePath = join(userDataDir, 'corrupt.pdf')
     await writeFile(filePath, 'not a real pdf', 'utf8')
 
-    await expect(service.addDocumentFromFile(notebookId, filePath)).rejects.toThrow()
+    await expect(service.addDocumentFromFile(notebookId, filePath)).rejects.toThrow(
+      /does not match/i
+    )
 
-    const failedDocument = service
-      .getDocuments(notebookId)
-      .find((document) => document.title === 'corrupt.pdf')
-    expect(failedDocument?.status).toBe('failed')
-    expect(failedDocument?.errorMessage).toMatch(/parse|pdf|invalid|Failed/i)
-    expect(service.getDocumentChunks(failedDocument!.id)).toHaveLength(0)
+    expect(
+      service.getDocuments(notebookId).some((document) => document.title === 'corrupt.pdf')
+    ).toBe(false)
   })
 
   it('marks documents failed with actionable embedding errors', async () => {

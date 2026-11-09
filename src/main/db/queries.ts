@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto'
+import { join } from 'path'
+import { app } from 'electron'
 import { eq, desc, and, sql } from 'drizzle-orm'
 import { getDatabase, executeCheckpoint, getSqlite } from './index'
+import { isPathInsideDirectory } from '../security/guards'
 import { chatSessions, chatMessages, notebooks, notes, documents, items, chunks } from './schema'
 import { vectorStoreManager } from '../vectorstore'
 import Logger from '../../shared/utils/logger'
@@ -306,8 +309,9 @@ export async function deleteNotebook(id: string) {
     // 删除本地文件（异步执行，不阻塞数据库操作）
     if (docsWithLocalFiles.length > 0) {
       const { unlink } = await import('fs/promises')
+      const knowledgeFilesDir = join(app.getPath('userData'), 'knowledge-files')
       for (const doc of docsWithLocalFiles) {
-        if (doc.localFilePath) {
+        if (doc.localFilePath && isPathInsideDirectory(doc.localFilePath, knowledgeFilesDir)) {
           try {
             await unlink(doc.localFilePath)
             console.log(`[Database] Deleted local file: ${doc.localFilePath}`)
