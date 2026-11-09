@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog, session } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { LlamaService } from './services/LlamaService'
 import {
@@ -27,6 +27,11 @@ import { registerAllHandlers } from './ipc'
 import { getStore, settingsManager } from './config'
 import Logger from '../shared/utils/logger'
 import { isAllowedExternalOpenUrl } from './security/guards'
+import {
+  enforceSingleInstance,
+  installPermissionHandlers,
+  installWebContentsGuards
+} from './security/appHardening'
 
 let providerManager: ProviderManager | null = null
 let sessionAutoSwitchService: SessionAutoSwitchService | null = null
@@ -37,6 +42,8 @@ let shortcutManager: ShortcutManager | null = null
 let isQuitting = false // Flag to indicate if app is quitting
 
 let llamaService: LlamaService | null = null
+
+enforceSingleInstance(app)
 
 /**
  * Hằng ngày enqueue decay-links cho mọi notebook
@@ -69,6 +76,9 @@ function scheduleDailyLinkDecay(queue: BackgroundJobService): void {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   try {
+    installPermissionHandlers(session.defaultSession)
+    installWebContentsGuards(app)
+
     const licenseStatus = LicenseService.ensureLicenseOnStartup()
     Logger.info(
       'Main',

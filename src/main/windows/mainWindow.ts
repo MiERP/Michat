@@ -2,6 +2,7 @@ import { BrowserWindow, shell, session } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { settingsManager } from '../config'
+import { getSecureWebPreferences } from '../security/appHardening'
 import { buildContentSecurityPolicy } from '../security/csp'
 import { isAllowedExternalOpenUrl } from '../security/guards'
 
@@ -49,10 +50,7 @@ export function createMainWindow(): BrowserWindow {
       ? { titleBarOverlay: { color: 'rgba(0,0,0,0)', height: 35, symbolColor: 'white' } }
       : {}),
     backgroundColor,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: true
-    }
+    webPreferences: getSecureWebPreferences(join(__dirname, '../preload/index.js'))
   })
 
   mainWindow.on('ready-to-show', () => {

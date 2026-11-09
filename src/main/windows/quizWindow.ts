@@ -2,6 +2,7 @@ import { BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { settingsManager } from '../config'
+import { getSecureWebPreferences } from '../security/appHardening'
 import { isAllowedExternalOpenUrl } from '../security/guards'
 
 let quizWindow: BrowserWindow | null = null
@@ -46,10 +47,7 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
       ? { titleBarOverlay: { color: 'rgba(0,0,0,0)', height: 35, symbolColor: 'white' } }
       : {}),
     backgroundColor,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: true
-    }
+    webPreferences: getSecureWebPreferences(join(__dirname, '../preload/index.js'))
   })
 
   quizWindow.on('ready-to-show', () => {
