@@ -1,48 +1,47 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { isAbsolute, relative, resolve } from 'node:path'
+import * as ipaddr from 'ipaddr.js'
+
+/**
+ * Ranges that must never be reachable by a user-supplied URL. `ipaddr.process`
+ * normalizes IPv4-mapped IPv6 addresses before the range check.
+ */
+const BLOCKED_IP_RANGES = new Set([
+  'unspecified',
+  'broadcast',
+  'multicast',
+  'linkLocal',
+  'loopback',
+  'carrierGradeNat',
+  'private',
+  'reserved',
+  'as112',
+  'as112v6',
+  'amt',
+  'uniqueLocal',
+  'documentation',
+  'benchmarking',
+  'ipv4Mapped'
+])
 
 function normalizeHostname(hostname: string): string {
   return hostname.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '').replace(/\.$/, '')
 }
 
-function parseIpv4(ip: string): number[] | null {
-  const octets = ip.split('.').map((part) => Number(part))
-  if (
-    octets.length !== 4 ||
-    octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)
-  ) {
-    return null
-  }
-  return octets
+function parseIp(hostname: string): ipaddr.IP | null {
+  const normalized = normalizeHostname(hostname)
+  if (!normalized || !ipaddr.isValid(normalized)) return null
+  return ipaddr.process(normalized)
 }
 
 function isLoopbackIp(hostname: string): boolean {
-  const normalized = normalizeHostname(hostname)
-  if (normalized === '::1') return true
-
-  const octets = parseIpv4(normalized)
-  return octets !== null && octets[0] === 127
+  return parseIp(hostname)?.range() === 'loopback'
 }
 
 function isPrivateOrSpecialIp(hostname: string): boolean {
-  const normalized = normalizeHostname(hostname).toLowerCase()
-  if (normalized === '::1') return true
-  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
-  if (/^fe[89ab]/i.test(normalized)) return true
-
-  const octets = parseIpv4(normalized)
-  if (octets === null) return false
-
-  const [a, b] = octets
-  if (a === 0 || a === 10 || a === 127) return true
-  if (a === 169 && b === 254) return true
-  if (a === 172 && b >= 16 && b <= 31) return true
-  if (a === 192 && b === 168) return true
-  if (a === 100 && b >= 64 && b <= 127) return true
-  if (a === 198 && (b === 18 || b === 19)) return true
-
-  return false
+  const address = parseIp(hostname)
+  return address !== null && BLOCKED_IP_RANGES.has(address.range())
 }
 
 function isPrivateOrSpecialHostname(hostname: string): boolean {
@@ -105,7 +104,16 @@ export function isAllowedExternalOpenUrl(url: string): boolean {
   }
 }
 
-export async function assertSafePublicHttpUrl(url: string, label: string): Promise<URL> {
+export interface ValidatedPublicUrl {
+  url: URL
+  /** Resolved addresses; the caller can pin the connection to one of them. */
+  addresses: string[]
+}
+
+export async function assertSafePublicHttpUrl(
+  url: string,
+  label: string
+): Promise<ValidatedPublicUrl> {
   const parsed = assertHttpUrl(url, label)
   const hostname = normalizeHostname(parsed.hostname)
 
@@ -113,18 +121,21 @@ export async function assertSafePublicHttpUrl(url: string, label: string): Promi
     throw new Error(`${label} must not target localhost or a private network address`)
   }
 
-  if (isIP(hostname) === 0) {
-    const results = await lookup(hostname, { all: true, verbatim: true })
-    if (results.length === 0) {
-      throw new Error(`${label} host could not be resolved`)
-    }
+  if (isIP(hostname) !== 0) {
+    return { url: parsed, addresses: [hostname] }
+  }
 
-    for (const result of results) {
-      if (isPrivateOrSpecialIp(result.address)) {
-        throw new Error(`${label} must not resolve to localhost or a private network address`)
-      }
+  const results = await lookup(hostname, { all: true, verbatim: true })
+  if (results.length === 0) {
+    throw new Error(`${label} host could not be resolved`)
+  }
+
+  const addresses = results.map((result) => result.address)
+  for (const address of addresses) {
+    if (isPrivateOrSpecialIp(address)) {
+      throw new Error(`${label} must not resolve to localhost or a private network address`)
     }
   }
 
-  return parsed
+  return { url: parsed, addresses }
 }

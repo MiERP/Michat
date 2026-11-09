@@ -3,6 +3,7 @@ import {
   normalizeFsPath,
   isPathInsideDirectory,
   assertLoopbackHttpUrl,
+  assertSafePublicHttpUrl,
   isAllowedExternalOpenUrl
 } from '../src/main/security/guards'
 
@@ -62,4 +63,35 @@ describe('guards', () => {
     })
   })
 
+  describe('assertSafePublicHttpUrl', () => {
+    it('rejects IPv4-mapped IPv6 loopback addresses', async () => {
+      await expect(
+        assertSafePublicHttpUrl('http://[::ffff:127.0.0.1]:8000/v1/models', 'test')
+      ).rejects.toThrow(/private network address/i)
+    })
+
+    it('rejects the unspecified IPv6 address', async () => {
+      await expect(assertSafePublicHttpUrl('http://[::]:8000', 'test')).rejects.toThrow(
+        /private network address/i
+      )
+    })
+
+    it('rejects multicast and reserved IPv4 ranges', async () => {
+      await expect(assertSafePublicHttpUrl('http://224.0.0.1', 'test')).rejects.toThrow(
+        /private network address/i
+      )
+      await expect(assertSafePublicHttpUrl('http://240.0.0.1', 'test')).rejects.toThrow(
+        /private network address/i
+      )
+    })
+
+    it('rejects plain loopback and link-local addresses', async () => {
+      await expect(assertSafePublicHttpUrl('http://127.0.0.1', 'test')).rejects.toThrow(
+        /private network address/i
+      )
+      await expect(assertSafePublicHttpUrl('http://169.254.1.1', 'test')).rejects.toThrow(
+        /private network address/i
+      )
+    })
+  })
 })

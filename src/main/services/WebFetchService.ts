@@ -5,29 +5,99 @@
 
 import * as cheerio from 'cheerio'
 import TurndownService from 'turndown'
+import { Agent, fetch as undiciFetch } from 'undici'
 import Logger from '../../shared/utils/logger'
 import { assertSafePublicHttpUrl } from '../security/guards'
 
+/** Hard cap for a fetched HTML document (decompressed bytes). */
+export const MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
+type FetchResponse = Awaited<ReturnType<typeof undiciFetch>>
+type FetchLike = (
+  input: string | URL,
+  init?: Parameters<typeof undiciFetch>[1]
+) => Promise<FetchResponse>
+
 /**
- * 抓取结果
+ * Fetch result
  */
 export interface FetchResult {
-  content: string // 提取的文本内容
-  title?: string // 页面标题
-  description?: string // 页面描述
-  url: string // 原始 URL
+  content: string // extracted text
+  title?: string
+  description?: string
+  url: string
   mimeType: string
   metadata?: Record<string, unknown>
 }
 
 /**
- * 抓取选项
+ * Fetch options
  */
 export interface FetchOptions {
-  timeout?: number // 超时时间（毫秒），默认 30000
-  extractMainContent?: boolean // 是否提取主要内容，默认 true
-  convertToMarkdown?: boolean // 是否转换为 Markdown，默认 true
-  userAgent?: string // 自定义 User-Agent
+  timeout?: number
+  extractMainContent?: boolean
+  convertToMarkdown?: boolean
+  userAgent?: string
+}
+
+interface ReadableStreamLike {
+  getReader(): {
+    read(): Promise<{ done: boolean; value?: Uint8Array }>
+    cancel(reason?: unknown): Promise<void>
+    releaseLock(): void
+  }
+}
+
+/**
+ * Read a response body while enforcing a byte cap. The timeout stays active
+ * until this promise settles, so a slow body cannot outlive the request.
+ */
+export async function readBodyWithLimit(
+  response: { body: ReadableStreamLike | null },
+  maxBytes: number = MAX_RESPONSE_BYTES
+): Promise<string> {
+  if (!response.body) return ''
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.byteLength
+      if (total > maxBytes) {
+        await reader.cancel()
+        throw new Error(`Response exceeds maximum size of ${maxBytes} bytes`)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    merged.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(merged)
+}
+
+function createPinnedDispatcher(addresses: string[]): Agent {
+  const address = addresses[0]
+  const family = address.includes(':') ? 6 : 4
+
+  return new Agent({
+    connect: {
+      lookup: ((_hostname: string, _options: unknown, callback: Function) => {
+        callback(null, address, family)
+      }) as never
+    }
+  })
 }
 
 /**
@@ -36,6 +106,7 @@ export interface FetchOptions {
 export class WebFetchService {
   private static readonly MAX_REDIRECTS = 5
   private turndown: TurndownService
+  private readonly fetchImpl: FetchLike
   private defaultOptions: Required<FetchOptions> = {
     timeout: 30000,
     extractMainContent: true,
@@ -44,7 +115,8 @@ export class WebFetchService {
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   }
 
-  constructor() {
+  constructor(fetchImpl: FetchLike = undiciFetch) {
+    this.fetchImpl = fetchImpl
     // 配置 Turndown
     this.turndown = new TurndownService({
       headingStyle: 'atx',
@@ -63,30 +135,35 @@ export class WebFetchService {
     const opts = { ...this.defaultOptions, ...options }
 
     try {
-      let parsedUrl = await assertSafePublicHttpUrl(url, 'Knowledge URL')
+      let validated = await assertSafePublicHttpUrl(url, 'Knowledge URL')
+      Logger.info('WebFetchService', `Fetching: ${validated.url.toString()}`)
 
-      Logger.info('WebFetchService', `Fetching: ${parsedUrl.toString()}`)
-
-      // 创建 AbortController 用于超时
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), opts.timeout)
+      let dispatcher: Agent | undefined
 
       try {
-        let response: Response | undefined
+        let response: FetchResponse | undefined
+
         for (
           let redirectCount = 0;
           redirectCount <= WebFetchService.MAX_REDIRECTS;
           redirectCount++
         ) {
-          response = await fetch(parsedUrl, {
+          // Pin the connection to an address that was validated above. Creating
+          // a fresh dispatcher per hop also prevents credential/connection reuse
+          // across a redirect to another origin.
+          dispatcher = createPinnedDispatcher(validated.addresses)
+          response = await this.fetchImpl(validated.url, {
             headers: {
               'User-Agent': opts.userAgent,
               Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
               'Accept-Language': 'vi-VN,zh;q=0.9,en;q=0.8'
             },
             signal: controller.signal,
-            redirect: 'manual'
-          })
+            redirect: 'manual',
+            dispatcher
+          } as Parameters<typeof undiciFetch>[1])
 
           if (![301, 302, 303, 307, 308].includes(response.status)) break
           const location = response.headers.get('location')
@@ -95,16 +172,18 @@ export class WebFetchService {
             throw new Error(`Too many redirects (maximum ${WebFetchService.MAX_REDIRECTS})`)
           }
 
-          const redirectUrl = new URL(location, parsedUrl)
-          parsedUrl = await assertSafePublicHttpUrl(
+          await response.body?.cancel()
+          await dispatcher.close()
+          dispatcher = undefined
+
+          const redirectUrl = new URL(location, validated.url)
+          validated = await assertSafePublicHttpUrl(
             redirectUrl.toString(),
             'Knowledge redirect URL'
           )
         }
 
         if (!response) throw new Error('Web request did not return a response')
-
-        clearTimeout(timeoutId)
 
         if (!response.ok) {
           throw new Error(`HTTP error: ${response.status} ${response.statusText}`)
@@ -115,10 +194,16 @@ export class WebFetchService {
           throw new Error(`Unsupported content type: ${contentType}`)
         }
 
-        const html = await response.text()
-        return this.parseHtml(html, parsedUrl.toString(), opts)
+        const contentLength = Number(response.headers.get('content-length') || 0)
+        if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+          throw new Error(`Response exceeds maximum size of ${MAX_RESPONSE_BYTES} bytes`)
+        }
+
+        const html = await readBodyWithLimit(response, MAX_RESPONSE_BYTES)
+        return this.parseHtml(html, validated.url.toString(), opts)
       } finally {
         clearTimeout(timeoutId)
+        await dispatcher?.close().catch(() => {})
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
@@ -136,15 +221,11 @@ export class WebFetchService {
     const opts = { ...this.defaultOptions, ...options }
     const $ = cheerio.load(html)
 
-    // 提取标题
     const title = $('title').text().trim() || $('h1').first().text().trim()
-
-    // 提取描述
     const description =
       $('meta[name="description"]').attr('content') ||
       $('meta[property="og:description"]').attr('content')
 
-    // 提取主要内容
     let content: string
     if (opts.extractMainContent) {
       content = this.extractMainContent($)
@@ -152,15 +233,12 @@ export class WebFetchService {
       content = $('body').html() || ''
     }
 
-    // 转换为 Markdown
     if (opts.convertToMarkdown) {
       content = this.htmlToMarkdown(content)
     } else {
-      // 直接提取文本
       content = cheerio.load(content).text()
     }
 
-    // 清理内容
     content = this.cleanContent(content)
 
     return {
@@ -179,14 +257,12 @@ export class WebFetchService {
    * 提取主要内容
    */
   private extractMainContent($: cheerio.CheerioAPI): string {
-    // 移除不需要的元素
     $(
       'script, style, nav, footer, header, aside, iframe, noscript, ' +
         '.nav, .navigation, .menu, .sidebar, .footer, .header, .ad, .advertisement, ' +
         '.comments, .comment, .social, .share, .related, .recommend'
     ).remove()
 
-    // 尝试找到主要内容区域
     const mainSelectors = [
       'article',
       'main',
@@ -208,7 +284,6 @@ export class WebFetchService {
       }
     }
 
-    // 如果没有找到，使用 body
     return $('body').html() || ''
   }
 
@@ -230,13 +305,10 @@ export class WebFetchService {
   private cleanContent(content: string): string {
     return (
       content
-        // 移除多余空行
         .replace(/\n{3,}/g, '\n\n')
-        // 移除行首尾空白
         .split('\n')
         .map((line) => line.trim())
         .join('\n')
-        // 移除首尾空白
         .trim()
     )
   }
