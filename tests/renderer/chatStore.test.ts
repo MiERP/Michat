@@ -37,7 +37,7 @@ describe('chat navigation and concurrent streams', () => {
         getActiveSession: vi.fn(async (id: string) => session(id)),
         getMessages: vi.fn(async () => []),
         createChatSession: vi.fn(async (id: string) => session(id)),
-        sendMessage: vi.fn(async () => 'reply')
+        sendMessage: vi.fn(async () => ({ messageId: 'reply' }))
       }
     })
   })
@@ -113,7 +113,7 @@ describe('chat navigation and concurrent streams', () => {
     useChatStore.getState().setCurrentSession(session('a'))
     const sending = useChatStore.getState().sendMessage('a', 'hello')
     await useChatStore.getState().loadActiveSession('b')
-    pending.resolve('reply-a')
+    pending.resolve({ messageId: 'reply-a' })
     await sending
     expect(useChatStore.getState().messages).toEqual([])
     expect(useChatStore.getState().streamingMessages.a).toBe('reply-a')
@@ -129,6 +129,22 @@ describe('chat navigation and concurrent streams', () => {
     await useChatStore.getState().loadMessages('a')
     useChatStore.getState().setStreamingMessage('a', null)
     expect(useChatStore.getState().messages[0].isStreaming).toBe(false)
+  })
+
+  it('renders a preflight error without leaving a streaming placeholder', async () => {
+    vi.mocked(window.api.sendMessage).mockResolvedValueOnce({
+      messageId: '',
+      error: 'AI Provider not configured'
+    })
+    useChatStore.getState().setCurrentSession(session('a'))
+
+    await useChatStore.getState().sendMessage('a', 'hello')
+
+    const state = useChatStore.getState()
+    expect(state.streamingMessages.a).toBeUndefined()
+    expect(state.messages.some((message) => message.content.includes('AI Provider not configured'))).toBe(
+      true
+    )
   })
 
   it('preserves a new stream cache when an earlier abort finishes', async () => {

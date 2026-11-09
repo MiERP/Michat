@@ -1,4 +1,10 @@
-import type { ChatSession, ChatMessage, ChatScope } from '../shared/types/chat'
+import type {
+  ChatSession,
+  ChatMessage,
+  ChatScope,
+  ChatMessageCreatedEvent,
+  SendMessageResult
+} from '../shared/types/chat'
 import type {
   Notebook,
   Note,
@@ -143,7 +149,12 @@ declare global {
 
       // Chat Message 相关
       getMessages: (sessionId: string) => Promise<ChatMessage[]>
-      sendMessage: (sessionId: string, content: string, scope?: ChatScope) => Promise<string>
+      sendMessage: (
+        sessionId: string,
+        content: string,
+        scope?: ChatScope
+      ) => Promise<SendMessageResult>
+      onMessageCreated: (callback: (data: ChatMessageCreatedEvent) => void) => () => void
       abortMessage: (messageId: string) => Promise<{ success: boolean; reason?: string }>
 
       // 流式消息监听（AI SDK 流式协议格式）
@@ -156,7 +167,9 @@ declare global {
           metadata?: any
         }) => void
       ) => () => void
-      onMessageError: (callback: (data: { messageId: string; error: string }) => void) => () => void
+      onMessageError: (
+        callback: (data: { messageId: string; notebookId: string; error: string }) => void
+      ) => () => void
 
       // Session 自动切换监听
       onSessionAutoSwitched: (

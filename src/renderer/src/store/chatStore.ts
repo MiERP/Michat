@@ -188,7 +188,27 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     get().addMessage(userMessage)
 
     // 3. 发送消息并获取 assistant messageId (kèm phạm vi tri thức đang chọn)
-    const messageId = await window.api.sendMessage(sessionId, content, get().ragScope ?? undefined)
+    let result: Awaited<ReturnType<typeof window.api.sendMessage>>
+    try {
+      result = await window.api.sendMessage(sessionId, content, get().ragScope ?? undefined)
+    } catch (error) {
+      result = { messageId: '', error: (error as Error).message }
+    }
+
+    if (result.error || !result.messageId) {
+      const errorMessage: ChatMessage = {
+        id: `temp_error_${Date.now()}`,
+        sessionId,
+        notebookId,
+        role: 'assistant',
+        content: `❌ Error: ${result.error ?? 'Failed to start the response'}`,
+        createdAt: new Date()
+      }
+      if (get().currentSession?.id === sessionId) get().addMessage(errorMessage)
+      return
+    }
+
+    const messageId = result.messageId
 
     // 4. 添加 assistant 消息占位符（包含推理字段）
     const assistantMessage: ChatMessage = {
@@ -202,7 +222,12 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       isStreaming: true,
       isReasoningStreaming: true
     }
-    if (get().currentSession?.id === sessionId) get().addMessage(assistantMessage)
+    if (
+      get().currentSession?.id === sessionId &&
+      !get().messages.some((message) => message.id === messageId)
+    ) {
+      get().addMessage(assistantMessage)
+    }
     get().setStreamingMessage(notebookId, messageId)
 
     // 5. 初始化缓存，记录 messageId -> {notebookId, content, reasoningContent}
@@ -354,35 +379,66 @@ export function setupChatListeners() {
     }
   })
 
+  // The assistant row exists before any provider/stream work. Creating the
+  // cache here closes the race where an error arrived before sendMessage()
+  // resolved in the renderer.
+  const cleanupCreated = window.api.onMessageCreated((data) => {
+    const { messageId, sessionId, notebookId } = data
+    const state = useChatStore.getState()
+    if (state.messageToNotebook[messageId]) return
+
+    const placeholder: ChatMessage = {
+      id: messageId,
+      sessionId,
+      notebookId,
+      role: 'assistant',
+      content: '',
+      createdAt: new Date(),
+      isStreaming: true,
+      isReasoningStreaming: true
+    }
+
+    useChatStore.setState((current) => ({
+      messageToNotebook: {
+        ...current.messageToNotebook,
+        [messageId]: { notebookId, content: '', reasoningContent: '' }
+      },
+      messages:
+        current.currentSession?.id === sessionId &&
+        !current.messages.some((message) => message.id === messageId)
+          ? [...current.messages, placeholder]
+          : current.messages
+    }))
+    useChatStore.getState().setStreamingMessage(notebookId, messageId)
+  })
+
   // 监听错误
   const cleanupError = window.api.onMessageError((data) => {
     const { messageId, error } = data
     const store = useChatStore.getState()
 
     const errorContent = `❌ Error: ${error}`
-
-    // Update cache
     const cached = store.messageToNotebook[messageId]
-    if (cached) {
-      useChatStore.setState((state) => ({
-        messageToNotebook: {
-          ...state.messageToNotebook,
-          [messageId]: { ...cached, content: errorContent }
-        }
-      }))
+    const notebookId = cached?.notebookId ?? data.notebookId
 
-      // If message is in current messages, also update it
-      const message = store.messages.find((m) => m.id === messageId)
-      if (message) {
-        store.updateMessageContent(messageId, errorContent)
-      }
+    useChatStore.setState((state) => ({
+      messageToNotebook: {
+        ...state.messageToNotebook,
+        [messageId]: { notebookId, content: errorContent, reasoningContent: '' }
+      },
+      messages: state.messages.some((message) => message.id === messageId)
+        ? state.messages.map((message) =>
+            message.id === messageId
+              ? { ...message, content: errorContent, isStreaming: false, isReasoningStreaming: false }
+              : message
+          )
+        : state.messages
+    }))
 
-      // Clear streaming status and cache
-      store.setStreamingMessage(cached.notebookId, null)
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [messageId]: _removed, ...rest } = store.messageToNotebook
-      useChatStore.setState({ messageToNotebook: rest })
-    }
+    store.setStreamingMessage(notebookId, null)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { [messageId]: _removed, ...rest } = store.messageToNotebook
+    useChatStore.setState({ messageToNotebook: rest })
   })
 
   // Listen for session auto switch
@@ -406,6 +462,7 @@ export function setupChatListeners() {
   // Return cleanup function
   return () => {
     cleanupChunk()
+    cleanupCreated()
     cleanupError()
     cleanupAutoSwitch()
   }

@@ -76,6 +76,26 @@ export interface APIMessage {
 /**
  * 流式响应片段
  */
+/** Result of the send-message IPC call. */
+export interface SendMessageResult {
+  messageId: string
+  error?: string
+}
+
+/** Emitted as soon as the assistant placeholder row exists. */
+export interface ChatMessageCreatedEvent {
+  messageId: string
+  sessionId: string
+  notebookId: string
+}
+
+/** Streaming error payload; notebookId lets the renderer clear state without a cache hit. */
+export interface ChatMessageErrorEvent {
+  messageId: string
+  notebookId: string
+  error: string
+}
+
 export interface StreamChunk {
   content: string
   reasoningContent?: string // DeepSeek Reasoner 推理过程内容

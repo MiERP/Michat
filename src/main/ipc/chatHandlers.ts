@@ -342,22 +342,46 @@ export function registerChatHandlers(
     'send-message',
     validateWithEvent(ChatSchemas.sendMessage, async (event, args) => {
       const { sessionId, content, scope } = args
+      const session = queries.getSessionById(sessionId)
+      if (!session?.notebookId) {
+        return { messageId: '', error: 'Session not found' }
+      }
 
-      // 1. 保存用户消息
-      queries.createMessage(sessionId, 'user', content)
-
-      // 2. Create the assistant placeholder message.
-      const assistantMessage = queries.createMessage(sessionId, 'assistant', '')
-
-      // License guard: block chat when license is missing/invalid/expired
+      // Fail before writing rows so the renderer never receives an error for a
+      // placeholder it has not seen yet.
       const licenseStatus = LicenseService.getStatus()
       if (!licenseStatus.valid) {
-        event.sender.send('message-error', {
-          messageId: assistantMessage.id,
-          error: `License invalid: ${licenseStatus.message}`
-        })
-        return assistantMessage.id
+        return { messageId: '', error: `License invalid: ${licenseStatus.message}` }
       }
+
+      const provider = await providerManager.getActiveChatProvider()
+      if (!provider) {
+        return {
+          messageId: '',
+          error: 'AI Provider not configured, please configure in settings'
+        }
+      }
+
+      const providerName = String((provider as any)?.name || '').toLowerCase()
+      const isLlamaChat = providerName === 'llama' || providerName === 'llama-embed'
+      if (isLlamaChat) {
+        const chatReady = await llamaService.ensureChatStarted()
+        if (!chatReady) {
+          return {
+            messageId: '',
+            error:
+              'Local llama chat server is unavailable. Please check llama binary/model configuration and try again.'
+          }
+        }
+      }
+
+      queries.createMessage(sessionId, 'user', content)
+      const assistantMessage = queries.createMessage(sessionId, 'assistant', '')
+      event.sender.send('message-created', {
+        messageId: assistantMessage.id,
+        sessionId,
+        notebookId: session.notebookId
+      })
 
       // 3. Load conversation history.
       const history = queries.getMessagesBySession(sessionId)
@@ -373,9 +397,10 @@ export function registerChatHandlers(
       if (messages.length === 0) {
         event.sender.send('message-error', {
           messageId: assistantMessage.id,
+          notebookId: session.notebookId,
           error: 'No valid conversation history'
         })
-        return assistantMessage.id
+        return { messageId: assistantMessage.id }
       }
 
       const settings = await settingsManager.getAllSettings().catch(() => null)
@@ -389,9 +414,8 @@ export function registerChatHandlers(
         })
       }
 
-      const session = queries.getSessionById(sessionId)
       const summaries: Array<{ title: string; summary: string }> = []
-      let cursorSessionId = session?.parentSessionId
+      let cursorSessionId = session.parentSessionId
       let depth = 0
 
       while (cursorSessionId && depth < 5) {
@@ -443,8 +467,7 @@ export function registerChatHandlers(
           hasEmbeddingModel &&
           !(useChitChatHeuristic && isLikelyChitChat(content, shortQueryLength))
         ) {
-          const session = queries.getSessionById(sessionId)
-          if (session?.notebookId) {
+          if (session.notebookId) {
             const ragStartedAt = Date.now()
             const explicitScope = buildScopeFilter(scope)
 
@@ -513,30 +536,6 @@ export function registerChatHandlers(
       } catch (error) {
         // RAG is best-effort: log and continue without context.
         Logger.warn('ChatHandlers', 'RAG search failed:', error)
-      }
-
-      // 4. 调用 AI Provider 流式生成
-      const provider = await providerManager.getActiveChatProvider()
-      if (!provider) {
-        event.sender.send('message-error', {
-          messageId: assistantMessage.id,
-          error: 'AI Provider not configured, please configure in settings'
-        })
-        return assistantMessage.id
-      }
-
-      const providerName = String((provider as any)?.name || '').toLowerCase()
-      const isLlamaChat = providerName === 'llama' || providerName === 'llama-embed'
-      if (isLlamaChat) {
-        const chatReady = await llamaService.ensureChatStarted()
-        if (!chatReady) {
-          event.sender.send('message-error', {
-            messageId: assistantMessage.id,
-            error:
-              'Local llama chat server is unavailable. Please check llama binary/model configuration and try again.'
-          })
-          return assistantMessage.id
-        }
       }
 
       let fullTextContent = ''
@@ -612,6 +611,7 @@ export function registerChatHandlers(
         (error) => {
           event.sender.send('message-error', {
             messageId: assistantMessage.id,
+            notebookId: session.notebookId,
             error: error.message
           })
           cleanupStream(assistantMessage.id)
@@ -658,6 +658,7 @@ export function registerChatHandlers(
             Logger.error('ChatHandlers', 'Error in completion callback:', error)
             event.sender.send('message-error', {
               messageId: assistantMessage.id,
+              notebookId: session.notebookId,
               error: 'Error occurred while processing message'
             })
           } finally {
@@ -669,7 +670,7 @@ export function registerChatHandlers(
       // BUG-05 Fix: Track stream with timestamp for stale cleanup
       trackStream(assistantMessage.id, abortController)
 
-      return assistantMessage.id
+      return { messageId: assistantMessage.id }
     })
   )
 

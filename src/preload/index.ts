@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DocumentMetadata } from '../main/services/DocumentMetadataExtractionService'
-import type { ShortcutAction, ShortcutConfig } from '../shared/types'
+import type {
+  ChatMessageCreatedEvent,
+  SendMessageResult,
+  ShortcutAction,
+  ShortcutConfig
+} from '../shared/types'
 
 async function invokeWithTimeout<T>(channel: string, timeout: number, ...args: any[]): Promise<T> {
   return Promise.race([
@@ -86,9 +91,20 @@ const api = {
 
   // Chat Message 相关
   getMessages: (sessionId: string) => invokeWithTimeout('get-messages', 10000, { sessionId }),
-  sendMessage: (sessionId: string, content: string, scope?: unknown) =>
+  sendMessage: (
+    sessionId: string,
+    content: string,
+    scope?: unknown
+  ): Promise<SendMessageResult> =>
     invokeWithTimeout('send-message', 60000, { sessionId, content, scope }), // 60秒超时（流式消息可能较长）
   abortMessage: (messageId: string) => invokeWithTimeout('abort-message', 5000, { messageId }),
+
+  // Emitted as soon as the assistant placeholder row exists.
+  onMessageCreated: (callback: (data: ChatMessageCreatedEvent) => void) => {
+    const listener = (_event: any, data: ChatMessageCreatedEvent) => callback(data)
+    ipcRenderer.on('message-created', listener)
+    return () => ipcRenderer.removeListener('message-created', listener)
+  },
 
   // 流式消息监听
   onMessageChunk: (callback: (data: any) => void) => {
