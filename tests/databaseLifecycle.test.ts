@@ -24,6 +24,14 @@ describe('database connection lifecycle', () => {
     }
   })
 
+  it('enforces foreign keys and secure deletion', () => {
+    initDatabase()
+    const sqlite = getSqlite()!
+
+    expect(sqlite.pragma('foreign_keys', { simple: true })).toBe(1)
+    expect(sqlite.pragma('secure_delete', { simple: true })).toBe(1)
+  })
+
   it('closes a reopened database and invalidates its ORM handle', () => {
     initDatabase()
     closeDatabase()

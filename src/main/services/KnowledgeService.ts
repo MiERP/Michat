@@ -12,7 +12,7 @@ import { app } from 'electron'
 import { join, basename, extname } from 'path'
 import { mkdir, copyFile, unlink, stat, readdir, readFile } from 'fs/promises'
 import { existsSync, watch, type FSWatcher } from 'fs'
-import { getDatabase, executeCheckpoint, getSqlite } from '../db'
+import { getDatabase, executeCheckpoint, getSqlite, vacuumDatabase } from '../db'
 import {
   documents,
   chunks,
@@ -3197,6 +3197,7 @@ export class KnowledgeService {
 
     db.delete(documents).where(eq(documents.id, documentId)).run()
     executeCheckpoint('PASSIVE')
+    vacuumDatabase()
     Logger.info('KnowledgeService', `Document deleted: ${documentId}`)
   }
 

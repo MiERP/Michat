@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { app } from 'electron'
 import { eq, desc, and, sql } from 'drizzle-orm'
-import { getDatabase, executeCheckpoint, getSqlite } from './index'
+import { getDatabase, executeCheckpoint, getSqlite, vacuumDatabase } from './index'
 import { isPathInsideDirectory } from '../security/guards'
 import { chatSessions, chatMessages, notebooks, notes, documents, items, chunks } from './schema'
 import { vectorStoreManager } from '../vectorstore'
@@ -326,6 +326,7 @@ export async function deleteNotebook(id: string) {
 
     // 执行 checkpoint 确保数据持久化
     executeCheckpoint('PASSIVE')
+    vacuumDatabase()
     Logger.info('Database', `Deleted notebook: ${id}`)
   } catch (error) {
     Logger.error('Database', 'Error deleting notebook:', error)

@@ -92,6 +92,12 @@ export function initDatabase() {
     // 启用 WAL 模式以提高性能
     sqlite.pragma('journal_mode = WAL')
 
+    // Explicitly enforce the schema's ON DELETE CASCADE relationships.
+    sqlite.pragma('foreign_keys = ON')
+
+    // Overwrite deleted rows instead of leaving old content in free pages.
+    sqlite.pragma('secure_delete = ON')
+
     // 优化 WAL 配置
     sqlite.pragma('wal_autocheckpoint = 100') // 每 100 页自动 checkpoint（降低默认值）
     sqlite.pragma('synchronous = NORMAL') // WAL 模式推荐设置
@@ -185,6 +191,20 @@ export function executeCheckpoint(mode: 'PASSIVE' | 'FULL' | 'RESTART' | 'TRUNCA
     console.log(`[Database] ${mode} checkpoint result:`, result)
   } catch (error) {
     console.error(`[Database] Error executing ${mode} checkpoint:`, error)
+  }
+}
+
+/**
+ * Rebuild the database file after destructive deletes so old pages do not
+ * retain document/chat content. VACUUM cannot run inside a transaction.
+ */
+export function vacuumDatabase(): void {
+  if (!sqlite || isClosing) return
+  try {
+    sqlite.exec('VACUUM')
+    console.log('[Database] VACUUM completed')
+  } catch (error) {
+    console.warn('[Database] VACUUM failed:', error)
   }
 }
 
