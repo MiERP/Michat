@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Verify that a packaged app.asar contains only runtime files. Run after
- * `electron-builder --dir` in release verification.
+ * Verify that a packaged app.asar contains only runtime files and that the
+ * entries the app needs at runtime (main bundle + isolated parser worker) are
+ * present. Run after `electron-builder --dir` in release verification.
  */
 const asar = require('@electron/asar')
 
@@ -18,14 +19,14 @@ try {
   files = asar.listPackage(archivePath)
 }
 
-const forbidden = files.filter((file) => {
-  const normalized = file.replace(/\\/g, '/')
-  return (
-    /^\/(tests|docs|coverage|scripts)(\/|$)/.test(normalized) ||
-    /^\/(\.env|\$null|.*\.tsbuildinfo)/.test(normalized) ||
-    /\.map$/.test(normalized)
-  )
-})
+const normalized = files.map((file) => file.replace(/\\/g, '/'))
+
+const forbidden = normalized.filter(
+  (file) =>
+    /^\/(tests|docs|coverage|scripts|src|build)(\/|$)/.test(file) ||
+    /^\/(\.env|\$null|.*\.tsbuildinfo)/.test(file) ||
+    /\.map$/.test(file)
+)
 
 if (forbidden.length > 0) {
   console.error('[asar] forbidden files found:')
@@ -33,4 +34,15 @@ if (forbidden.length > 0) {
   process.exit(1)
 }
 
-console.log(`[asar] ${files.length} entries; no source/test/docs/coverage files found`)
+const required = ['/out/main/index.js', '/out/main/parserWorker.js', '/package.json']
+const missing = required.filter((entry) => !normalized.includes(entry))
+
+if (missing.length > 0) {
+  console.error('[asar] required runtime entries are missing:')
+  for (const entry of missing) console.error(`  - ${entry}`)
+  process.exit(1)
+}
+
+console.log(
+  `[asar] ${files.length} entries; runtime entries present, no source/test/docs/coverage files found`
+)

@@ -18,7 +18,11 @@ const FLOORS = {
   'fast-uri': '3.1.9',
   'js-yaml': '4.3.1',
   'builder-util-runtime': '9.7.0',
-  nanoid: '3.3.18'
+  nanoid: '3.3.18',
+  // GHSA-866g-f22w-33x8: uncontrolled resource consumption in provider responses.
+  '@ai-sdk/provider-utils': '3.0.28',
+  // GHSA-238p-pmpm-9mq7: prototype pollution bypassing KaTeX trust restrictions.
+  katex: '0.18.2'
 }
 
 function parseVersion(value) {
@@ -33,9 +37,38 @@ function compare(a, b) {
   return 0
 }
 
+/**
+ * pnpm keeps virtual-store directories for removed versions until the store is
+ * pruned, so directory names alone over-report. When pnpm's installed lockfile
+ * is available it is the authoritative list of versions that are still linked.
+ */
+const LOCKFILE = path.join(process.cwd(), 'node_modules', '.pnpm', 'lock.yaml')
+
+function readInstalledLockfile() {
+  try {
+    return fs.readFileSync(LOCKFILE, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function isStillInstalled(lockfile, packageName, version) {
+  if (!lockfile) return true
+  const pattern = new RegExp(
+    `(^|[\\s'"])${escapeRegExp(packageName)}@${escapeRegExp(version)}(?=$|[\\s'"(:])`,
+    'm'
+  )
+  return pattern.test(lockfile)
+}
+
 function installedVersions(packageName) {
   const root = path.join(process.cwd(), 'node_modules', '.pnpm')
   if (!fs.existsSync(root)) return []
+  const lockfile = readInstalledLockfile()
 
   const prefix = packageName.startsWith('@')
     ? `${packageName.replace('/', '+')}@`
@@ -46,6 +79,7 @@ function installedVersions(packageName) {
     .filter((entry) => entry.startsWith(prefix))
     .map((entry) => entry.slice(prefix.length).split('_')[0])
     .filter((version) => parseVersion(version))
+    .filter((version) => isStillInstalled(lockfile, packageName, version))
 }
 
 let failed = false

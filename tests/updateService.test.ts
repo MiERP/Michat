@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { UpdateStatus } from '../src/shared/types/update'
 
 const mocks = vi.hoisted(() => {
+  // `vi.hoisted` runs before the ESM imports are initialised, so the module that
+  // provides EventEmitter has to be loaded synchronously here.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { EventEmitter } = require('events') as typeof import('events')
   return {
     autoUpdater: Object.assign(new EventEmitter(), {

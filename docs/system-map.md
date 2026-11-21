@@ -140,11 +140,18 @@
 
 - `Knowledge ingestion and retrieval`
   - purpose: turns notebook sources into chunks + embeddings + searchable metadata and later executes hybrid retrieval
-  - key paths: `src/main/services/KnowledgeService.ts`, `src/main/services/FileParserService.ts`, `src/main/services/EmbeddingService.ts`, `src/main/services/RerankService.ts`, `src/main/services/WebFetchService.ts`, `src/main/services/loaders/**`
-  - depends on: DB schema, vector store, providers, loaders, web parsing
+  - key paths: `src/main/services/KnowledgeService.ts`, `src/main/services/FileParserService.ts`, `src/main/services/EmbeddingService.ts`, `src/main/services/RerankService.ts`, `src/main/services/WebFetchService.ts`, `src/main/services/loaders/**`, `src/main/services/rag/**`: document metadata projections (`DocumentRetrievalMetadata`) and the section index lifecycle (`SectionIndexService`) extracted from `KnowledgeService`; `src/main/services/import/ParserWorkerClient.ts`
+  - depends on: DB schema, vector store, providers, loaders, web parsing, the document parser utility process
   - used by: knowledge IPC, chat RAG augmentation, citation previews, notebook source management
   - major external dependencies: `pdfjs-dist`, `mammoth`, `officeparser`, `xlsx`, `cheerio`, `turndown`
   - why it matters: it owns the manual sync between relational chunk rows, vector rows, FTS rows, copied source files, and notebook stats; mistakes here create partial indexing states that other layers assume are valid
+
+- `Document parser utility process`
+  - purpose: runs every document loader (PDF, DOCX, PPTX, XLSX, HTML, Markdown) outside the Electron main process so a crafted or corrupt document can only crash or exhaust memory in a disposable child
+  - key paths: `src/main/workers/parserWorker.ts`, `src/main/services/import/parserProtocol.ts`, `src/main/services/import/ParserWorkerClient.ts`, `electron.vite.config.ts` (second main-process entry), `scripts/smoke-parser-worker.cjs`, `scripts/smoke-packaged.ps1`
+  - depends on: Electron `utilityProcess`, `out/main/parserWorker.js` built next to `out/main/index.js`, import validation (`fileValidation.ts`)
+  - used by: `KnowledgeService.addDocumentFromFile` and `KnowledgeService.reindexDocument` through `ParserWorkerClient.parseFile`
+  - why it matters: the worker re-checks size/type in its own process (TOCTOU), has a parse timeout, and rejects all in-flight requests when it exits; the main process never falls back to in-process parsing inside Electron, so a broken worker bundle surfaces as a failed import instead of silently removing the isolation boundary
 
 - `Chat orchestration and session lifecycle`
   - purpose: persists chat history, injects persona/memory/RAG context, streams assistant output, tracks token usage, and auto-switches long sessions
@@ -487,9 +494,9 @@
   - likely regression: notebook/session/message CRUD breaks, delete cascades miss copied files or vector cleanup, item ordering becomes unstable
   - verify by: create/edit/delete notebooks and confirm local knowledge files disappear when expected
 
-- `If src/main/services/KnowledgeService.ts changes`
-  - likely regression: indexing stalls, vector and FTS rows desynchronize, citations reference missing chunks, reindex cleanup leaves stale search results
-  - verify by: ingest a mixed-source notebook, search it, then reindex/remove a document and compare results
+- `If src/main/services/KnowledgeService.ts`, `src/main/services/rag/**`, or the parser worker changes`
+  - likely regression: indexing stalls, vector and FTS rows desynchronize, citations reference missing chunks, reindex cleanup leaves stale search results, or file imports fail because the parser worker bundle/message protocol drifted
+  - verify by: ingest a mixed-source notebook, search it, then reindex/remove a document and compare results; run `pnpm smoke:parser-worker` after a build and the packaged parser smoke from `pnpm check:package`
 
 - `If src/main/providers/ProviderManager.ts` or `src/main/providers/base/AISDKProvider.ts` changes
   - likely regression: wrong active model/provider resolution, broken embedding availability, or invalid assumptions about local keyless providers

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell, dialog, session } from 'electron'
+import { isAbsolute } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { LlamaService } from './services/LlamaService'
 import {
@@ -46,6 +47,38 @@ let llamaService: LlamaService | null = null
 enforceSingleInstance(app)
 
 /**
+ * Packaged smoke hook for the isolated document parser (plan Task 15).
+ * `scripts/smoke-packaged.ps1` starts the packaged binary with this flag,
+ * checks that a real utility process parsed the file, then the app exits.
+ */
+const PARSER_SMOKE_PREFIX = '--smoke-parser='
+
+async function runParserSmoke(filePath: string): Promise<void> {
+  const { ParserWorkerClient } = await import('./services/import/ParserWorkerClient')
+  const client = new ParserWorkerClient()
+  let line: string
+  let exitCode = 0
+
+  try {
+    if (!isAbsolute(filePath)) throw new Error('Smoke file path must be absolute')
+    const result = await client.parseFile(filePath)
+    const pid = client.workerPid
+    if (!pid || pid === process.pid) {
+      throw new Error('Document parser did not run in a separate utility process')
+    }
+    line = `MICHAT_PARSER_SMOKE_OK chars=${result.content.length} mime=${result.mimeType} pid=${pid}`
+  } catch (error) {
+    exitCode = 1
+    line = `MICHAT_PARSER_SMOKE_FAIL ${(error as Error).message}`
+  } finally {
+    client.dispose()
+  }
+
+  await new Promise<void>((resolve) => process.stdout.write(`${line}\n`, () => resolve()))
+  app.exit(exitCode)
+}
+
+/**
  * Hằng ngày enqueue decay-links cho mọi notebook
  * (giảm confidence liên kết cũ, loại link quá yếu)
  */
@@ -76,6 +109,12 @@ function scheduleDailyLinkDecay(queue: BackgroundJobService): void {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
   try {
+    const parserSmokeArg = process.argv.find((arg) => arg.startsWith(PARSER_SMOKE_PREFIX))
+    if (parserSmokeArg) {
+      await runParserSmoke(parserSmokeArg.slice(PARSER_SMOKE_PREFIX.length))
+      return
+    }
+
     installPermissionHandlers(session.defaultSession)
     installWebContentsGuards(app)
 
@@ -141,11 +180,7 @@ app.whenReady().then(async () => {
 
     // Initialize Session Auto Switch Service (cần knowledgeService để lưu memory)
     Logger.info('Main', 'Initializing Session Auto Switch Service...')
-    sessionAutoSwitchService = new SessionAutoSwitchService(
-      providerManager,
-      knowledgeService,
-      null
-    )
+    sessionAutoSwitchService = new SessionAutoSwitchService(providerManager, knowledgeService, null)
     Logger.info('Main', 'Session Auto Switch Service initialized')
 
     // Initialize Background Job Service (queue cho auto-link/decay/reindex/enrich)
@@ -185,9 +220,11 @@ app.whenReady().then(async () => {
     const maintenanceNotebooks = getAllNotebooks()
     const vectorIndexRebuilt = wasVectorIndexRebuilt()
     for (const notebook of maintenanceNotebooks) {
-      void knowledgeService.reconcileNotebookIndexes(notebook.id).catch((error) =>
-        Logger.warn('Main', `Knowledge index reconciliation failed for ${notebook.id}:`, error)
-      )
+      void knowledgeService
+        .reconcileNotebookIndexes(notebook.id)
+        .catch((error) =>
+          Logger.warn('Main', `Knowledge index reconciliation failed for ${notebook.id}:`, error)
+        )
       if (vectorIndexRebuilt) {
         backgroundJobService.enqueueRebuildVectors(notebook.id)
       }
@@ -201,9 +238,7 @@ app.whenReady().then(async () => {
     setTimeout(() => {
       void knowledgeService
         ?.backfillLegalMetadataToIndex()
-        .catch((error) =>
-          Logger.warn('Main', 'Legal metadata backfill failed:', error)
-        )
+        .catch((error) => Logger.warn('Main', 'Legal metadata backfill failed:', error))
     }, 10000)
 
     // Tài liệu pháp lý bị parser cũ làm mất phần đầu (DOCX table) → reindex lại
@@ -399,6 +434,7 @@ app.on('before-quit', (event) => {
     } catch (error) {
       Logger.error('Main', 'Error during graceful shutdown:', error)
     } finally {
+      knowledgeService?.disposeFileParser()
       closeDatabase()
       app.quit()
     }

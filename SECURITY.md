@@ -30,8 +30,14 @@ We will acknowledge the report and coordinate a fix and disclosure date.
 - Provider configuration is encrypted with the OS credential store when
   available. Do not run with `--no-sandbox` or with context isolation disabled.
 - Imported documents are untrusted. Size, extension, magic bytes, and local
-  paths are validated before a file is copied or parsed. Parsers should be
-  treated as an attack surface; report parser crashes or memory issues.
+  paths are validated before a file is copied or parsed, and document parsing
+  runs in a dedicated Electron utility process (`src/main/workers/parserWorker.ts`)
+  rather than in the main process. That process re-validates the target file,
+  has a parse timeout, and is restarted after a crash; the main process never
+  falls back to in-process parsing inside Electron. This is a crash/OOM
+  boundary, not a privilege or network sandbox: the worker still runs with the
+  user's privileges and can read files and reach the network. Parser crashes,
+  hangs, or memory blowups are still worth reporting.
 - Web imports are limited to public HTTP(S) URLs. Private, loopback, link-local,
   multicast, reserved, and IPv4-mapped IPv6 addresses are rejected. Redirects
   are revalidated and response bodies are capped.

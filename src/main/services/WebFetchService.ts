@@ -93,7 +93,11 @@ function createPinnedDispatcher(addresses: string[]): Agent {
 
   return new Agent({
     connect: {
-      lookup: ((_hostname: string, _options: unknown, callback: Function) => {
+      lookup: ((
+        _hostname: string,
+        _options: unknown,
+        callback: (error: Error | null, address: string, family: number) => void
+      ) => {
         callback(null, address, family)
       }) as never
     }
@@ -303,14 +307,12 @@ export class WebFetchService {
    * 清理内容
    */
   private cleanContent(content: string): string {
-    return (
-      content
-        .replace(/\n{3,}/g, '\n\n')
-        .split('\n')
-        .map((line) => line.trim())
-        .join('\n')
-        .trim()
-    )
+    return content
+      .replace(/\n{3,}/g, '\n\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .join('\n')
+      .trim()
   }
 
   /**

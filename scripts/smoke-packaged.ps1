@@ -76,6 +76,21 @@ function Send-Cdp($method, $params) {
   }
 }
 
+function Invoke-ParserSmoke($exePath) {
+  # Plan Task 15: prove that the packaged app parses a document in a separate
+  # utility process (asar entry, loaders, message channel), not in-process.
+  $fixture = (Resolve-Path (Join-Path $PSScriptRoot '..\tests\fixtures\rag\local-first.md')).Path
+  $output = & $exePath "--smoke-parser=$fixture" 2>&1 | Out-String
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
+    throw "Packaged parser smoke failed (exit $exitCode): $output"
+  }
+  if ($output -notmatch 'MICHAT_PARSER_SMOKE_OK') {
+    throw "Packaged parser smoke produced no success marker: $output"
+  }
+  Write-Host ('[parser] ' + ($output.Trim() -split "`n" | Where-Object { $_ -match 'MICHAT_PARSER_SMOKE_OK' } | Select-Object -First 1))
+}
+
 function Wait-ForRendererTarget($port, $process) {
   $deadline = (Get-Date).AddSeconds(45)
   $lastError = $null
@@ -100,6 +115,7 @@ function Wait-ForRendererTarget($port, $process) {
 }
 
 try {
+  Invoke-ParserSmoke $resolvedExe
   Set-OnboardingIncomplete
 
   $proc = Start-Process -FilePath $resolvedExe -ArgumentList "--remote-debugging-port=$Port" -PassThru

@@ -65,6 +65,14 @@ export default defineConfig({
     plugins: [copyMigrationsPlugin()],
     build: {
       emptyOutDir: false,
+      rollupOptions: {
+        // The document parser runs in its own utility process, so it needs a
+        // second main-process entry emitted next to index.js.
+        input: {
+          index: resolve('src/main/index.ts'),
+          parserWorker: resolve('src/main/workers/parserWorker.ts')
+        }
+      },
       // electron-vite auto-externalizes all dependencies from package.json.
       // ESM-only packages (no CJS entry) MUST be force-bundled inline,
       // otherwise the CJS output will contain require("remark") which fails at runtime

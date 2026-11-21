@@ -28,21 +28,27 @@ import type {
   NewDocument,
   NewChunk,
   NewEmbedding,
-  NewChunkFeedback,
-  NewSection
+  NewChunkFeedback
 } from '../db/schema'
 import { and, eq, desc, inArray, isNull, sql, gte, lte } from 'drizzle-orm'
 import { EmbeddingService } from './EmbeddingService'
 import { ChunkingService, type ChunkOptions, type ChunkStructureContext } from './ChunkingService'
 import { FileParserService } from './FileParserService'
-import type { SectionInfo } from './loaders/types'
 import { validateImportableFile } from './import/fileValidation'
+import { ParserWorkerClient } from './import/ParserWorkerClient'
+import { SectionIndexService } from './rag/SectionIndexService'
 import {
-  flattenSectionsWithPath,
-  sanitizeCompactSections,
-  findDeepestSection,
-  type CompactSection
-} from './loaders/sections'
+  buildChunkStructureContext,
+  buildCompactStructureMetadata,
+  buildDocumentIndexText,
+  extractLegalMetadata,
+  extractRetrievalMetadata,
+  legalMetadataIndexText,
+  readDocumentMetadataProjection,
+  retrievalMetadataIndexText,
+  withRetrievalMetadata,
+  type RetrievalMetadataProjection
+} from './rag/DocumentRetrievalMetadata'
 import { MarkdownNormalizer } from './MarkdownNormalizer'
 import { detectQueryMetadata, normalizeMetadataValue } from '../utils/queryMetadata'
 import {
@@ -79,20 +85,8 @@ const MAX_PARAMETERIZED_CHUNK_FILTER = 5000
 /** Kích thước lô khi phải lọc FTS theo danh sách chunk id rất lớn. */
 const FTS_FILTER_BATCH_SIZE = 900
 
-/** Số ký tự tối đa của nội dung đưa vào vector cấp tài liệu. */
-const DOCUMENT_INDEX_MAX_CHARS = 2000
-
-/** Số ký tự tối đa của nội dung mục đưa vào vector cấp mục (section). */
-const SECTION_INDEX_MAX_CHARS = 1200
-
 /** Nhận diện nội dung có heading markdown (điều kiện để backfill cấu trúc mục). */
 const HEADING_MARKER_REGEX = /^#{1,6}\s+\S/m
-
-interface RetrievalMetadataProjection {
-  keywords: string[]
-  entities: string[]
-  tags: string[]
-}
 
 /**
  * Dựng biểu thức MATCH cho FTS5.
@@ -173,15 +167,7 @@ export interface SearchOptions {
   }
 }
 
-/**
- * Cấu trúc tài liệu sau khi loader/normalizer trả về.
- * Offset tính trên content sẽ được lưu vào documents.content.
- */
-export interface DocumentStructureLike {
-  type: 'flat' | 'pages' | 'sections'
-  pages?: Array<{ pageNumber: number; startOffset: number; endOffset: number }>
-  sections?: SectionInfo[]
-}
+export type { DocumentStructureLike } from './rag/DocumentRetrievalMetadata'
 
 export interface SearchResult {
   chunkId: string
@@ -235,7 +221,10 @@ export class KnowledgeService {
   private embeddingService: EmbeddingService
   private chunkingService: ChunkingService
   private fileParserService: FileParserService
+  /** Runs every document loader outside the main process (plan Task 15). */
+  private parserWorker = new ParserWorkerClient()
   private rerankService: RerankService
+  private sectionIndex: SectionIndexService
   private markdownNormalizer: MarkdownNormalizer
   private metadataIndexService = new DocumentMetadataIndexService()
   private webFetchService = new WebFetchService()
@@ -251,6 +240,9 @@ export class KnowledgeService {
     this.chunkingService = new ChunkingService()
     this.fileParserService = new FileParserService()
     this.rerankService = new RerankService()
+    this.sectionIndex = new SectionIndexService((texts) =>
+      this.embeddingService.embedBatch(texts, { dimensions: 1024 })
+    )
     this.markdownNormalizer = new MarkdownNormalizer()
     this.llamaService = llamaService
     this.knowledgeFilesDir = join(app.getPath('userData'), 'knowledge-files')
@@ -340,186 +332,11 @@ export class KnowledgeService {
   }
 
   /**
-   * Rút gọn cấu trúc tài liệu để lưu vào documents.metadata.
-   * Giữ CẢ pages (PDF/PPT) và sections (Word/Markdown) — sections trước đây bị
-   * bỏ hoàn toàn nên metadata-aware retrieval không có gì để lọc.
+   * Tears down the isolated parser process. Called from the app shutdown
+   * barrier so a quit does not leave a utility process behind.
    */
-  private buildCompactStructureMetadata(
-    structure: DocumentStructureLike | undefined
-  ): Record<string, unknown> | undefined {
-    if (!structure) return undefined
-
-    const pages = structure.pages
-      ?.filter(
-        (page) =>
-          typeof page?.startOffset === 'number' &&
-          typeof page?.endOffset === 'number' &&
-          page.endOffset > page.startOffset
-      )
-      .map((page) => ({
-        pageNumber: page.pageNumber,
-        startOffset: page.startOffset,
-        endOffset: page.endOffset
-      }))
-
-    const sections = structure.sections?.length
-      ? sanitizeCompactSections(flattenSectionsWithPath(structure.sections))
-      : undefined
-
-    if (!pages?.length && !sections?.length) return undefined
-
-    return {
-      structure: {
-        type: structure.type,
-        ...(pages?.length ? { pages } : {}),
-        ...(sections?.length ? { sections } : {})
-      }
-    }
-  }
-
-  /**
-   * Dựng ngữ cảnh cấu trúc truyền cho ChunkingService để neo headingPath/trang.
-   */
-  private buildChunkStructureContext(
-    structure: DocumentStructureLike | undefined
-  ): ChunkStructureContext | undefined {
-    if (!structure) return undefined
-
-    const sections = structure.sections?.length
-      ? sanitizeCompactSections(flattenSectionsWithPath(structure.sections))
-      : undefined
-    const pages = structure.pages?.length
-      ? structure.pages.map((page) => ({
-          pageNumber: page.pageNumber,
-          startOffset: page.startOffset,
-          endOffset: page.endOffset
-        }))
-      : undefined
-
-    if (!sections?.length && !pages?.length) return undefined
-    return { sections, pages }
-  }
-
-  /** Metadata pháp lý đã trích, chỉ giữ các trường có giá trị. */
-  private extractLegalMetadata(
-    metadata: Record<string, unknown> | null | undefined
-  ): Record<string, string> | undefined {
-    const source = metadata?.documentMetadata
-    if (!source || typeof source !== 'object') return undefined
-
-    const result: Record<string, string> = {}
-    for (const key of [
-      'documentNumber',
-      'documentType',
-      'issuer',
-      'issuedAt',
-      'documentTitle',
-      'legalBases'
-    ]) {
-      const value = (source as Record<string, unknown>)[key]
-      if (typeof value === 'string' && value.trim()) result[key] = value.trim()
-    }
-
-    return Object.keys(result).length > 0 ? result : undefined
-  }
-
-  private extractRetrievalMetadata(
-    metadata: Record<string, unknown> | null | undefined
-  ): RetrievalMetadataProjection {
-    const enrichment =
-      metadata?.enrichment &&
-      typeof metadata.enrichment === 'object' &&
-      !Array.isArray(metadata.enrichment)
-        ? (metadata.enrichment as Record<string, unknown>)
-        : {}
-    const readList = (value: unknown): string[] =>
-      Array.isArray(value)
-        ? [
-            ...new Set(
-              value
-                .filter((item): item is string => typeof item === 'string')
-                .map((item) => item.trim())
-                .filter(Boolean)
-            )
-          ]
-        : []
-
-    return {
-      keywords: readList(enrichment.keywords),
-      entities: readList(enrichment.entities),
-      tags: readList(metadata?.tags)
-    }
-  }
-
-  private readDocumentMetadataProjection(documentId: string): {
-    legalMetadata?: Record<string, string>
-    retrievalMetadata: RetrievalMetadataProjection
-  } {
-    const row = getDatabase()
-      .select({ metadata: documents.metadata })
-      .from(documents)
-      .where(eq(documents.id, documentId))
-      .get()
-    const metadata = row?.metadata as Record<string, unknown> | null | undefined
-    return {
-      legalMetadata: this.extractLegalMetadata(metadata),
-      retrievalMetadata: this.extractRetrievalMetadata(metadata)
-    }
-  }
-
-  private withRetrievalMetadata(
-    metadata: Record<string, unknown> | null | undefined,
-    projection: {
-      legalMetadata?: Record<string, string>
-      retrievalMetadata: RetrievalMetadataProjection
-    }
-  ): Record<string, unknown> | undefined {
-    const result = { ...(metadata || {}) }
-    if (projection.legalMetadata) result.documentMetadata = projection.legalMetadata
-    else delete result.documentMetadata
-
-    const hasRetrievalMetadata = Object.values(projection.retrievalMetadata).some(
-      (values) => values.length > 0
-    )
-    if (hasRetrievalMetadata) result.retrievalMetadata = projection.retrievalMetadata
-    else delete result.retrievalMetadata
-
-    return Object.keys(result).length > 0 ? result : undefined
-  }
-
-  private legalMetadataIndexText(legalMetadata: Record<string, string> | undefined): string {
-    if (!legalMetadata) return ''
-    return [
-      legalMetadata.documentNumber,
-      legalMetadata.documentType,
-      legalMetadata.issuer,
-      legalMetadata.issuedAt
-    ]
-      .filter((value): value is string => typeof value === 'string' && value.length > 0)
-      .join(' · ')
-  }
-
-  private retrievalMetadataIndexText(metadata: RetrievalMetadataProjection): string {
-    return [...metadata.keywords, ...metadata.entities, ...metadata.tags].join(' · ')
-  }
-
-  /**
-   * Text dùng để embed ở cấp TÀI LIỆU: ưu tiên summary (enrichment), nếu chưa có
-   * thì dùng tiêu đề + phần đầu nội dung — đủ để phân biệt chủ đề tài liệu.
-   */
-  private buildDocumentIndexText(doc: Document): string {
-    const metadata = (doc.metadata as Record<string, unknown> | null) || {}
-    const enrichment = metadata.enrichment as { summary?: unknown } | undefined
-    const summary = typeof enrichment?.summary === 'string' ? enrichment.summary.trim() : ''
-    const legalText = this.legalMetadataIndexText(this.extractLegalMetadata(metadata))
-    const retrievalText = this.retrievalMetadataIndexText(this.extractRetrievalMetadata(metadata))
-
-    const heading = (doc.title || '').trim()
-    const body = (doc.content || '').trim().slice(0, DOCUMENT_INDEX_MAX_CHARS)
-
-    return [heading, legalText, retrievalText, summary, body]
-      .filter((part) => part.length > 0)
-      .join('\n\n')
+  disposeFileParser(): void {
+    this.parserWorker.dispose()
   }
 
   /**
@@ -532,7 +349,7 @@ export class KnowledgeService {
       const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()
       if (!doc) return
 
-      const text = this.buildDocumentIndexText(doc)
+      const text = buildDocumentIndexText(doc)
       if (!text) return
 
       const [result] = await this.embeddingService.embedBatch([text], { dimensions: 1024 })
@@ -572,192 +389,6 @@ export class KnowledgeService {
       documentVectorStore.deleteByDocumentIds(documentIds)
     } catch (error) {
       Logger.warn('KnowledgeService', 'Failed to remove document vectors:', error)
-    }
-  }
-
-  /**
-   * Dựng bản ghi MỤC (section) từ cấu trúc phẳng của tài liệu có heading.
-   * Chỉ giữ mục có nội dung thật (bỏ mục chỉ có tiêu đề). Trả về danh sách
-   * bản ghi và hàm gán sectionId cho chunk theo offset bắt đầu.
-   */
-  private buildSectionRecords(
-    notebookId: string,
-    documentId: string,
-    content: string,
-    compactSections: CompactSection[] | undefined
-  ): { records: NewSection[]; assign: (startOffset: number | null) => string | null } {
-    const empty = { records: [], assign: () => null }
-
-    if (!compactSections?.length) return empty
-
-    const sanitized = sanitizeCompactSections(compactSections)
-    if (sanitized.length === 0) return empty
-
-    const now = new Date()
-    const records: NewSection[] = []
-    const idByOffset = new Map<string, string>()
-
-    for (const section of sanitized) {
-      const raw = content.slice(section.startOffset, section.endOffset)
-      const title = (section.title || '').trim()
-      // Bỏ dòng heading để biết mục có nội dung thật hay chỉ có tiêu đề.
-      const body = raw.replace(/^#{1,6}[ \t]+.+?[ \t]*(\r?\n|$)/, '').trim()
-      if (!body || !title) continue
-
-      const id = `sec_${randomUUID()}`
-      const key = `${section.startOffset}:${section.endOffset}`
-      idByOffset.set(key, id)
-      records.push({
-        id,
-        notebookId,
-        documentId,
-        headingPath: section.headingPath,
-        title,
-        level: section.level,
-        content: raw.trim(),
-        contentHash: createHash('md5').update(raw).digest('hex'),
-        startOffset: section.startOffset,
-        endOffset: section.endOffset,
-        chunkCount: 0,
-        createdAt: now,
-        updatedAt: now
-      })
-    }
-
-    if (records.length === 0) return empty
-
-    const assign = (startOffset: number | null): string | null => {
-      if (startOffset === null || startOffset === undefined) return null
-      const keyOf = (section: CompactSection): string =>
-        `${section.startOffset}:${section.endOffset}`
-
-      const deepest = findDeepestSection(sanitized, startOffset)
-      if (deepest) {
-        const direct = idByOffset.get(keyOf(deepest))
-        if (direct) return direct
-
-        // Mục sâu nhất không có bản ghi (chỉ có tiêu đề, như H1) → gán về mục
-        // con đầu tiên có bản ghi xuất hiện sau đó, để chunk không bị coi là
-        // "không thuộc mục nào" rồi lọt qua tầng section khi truy vấn.
-        const successor = sanitized.find(
-          (section) => section.startOffset >= deepest.startOffset && idByOffset.has(keyOf(section))
-        )
-        if (successor) return idByOffset.get(keyOf(successor)) ?? null
-        return null
-      }
-
-      // Chunk bắt đầu TRƯỚC mục đầu tiên (preamble) → gán về mục đầu tiên có
-      // bản ghi (thường là mục 1).
-      if (sanitized.length > 0 && startOffset < sanitized[0].startOffset) {
-        const firstWithRecord = sanitized.find((section) => idByOffset.has(keyOf(section)))
-        if (firstWithRecord) return idByOffset.get(keyOf(firstWithRecord)) ?? null
-      }
-
-      return null
-    }
-
-    return { records, assign }
-  }
-
-  /**
-   * Cập nhật vector cấp MỤC (tầng giữa Hierarchical Retrieval) — best-effort:
-   * lỗi chỉ log, không làm hỏng luồng index chính. Xoá vector cũ của document
-   * trước khi upsert để mục đã bị xoá không để lại vector mồ côi.
-   */
-  private async updateSectionVectors(
-    notebookId: string,
-    documentId: string,
-    records: NewSection[]
-  ): Promise<void> {
-    if (records.length === 0) {
-      // Document no longer has sections — drop the vectors it left behind so the
-      // section tier cannot point at deleted `sections` rows.
-      sectionVectorStore.deleteByDocumentIds([documentId])
-      return
-    }
-
-    try {
-      const doc = getDatabase()
-        .select({ metadata: documents.metadata })
-        .from(documents)
-        .where(eq(documents.id, documentId))
-        .get()
-      const rootMetadata = doc?.metadata as Record<string, unknown> | null
-      const legalText = this.legalMetadataIndexText(this.extractLegalMetadata(rootMetadata))
-      const retrievalText = this.retrievalMetadataIndexText(
-        this.extractRetrievalMetadata(rootMetadata)
-      )
-      const texts = records.map((record) =>
-        [record.title, legalText, retrievalText, record.content.slice(0, SECTION_INDEX_MAX_CHARS)]
-          .filter((part) => part.length > 0)
-          .join('\n\n')
-      )
-      const results = await this.embeddingService.embedBatch(texts, { dimensions: 1024 })
-
-      const items: Array<{
-        id: string
-        sectionId: string
-        documentId: string
-        vector: Float32Array
-      }> = []
-
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i]
-        if (!result || result.dimensions !== 1024) continue
-        items.push({
-          id: `secvec_${records[i].id}`,
-          sectionId: records[i].id,
-          documentId: records[i].documentId,
-          vector: result.embedding
-        })
-      }
-
-      sectionVectorStore.deleteByDocumentIds([documentId])
-      sectionVectorStore.upsert(notebookId, items)
-    } catch (error) {
-      Logger.warn('KnowledgeService', `Failed to update section vectors for ${documentId}:`, error)
-    }
-  }
-
-  /**
-   * Ghi lại số chunk thực tế thuộc mỗi mục sau khi index xong.
-   * `chunk_count` chỉ phục vụ thống kê/UI; lỗi không được làm hỏng index.
-   */
-  private updateSectionChunkCounts(documentId: string): void {
-    try {
-      const db = getDatabase()
-      const rows = db
-        .select({ sectionId: chunks.sectionId })
-        .from(chunks)
-        .where(eq(chunks.documentId, documentId))
-        .all()
-
-      const counts = new Map<string, number>()
-      for (const row of rows) {
-        if (!row.sectionId) continue
-        counts.set(row.sectionId, (counts.get(row.sectionId) ?? 0) + 1)
-      }
-
-      const sectionRows = db
-        .select({ id: sections.id, chunkCount: sections.chunkCount })
-        .from(sections)
-        .where(eq(sections.documentId, documentId))
-        .all()
-
-      for (const section of sectionRows) {
-        const next = counts.get(section.id) ?? 0
-        if (section.chunkCount === next) continue
-        db.update(sections)
-          .set({ chunkCount: next, updatedAt: new Date() })
-          .where(eq(sections.id, section.id))
-          .run()
-      }
-    } catch (error) {
-      Logger.warn(
-        'KnowledgeService',
-        `Failed to update section chunk counts for ${documentId}:`,
-        error
-      )
     }
   }
 
@@ -950,9 +581,9 @@ export class KnowledgeService {
         : ''
 
     const legal = metadata?.documentMetadata as Record<string, string> | undefined
-    const legalText = this.legalMetadataIndexText(legal)
+    const legalText = legalMetadataIndexText(legal)
     const retrieval = metadata?.retrievalMetadata as RetrievalMetadataProjection | undefined
-    const retrievalText = retrieval ? this.retrievalMetadataIndexText(retrieval) : ''
+    const retrievalText = retrieval ? retrievalMetadataIndexText(retrieval) : ''
     const header = [path, legalText, retrievalText].filter((part) => part.length > 0).join(' > ')
 
     return header ? `${header}\n${content}` : content
@@ -1048,7 +679,9 @@ export class KnowledgeService {
     }
 
     const documentIds = [...new Set(chunkDetails.map((chunk) => chunk.documentId))]
-    const sectionIds = [...new Set(chunkDetails.map((chunk) => chunk.sectionId).filter(Boolean))] as string[]
+    const sectionIds = [
+      ...new Set(chunkDetails.map((chunk) => chunk.sectionId).filter(Boolean))
+    ] as string[]
 
     if (documentIds.length > 0 && sectionIds.length > 0) {
       const sectionRows = db
@@ -1140,7 +773,7 @@ export class KnowledgeService {
       .where(and(eq(documents.notebookId, notebookId), eq(documents.status, 'indexed')))
       .all()
     const metadataList = rows
-      .map((row) => this.extractLegalMetadata(row.metadata as Record<string, unknown> | null))
+      .map((row) => extractLegalMetadata(row.metadata as Record<string, unknown> | null))
       .filter((value): value is Record<string, string> => !!value)
 
     if (metadataList.length === 0) return undefined
@@ -1584,8 +1217,8 @@ export class KnowledgeService {
     for (const doc of rows) {
       const rootMetadata = doc.metadata as Record<string, unknown> | null
       const projection = {
-        legalMetadata: this.extractLegalMetadata(rootMetadata),
-        retrievalMetadata: this.extractRetrievalMetadata(rootMetadata)
+        legalMetadata: extractLegalMetadata(rootMetadata),
+        retrievalMetadata: extractRetrievalMetadata(rootMetadata)
       }
       if (
         !projection.legalMetadata &&
@@ -1612,7 +1245,7 @@ export class KnowledgeService {
         const remove = sqlite.prepare('DELETE FROM fts_chunks WHERE chunk_id = ?')
         const run = sqlite.transaction(() => {
           for (const row of missing) {
-            const metadata = this.withRetrievalMetadata(
+            const metadata = withRetrievalMetadata(
               row.metadata as Record<string, unknown> | null,
               projection
             )
@@ -1666,7 +1299,7 @@ export class KnowledgeService {
     for (const row of rows) {
       if (ids.length >= limit) break
       if (!row.localFilePath) continue
-      if (this.extractLegalMetadata(row.metadata as Record<string, unknown> | null)) continue
+      if (extractLegalMetadata(row.metadata as Record<string, unknown> | null)) continue
 
       const raw = (row.content || '').trimStart()
       // Dấu hiệu parser DOCX cũ thay bảng đầu văn bản bằng marker này.
@@ -1719,7 +1352,7 @@ export class KnowledgeService {
         { legalMetadata?: Record<string, string>; retrievalMetadata: RetrievalMetadataProjection }
       >()
       for (const documentId of new Set(missingRows.map((row) => row.documentId))) {
-        projectionByDocument.set(documentId, this.readDocumentMetadataProjection(documentId))
+        projectionByDocument.set(documentId, readDocumentMetadataProjection(documentId))
       }
 
       const insert = sqlite.prepare(
@@ -1727,7 +1360,7 @@ export class KnowledgeService {
       )
       const run = sqlite.transaction((rows: typeof missingRows) => {
         for (const row of rows) {
-          const metadata = this.withRetrievalMetadata(
+          const metadata = withRetrievalMetadata(
             row.metadata as Record<string, unknown> | null,
             projectionByDocument.get(row.documentId) ?? {
               retrievalMetadata: { keywords: [], entities: [], tags: [] }
@@ -1768,7 +1401,7 @@ export class KnowledgeService {
     const db = getDatabase()
     const now = new Date()
     this.refreshDocumentContentMetadata(documentId, content)
-    const metadataProjection = this.readDocumentMetadataProjection(documentId)
+    const metadataProjection = readDocumentMetadataProjection(documentId)
 
     // 1. Chunk
     onProgress?.('chunking', 10)
@@ -1778,7 +1411,7 @@ export class KnowledgeService {
 
     // 1.5 Mục (section) — tầng giữa Hierarchical Retrieval: tách bản ghi mục từ
     // cấu trúc phẳng và gán sectionId cho từng chunk theo offset bắt đầu.
-    const sectionPlan = this.buildSectionRecords(
+    const sectionPlan = this.sectionIndex.buildRecords(
       notebookId,
       documentId,
       content,
@@ -1798,7 +1431,7 @@ export class KnowledgeService {
       const chunkId = `chunk_${randomUUID()}`
       chunkIds.push(chunkId)
       chunkContents.push(chunk.content)
-      const chunkMetadata = this.withRetrievalMetadata(chunk.metadata, metadataProjection)
+      const chunkMetadata = withRetrievalMetadata(chunk.metadata, metadataProjection)
 
       const newChunk: NewChunk = {
         id: chunkId,
@@ -1891,8 +1524,8 @@ export class KnowledgeService {
     await this.updateDocumentVector(documentId, notebookId)
 
     // 6.5 Vector cấp mục (tầng 2 Hierarchical Retrieval) — best-effort
-    await this.updateSectionVectors(notebookId, documentId, sectionPlan.records)
-    this.updateSectionChunkCounts(documentId)
+    await this.sectionIndex.updateVectors(notebookId, documentId, sectionPlan.records)
+    this.sectionIndex.updateChunkCounts(documentId)
 
     executeCheckpoint('PASSIVE')
     onProgress?.('completed', 100)
@@ -1915,7 +1548,7 @@ export class KnowledgeService {
       mimeType: options.mimeType ?? 'text/plain'
     })
     const normalizedContent = normalized.content
-    const structureMetadata = this.buildCompactStructureMetadata(normalized.structure)
+    const structureMetadata = buildCompactStructureMetadata(normalized.structure)
     const contentHash = createHash('md5').update(options.content).digest('hex')
     const contentMdHash = createHash('md5').update(normalizedContent).digest('hex')
 
@@ -1948,7 +1581,7 @@ export class KnowledgeService {
         notebookId,
         normalizedContent,
         options.chunkOptions,
-        this.buildChunkStructureContext(normalized.structure),
+        buildChunkStructureContext(normalized.structure),
         onProgress
       )
       return documentId
@@ -1997,7 +1630,7 @@ export class KnowledgeService {
         })
         .run()
 
-      const parseResult = await this.fileParserService.parseFile(filePath)
+      const parseResult = await this.parserWorker.parseFile(filePath)
       const normalizedResult = this.markdownNormalizer.normalize(parseResult)
       const normalizedContent = normalizedResult.content
       const contentHash = createHash('md5').update(parseResult.content).digest('hex')
@@ -2011,7 +1644,7 @@ export class KnowledgeService {
           ? 'text'
           : 'file'
 
-      const structureMetadata = this.buildCompactStructureMetadata(normalizedResult.structure)
+      const structureMetadata = buildCompactStructureMetadata(normalizedResult.structure)
       const chunkOptions = this.buildChunkOptionsForMimeType(parseResult.mimeType)
       if (chunkOptions) {
         Logger.info(
@@ -2045,7 +1678,7 @@ export class KnowledgeService {
         notebookId,
         normalizedContent,
         chunkOptions,
-        this.buildChunkStructureContext(normalizedResult.structure),
+        buildChunkStructureContext(normalizedResult.structure),
         onProgress
       )
       return documentId
@@ -3051,7 +2684,7 @@ export class KnowledgeService {
     if (!document) throw new Error(`Document ${documentId} not found`)
 
     this.metadataIndexService.sync(document)
-    const projection = this.readDocumentMetadataProjection(documentId)
+    const projection = readDocumentMetadataProjection(documentId)
     const chunkRows = getDatabase()
       .select({ id: chunks.id, content: chunks.content, metadata: chunks.metadata })
       .from(chunks)
@@ -3065,7 +2698,7 @@ export class KnowledgeService {
         'INSERT INTO fts_chunks (chunk_id, notebook_id, content) VALUES (?, ?, ?)'
       )
       for (const row of chunkRows) {
-        const metadata = this.withRetrievalMetadata(
+        const metadata = withRetrievalMetadata(
           row.metadata as Record<string, unknown> | null,
           projection
         )
@@ -3215,9 +2848,7 @@ export class KnowledgeService {
       doc.localFilePath && this.isManagedLocalFilePath(doc.localFilePath)
         ? await stat(doc.localFilePath).catch(() => undefined)
         : undefined
-    const parsed = localFile
-      ? await this.fileParserService.parseFile(doc.localFilePath!)
-      : undefined
+    const parsed = localFile ? await this.parserWorker.parseFile(doc.localFilePath!) : undefined
     const rawContent = parsed?.content ?? doc.content
     const normalized = this.markdownNormalizer.normalize({
       content: rawContent,
@@ -3225,7 +2856,7 @@ export class KnowledgeService {
       structure: parsed?.structure
     })
     const content = normalized.content
-    const structureContext = this.buildChunkStructureContext(normalized.structure)
+    const structureContext = buildChunkStructureContext(normalized.structure)
 
     const oldChunks = db
       .select({ id: chunks.id })
@@ -3239,7 +2870,7 @@ export class KnowledgeService {
     // metadata.structure.
     const metadata = { ...((doc.metadata as Record<string, unknown> | null) || {}) }
     delete metadata.structure
-    const structureMetadata = this.buildCompactStructureMetadata(normalized.structure)
+    const structureMetadata = buildCompactStructureMetadata(normalized.structure)
     if (structureMetadata) Object.assign(metadata, structureMetadata)
 
     if (parsed) {
@@ -3307,7 +2938,7 @@ export class KnowledgeService {
     const now = new Date()
     // Trích metadata TRƯỚC khi dựng chunk/FTS để metadata mới đi vào index.
     this.refreshDocumentContentMetadata(documentId, content)
-    const metadataProjection = this.readDocumentMetadataProjection(documentId)
+    const metadataProjection = readDocumentMetadataProjection(documentId)
 
     onProgress?.('diffing', 10)
     const chunkResults = this.chunkingService.chunk(content, chunkOptions, structure)
@@ -3315,7 +2946,7 @@ export class KnowledgeService {
 
     // Tách lại bản ghi mục + gán sectionId theo offset (giống full index) để
     // cấu trúc mục không bị lệch khi nội dung tài liệu thay đổi.
-    const sectionPlan = this.buildSectionRecords(
+    const sectionPlan = this.sectionIndex.buildRecords(
       notebookId,
       documentId,
       content,
@@ -3354,7 +2985,7 @@ export class KnowledgeService {
           chunkIndex: chunk.index,
           startOffset: chunk.startOffset,
           endOffset: chunk.endOffset,
-          metadata: this.withRetrievalMetadata(chunk.metadata, metadataProjection),
+          metadata: withRetrievalMetadata(chunk.metadata, metadataProjection),
           tokenCount: chunk.tokenCount,
           sectionId: sectionPlan.assign(chunk.startOffset)
         })
@@ -3368,7 +2999,7 @@ export class KnowledgeService {
           chunkIndex: chunk.index,
           startOffset: chunk.startOffset,
           endOffset: chunk.endOffset,
-          metadata: this.withRetrievalMetadata(chunk.metadata, metadataProjection) ?? null,
+          metadata: withRetrievalMetadata(chunk.metadata, metadataProjection) ?? null,
           tokenCount: chunk.tokenCount,
           sectionId: sectionPlan.assign(chunk.startOffset) ?? null,
           createdAt: now
@@ -3512,8 +3143,8 @@ export class KnowledgeService {
     await this.updateDocumentVector(documentId, notebookId)
 
     // 5.5 Vector cấp mục (tầng 2 Hierarchical Retrieval) — best-effort
-    await this.updateSectionVectors(notebookId, documentId, sectionPlan.records)
-    this.updateSectionChunkCounts(documentId)
+    await this.sectionIndex.updateVectors(notebookId, documentId, sectionPlan.records)
+    this.sectionIndex.updateChunkCounts(documentId)
 
     executeCheckpoint('PASSIVE')
     onProgress?.('completed', 100)
@@ -3573,7 +3204,7 @@ export class KnowledgeService {
           mimeType: 'text/plain'
         })
         const content = normalized.content
-        const structureMetadata = this.buildCompactStructureMetadata(normalized.structure)
+        const structureMetadata = buildCompactStructureMetadata(normalized.structure)
         const docMetadata = { ...((doc.metadata as Record<string, unknown> | null) || {}) }
         delete docMetadata.structure
         if (structureMetadata) Object.assign(docMetadata, structureMetadata)
@@ -3595,7 +3226,7 @@ export class KnowledgeService {
           doc.notebookId,
           content,
           undefined,
-          this.buildChunkStructureContext(normalized.structure),
+          buildChunkStructureContext(normalized.structure),
           undefined
         )
         Logger.info('KnowledgeService', `Note ${noteId} synced to KB doc ${doc.id}:`, result)
