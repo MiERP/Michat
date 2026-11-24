@@ -63,7 +63,7 @@ export default function AboutSettings(): ReactElement {
   }
 
   const handleOpenLicense = async () => {
-    await window.api.openExternalUrl('https://github.com/HAVS/MiChat/blob/main/LICENSE')
+    await window.api.openExternalUrl('https://github.com/MiERP/Michat/blob/main/LICENSE')
   }
 
   return (

@@ -56,7 +56,7 @@ function applyWindowsBranding(exePath, appInfo) {
       FileDescription: 'MiChat',
       FileVersion: version,
       InternalName: 'michat',
-      LegalCopyright: 'GPL-3.0-only',
+      LegalCopyright: 'AGPL-3.0-only',
       OriginalFilename: 'michat.exe',
       ProductName: 'MiChat',
       ProductVersion: version

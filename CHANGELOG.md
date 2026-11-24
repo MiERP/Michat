@@ -2,6 +2,12 @@
 
 All notable changes to MiChat are documented in this file.
 
+## [2.0.1] - 2026-11-24
+
+### Changed
+
+- Relicensed MiChat under AGPL-3.0-only and updated license links/metadata.
+
 ## [2.0.0] - 2026-11-24
 
 ### Changed

@@ -3,7 +3,7 @@
 # MiChat
 
 [![Latest release](https://img.shields.io/github/v/release/MiERP/Michat?label=release)](https://github.com/MiERP/Michat/releases/latest)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 > A local-first, open-source alternative to Google NotebookLM
 > Bring your own local OpenAI-compatible API. No Docker, no bundled model runtime.
@@ -203,4 +203,4 @@ More ideas are in the pipeline — feel free to open an issue.
 
 ## License
 
-MiChat is released under the [GNU General Public License v3.0](LICENSE).
+MiChat is released under the [GNU Affero General Public License v3.0](LICENSE).
