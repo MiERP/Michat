@@ -2,10 +2,15 @@
 
 # MiChat
 
-> A local-first, open-source alternative to Google NotebookLM
-> Bring your own local OpenAI-compatible API; no Docker, no bundled model runtime.
+[![Latest release](https://img.shields.io/github/v/release/MiERP/Michat?label=release)](https://github.com/MiERP/Michat/releases/latest)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
-**Transform your documents into an intelligent, conversational knowledge base**
+> A local-first, open-source alternative to Google NotebookLM
+> Bring your own local OpenAI-compatible API. No Docker, no bundled model runtime.
+
+**Turn your documents into a searchable, conversational knowledge base**
+
+[Download](#download) · [Quick start](#quick-start) · [Architecture](docs/api-only-architecture.md) · [Versioning](docs/versioning.md)
 
 </div>
 
@@ -16,120 +21,150 @@
 I really like the idea behind **Google NotebookLM**:
 upload documents, build context, and reason over them with LLMs.
 
-But I wanted a few things it doesn’t give me:
+But I wanted a few things it doesn't give me:
 
-- Using my own **private or self-managed LLM APIs**
-- Keeping **all data local**, without cloud lock-in
-- Trying the tool **without Docker or complex deployment**
+- Using my own **private or self-managed local API**
+- Keeping **all data and model traffic local**, without cloud lock-in
+- Trying the tool **without Docker, model downloads, or a bundled runtime**
 
-While exploring GitHub, I found many impressive “Open Notebook” projects.
-They are powerful and well-designed — but almost all of them rely on Docker.
-For beginners and non-backend users, that alone can be a deal-breaker.
+Many "Open Notebook" projects are powerful, but most rely on Docker or ship a
+model stack. MiChat is a small Electron desktop app that keeps the notebook
+workflow and leaves the model server to an application you already trust.
 
-So I built **MiChat**:
-a simple Electron-based desktop app that brings NotebookLM-style workflows
-to a **local-first, Docker-free environment**.
-
-This is my **first open-source project**.
-It’s still early, but the core idea works — and I’m excited to share it and learn from the community.
+This is my **first open-source project**. It's still early, but the core idea
+works, and feedback is very welcome.
 
 ---
 
-## What MiChat does (so far)
+## What MiChat does
 
-- 📚 Build a local knowledge base from documents and notes
-- 💬 Chat, summarize, and reason with your content using LLMs
-- 🔌 Connect to any local OpenAI-compatible API (LM Studio, llama.cpp server, Ollama, ...)
-- 🔍 RAG-powered retrieval with precise source traceability
-- 🖥️ Desktop app built with Electron — no Docker, no server setup
+- 📚 Build a local knowledge base from documents, notes, and web pages
+- 💬 Chat, summarize, and reason with your content
+- 🔌 Connect to any **local OpenAI-compatible API** (LM Studio, llama.cpp server,
+  Ollama, vLLM, or your own gateway)
+- 🔍 RAG retrieval with precise source traceability
+- 🖥️ Native desktop app built with Electron — no Docker required
+
+MiChat does **not** bundle models, start a model server, or manage model files.
+You configure an API once and MiChat uses it for chat and embeddings.
+
+---
+
+## Download
+
+Get the latest build from
+[GitHub Releases](https://github.com/MiERP/Michat/releases/latest):
+
+- Windows installer: `michat-<version>-setup.exe`
+- Source archives for every tag
+- Legacy **1.1.1** builds with the old bundled llama.cpp runtime are still
+  available under [releases/tag/v1.1.1](https://github.com/MiERP/Michat/releases/tag/v1.1.1).
+  They are superseded by the API-only 2.x line.
+
+Local builds are unsigned, so Windows SmartScreen may show a warning.
 
 ---
 
-## Who is this for?
+## Quick start
 
-MiChat is for you if:
+1. Install MiChat and start your local model application.
+2. Open **Settings → API**.
+3. Enter:
+   - **Base URL** — loopback address ending in `/v1`, e.g.
+     `http://127.0.0.1:1234/v1`
+   - **API key** — optional; encrypted with the OS keystore when available
+   - **Chat model** — exact model id advertised by `/v1/models`
+   - **Embedding model** — must return **1024-dimensional** vectors
+   - **Context window** — used for automatic session switching
+4. Click **Test Connection**, then **Save**.
+5. Import documents or create notes and start chatting.
 
-- You like NotebookLM but want more control
-- You prefer using private or self-hosted LLM APIs
-- You don’t want to spin up Docker just to try an idea
-- You want a simple desktop app for learning and research
+Only loopback endpoints are accepted: `localhost`, `127.0.0.1`, or `::1`.
+
+The API must expose OpenAI-compatible:
+
+- `GET /v1/models`
+- chat completions (streaming)
+- embeddings
 
 ---
-## Key Features
 
-### 📚 Document Management
+## Key features
 
-- PDF, Word (.docx), PowerPoint (.pptx), and web pages
-- Automatic structure parsing and content extraction
-- Fast local storage with SQLite
+### 📚 Document management
 
-### 🤖 AI-Powered Q&A
+- PDF, Word (`.docx`), PowerPoint (`.pptx`), Excel, Markdown, text, and web pages
+- Structure-aware parsing with headings, sections, pages, and metadata
+- Fast local storage with SQLite and Drizzle
 
-- Retrieval-Augmented Generation (RAG)
-- Bring your own local API for chat and embeddings (no cloud provider required)
+### 🤖 AI-powered Q&A
+
+- Retrieval-Augmented Generation (RAG) with hierarchical, metadata-aware search
+- Bring your own local chat and embedding models through one API
 - Answers with precise source references
+- Quiz generation from indexed knowledge
 
-### 🔒 Local-First by Design
+### 🔒 Local-first by design
 
-- All data stored locally
-- Offline-friendly: all data stays local; only a loopback API is contacted
-- Full control over your knowledge assets
+- All notebooks, documents, embeddings, and chats stay on your machine
+- Only the configured loopback API is contacted
+- API keys are encrypted at rest and never exposed to the renderer
+- No telemetry
 
-### 🔍 Vector Search
+### ⚡ Lightweight
 
-- Semantic search with sqlite-vec
-- Fast and accurate retrieval
-
-### ⚡ Lightweight & Cross-Platform
-
-- Electron-based desktop app
-- Windows and macOS support
+- No Docker, no bundled model runtime, no multi-gigabyte model downloads
+- Installer stays around 160 MB
+- Source builds for Windows, macOS, and Linux
 
 ---
 
-## Project Status
+## Requirements
 
-MiChat is an early-stage project.
-Some parts are still rough, but the foundation is in place.
+- An external local OpenAI-compatible API with chat and embedding endpoints
+- Windows 10/11 for the published installer
+- Node.js 22 and pnpm 11 when building from source
+- Embeddings must produce 1024-dimensional vectors
 
-I’m sharing it mainly to:
-
-- learn from real usage
-- improve learning and research workflows
-- explore better knowledge visualization and retrieval
-
-Feedback and suggestions are very welcome.
-
-### Current limitations
-
-- MiChat does not bundle models or a model runtime. A local OpenAI-compatible API must be provided by another application (chat + embedding models).
-- Only loopback API endpoints (localhost/127.0.0.1/::1) are accepted.
-- Scanned/image-only PDFs need an OCR engine, which is not bundled yet.
-- Office document generation was removed; the note editor and quiz generation remain.
-- Drizzle snapshots are complete for every journal entry; `pnpm check:migrations` enforces this.
-- See `docs/security/dependency-exceptions.md` for accepted dependency advisories.
+macOS and Linux can be built from source, but packaged installers for those
+platforms are not validated yet.
 
 ---
 
-## Building
-
-Requirements: Node.js 22 and pnpm 11.
+## Building and testing
 
 ```bash
 pnpm install
 pnpm dev              # development app
 pnpm build            # typecheck + main/preload/renderer bundles
+pnpm test             # unit and integration tests
+pnpm test:e2e         # Playwright Electron smoke test
 pnpm build:win        # Windows installer
+pnpm release:build    # version check + Windows installer
 ```
 
-After installing, open **Settings → API** and enter the base URL, API key (if
-any), chat model, and embedding model. The API must expose OpenAI-compatible
-`/v1/models`, chat completions, and embeddings. MiChat verifies the connection
-but never starts or manages the model server.
+`package.json` is the single source of truth for the version. Use
+`pnpm version:patch|minor|major --note "..."` before building a new release.
+See [`docs/versioning.md`](docs/versioning.md) for the full release flow.
 
-Version bumps, changelog entries and installer naming are described in
-[`docs/versioning.md`](docs/versioning.md). `package.json` is the single source
-of truth; use `pnpm version:minor --note "..."` before building a new release.
+---
+
+## Project status
+
+MiChat is early-stage. The API-only 2.x line is the current direction; the old
+bundled llama.cpp runtime was removed so the app stays small and composable.
+
+### Current limitations
+
+- MiChat does not bundle models or a model runtime. A local OpenAI-compatible
+  API must be provided by another application.
+- Only loopback API endpoints are accepted.
+- Scanned/image-only PDFs need an OCR engine, which is not bundled yet.
+- Office document generation was removed; the note editor and quiz generation
+  remain.
+- Packaged and signing flows for macOS/Linux still need their own CI coverage.
+- See [`docs/security/dependency-exceptions.md`](docs/security/dependency-exceptions.md)
+  for accepted dependency advisories.
 
 ---
 
@@ -137,19 +172,35 @@ of truth; use `pnpm version:minor --note "..."` before building a new release.
 
 ### ✅ Completed
 
-- External local OpenAI-compatible API integration
+- API-only architecture (v2.0.0)
+- External local OpenAI-compatible API configuration and connection test
+- Encrypted API key storage
 - Structured note generation
 - Hierarchical, metadata-aware RAG with source citations
-- Multi-format document import (PDF / Word / PowerPoint / Excel / Markdown / Web)
+- Multi-format document import
 - Quiz generation from documents
 - Local-first storage with no telemetry
 
-### 🚧 In Development
+### 🚧 In development
 
 - Audio upload and transcription
 
 ### 📋 Planned
 
-More ideas are in the pipeline — feel free to suggest features in Issues.
+More ideas are in the pipeline — feel free to open an issue.
 
 ---
+
+## Documentation
+
+- [API-only architecture](docs/api-only-architecture.md)
+- [Versioning and releases](docs/versioning.md)
+- [System map](docs/system-map.md) (historical snapshot; API-only changes are
+  noted at the top)
+- [Dependency exceptions](docs/security/dependency-exceptions.md)
+
+---
+
+## License
+
+MiChat is released under the [GNU General Public License v3.0](LICENSE).
