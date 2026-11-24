@@ -40,6 +40,9 @@ jobs:
       - name: Dependency floors
         run: pnpm check:deps
 
+      - name: Version consistency
+        run: pnpm check:version
+
       - name: Production audit
         run: pnpm security:audit
 

@@ -127,6 +127,10 @@ any), chat model, and embedding model. The API must expose OpenAI-compatible
 `/v1/models`, chat completions, and embeddings. MiChat verifies the connection
 but never starts or manages the model server.
 
+Version bumps, changelog entries and installer naming are described in
+[`docs/versioning.md`](docs/versioning.md). `package.json` is the single source
+of truth; use `pnpm version:minor --note "..."` before building a new release.
+
 ---
 
 ## Roadmap

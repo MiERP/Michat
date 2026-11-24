@@ -1,16 +1,16 @@
 {
     "name": "michat",
-    "version": "1.1.1",
+    "version": "2.0.0",
     "description": "Ứng dụng máy tính local-first giúp biến tài liệu thành cơ sở tri thức có thể truy vấn bằng AI.",
     "main": "./out/main/index.js",
     "author": "HAVS",
     "license": "GPL-3.0-only",
     "repository": {
         "type": "git",
-        "url": "https://github.com/HAVS/MiChat.git"
+        "url": "https://github.com/MiERP/Michat.git"
     },
     "bugs": {
-        "url": "https://github.com/HAVS/MiChat/issues"
+        "url": "https://github.com/MiERP/Michat/issues"
     },
     "scripts": {
         "format": "prettier --write .",
@@ -25,9 +25,9 @@
         "dev": "electron-vite dev",
         "build": "npm run typecheck && electron-vite build",
         "postinstall": "pnpm run electron:ensure && pnpm run package:deps",
-        "build:unpack": "npm run build && npm run package:deps && electron-builder --dir --config.npmRebuild=false --config.win.signAndEditExecutable=false",
-        "build:win": "npm run build && npm run package:deps && electron-builder --win --config.npmRebuild=false --config.win.signAndEditExecutable=false",
-        "package:ci": "electron-vite build && npm run package:deps && electron-builder --dir --config.npmRebuild=false --config.win.signAndEditExecutable=false && node scripts/check-asar.cjs dist/win-unpacked/resources/app.asar",
+        "build:unpack": "npm run check:version && npm run build && npm run package:deps && electron-builder --dir --config.npmRebuild=false --config.win.signAndEditExecutable=false",
+        "build:win": "npm run check:version && npm run build && npm run package:deps && electron-builder --win --config.npmRebuild=false --config.win.signAndEditExecutable=false",
+        "package:ci": "npm run check:version && electron-vite build && npm run package:deps && electron-builder --dir --config.npmRebuild=false --config.win.signAndEditExecutable=false && node scripts/check-asar.cjs dist/win-unpacked/resources/app.asar",
         "build:mac": "npm run build && electron-builder --mac",
         "build:linux": "npm run build && electron-builder --linux",
         "db:generate": "drizzle-kit generate",
@@ -40,7 +40,7 @@
         "test:e2e": "electron-vite build && npm run package:deps && playwright test",
         "smoke:packaged": "powershell -ExecutionPolicy Bypass -File scripts/smoke-packaged.ps1",
         "smoke:parser-worker": "node scripts/smoke-parser-worker.cjs",
-        "release:check": "npm run typecheck && npm run lint && npm test && npm run test:rag && npm run test:coverage && npm run check:security && npm run check:encoding && npm run check:cjk && npm run check:migrations && npm run check:package",
+        "release:check": "npm run check:version && npm run typecheck && npm run lint && npm test && npm run test:rag && npm run test:coverage && npm run check:security && npm run check:encoding && npm run check:cjk && npm run check:migrations && npm run check:package",
         "security:audit": "pnpm audit --prod --audit-level=high",
         "security:test": "vitest run tests/guards.test.ts tests/ipcValidation.test.ts tests/apiConfigSecrets.test.ts",
         "check:deps": "node scripts/check-dependency-floor.cjs",
@@ -51,11 +51,19 @@
         "check:security": "npm run security:audit && npm run check:deps && npm run check:encoding && npm run security:test",
         "test:rag": "vitest run tests/rag tests/evals",
         "package:deps": "electron-rebuild -w better-sqlite3 -f",
-        "check:package": "npm run build && npm run package:deps && npm run smoke:parser-worker && electron-builder --dir --config.npmRebuild=false --config.win.signAndEditExecutable=false && node scripts/check-asar.cjs dist/win-unpacked/resources/app.asar && npm run smoke:packaged",
+        "check:package": "npm run check:version && npm run build && npm run package:deps && npm run smoke:parser-worker && electron-builder --dir --config.npmRebuild=false --config.win.signAndEditExecutable=false && node scripts/check-asar.cjs dist/win-unpacked/resources/app.asar && npm run smoke:packaged",
         "test:node-deps": "pnpm rebuild better-sqlite3",
         "pretest": "npm run test:node-deps",
         "pretest:rag": "npm run test:node-deps",
-        "pretest:coverage": "npm run test:node-deps"
+        "pretest:coverage": "npm run test:node-deps",
+        "version:show": "node scripts/version.cjs show",
+        "version:bump": "node scripts/version.cjs bump",
+        "version:patch": "node scripts/version.cjs bump patch",
+        "version:minor": "node scripts/version.cjs bump minor",
+        "version:major": "node scripts/version.cjs bump major",
+        "version:set": "node scripts/version.cjs set",
+        "check:version": "node scripts/version.cjs check",
+        "release:build": "npm run check:version && npm run build:win"
     },
     "dependencies": {
         "@ai-sdk/openai-compatible": "^1.0.62",

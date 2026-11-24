@@ -100,5 +100,6 @@ Latest verification:
 | `pnpm build:win` | Pass; no llama/model assets in the package |
 | Packaged renderer (CDP) | Onboarding renders, app boots without any model runtime |
 
-Installer: `dist/michat-1.1.1-setup.exe`, 167,790,133 bytes, SHA-256
-`2F8531965B18E35D9ACCAF0B11B5E4A24C6B9398093F87F9FD67E268B6EA6BEF`.
+Installer: `dist/michat-2.0.0-setup.exe`, 167,790,931 bytes, SHA-256
+`5868872D80F21433AAA0B2DEC4C56A0A93A22FA1454D82609828F23BC47CC4AE`.
+Version 2.0.0 is managed by `scripts/version.cjs`; see `docs/versioning.md`.

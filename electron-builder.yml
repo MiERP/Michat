@@ -66,6 +66,6 @@ appImage:
 npmRebuild: false
 publish:
   provider: github
-  owner: HAVS
-  repo: MiChat
+  owner: MiERP
+  repo: Michat
   releaseType: release
