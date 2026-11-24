@@ -1,6 +1,6 @@
 /**
- * IPC 参数验证
- * 使用 Zod 进行运行时类型验证，防止注入攻击和无效数据
+ * IPC argument validation
+ * Uses Zod for runtime type validation to prevent injection attacks and invalid data
  */
 
 import { z } from 'zod'
@@ -126,7 +126,7 @@ export const NotebookSchemas = {
 }
 
 /**
- * 笔记相关的验证 schemas
+ * Note-related validation schemas
  */
 export const NoteSchemas = {
   createNote: z.object({
@@ -201,7 +201,7 @@ export const ProviderSchemas = {
 }
 
 /**
- * 知识库相关的验证 schemas
+ * Knowledge base validation schemas
  */
 const documentMetadataSchema = z.object({
   documentNumber: z.string().trim().max(200).optional(),
@@ -376,7 +376,7 @@ export const KnowledgeSchemas = {
 }
 
 /**
- * 聊天相关的验证 schemas
+ * Chat-related validation schemas
  */
 export const ChatSchemas = {
   sendMessage: z.object({
@@ -446,12 +446,12 @@ function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
 }
 
 /**
- * 验证函数包装器
- * 将 IPC handler 包装为自动验证参数的函数
+ * Validation function wrapper
+ * Wraps an IPC handler so its arguments are validated automatically
  *
  * @param schema Zod schema
- * @param handler IPC handler 函数
- * @returns 包装后的 handler
+ * @param handler IPC handler function
+ * @returns the wrapped handler
  *
  * @example
  * ```ts
@@ -465,8 +465,8 @@ function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
 export function validate<TSchema extends z.ZodType, TResult>(
   schema: TSchema,
   handler: (args: z.infer<TSchema>) => Promise<TResult>
-): (_event: Electron.IpcMainInvokeEvent, ...args: any[]) => Promise<TResult> {
-  return async (_event: Electron.IpcMainInvokeEvent, ...args: any[]): Promise<TResult> => {
+): (_event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => Promise<TResult> {
+  return async (_event: Electron.IpcMainInvokeEvent, ...args: unknown[]): Promise<TResult> => {
     try {
       assertTrustedSender(_event)
       if (args.length === 0) {
@@ -499,8 +499,8 @@ export function validate<TSchema extends z.ZodType, TResult>(
 export function validateWithEvent<TSchema extends z.ZodType, TResult>(
   schema: TSchema,
   handler: (event: Electron.IpcMainInvokeEvent, args: z.infer<TSchema>) => Promise<TResult>
-): (_event: Electron.IpcMainInvokeEvent, ...args: any[]) => Promise<TResult> {
-  return async (event: Electron.IpcMainInvokeEvent, ...args: any[]): Promise<TResult> => {
+): (_event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => Promise<TResult> {
+  return async (event: Electron.IpcMainInvokeEvent, ...args: unknown[]): Promise<TResult> => {
     try {
       assertTrustedSender(event)
       if (args.length === 0) {
@@ -539,12 +539,12 @@ export function validateNoArgs<TResult>(
 }
 
 /**
- * 验证单个参数
- * 适用于只有一个参数的简单 handler
+ * Validates a single argument
+ * Suitable for simple handlers that take only one argument
  *
  * @param schema Zod schema
- * @param value 要验证的值
- * @returns Result 对象
+ * @param value the value to validate
+ * @returns a Result object
  *
  * @example
  * ```ts
@@ -561,7 +561,7 @@ export function validateParam<T>(schema: z.ZodType<T>, value: unknown): Result<T
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errorMessage = error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ')
-      return Err(new Error(`验证失败: ${errorMessage}`))
+      return Err(new Error(`Validation failed: ${errorMessage}`))
     }
     return Err(error instanceof Error ? error : new Error(String(error)))
   }

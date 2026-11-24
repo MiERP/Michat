@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import type { Note } from '../../../shared/types'
+import type { Quiz } from '../../../main/db/schema'
 
 /**
- * Item 类型
+ * Item type
  */
 export type ItemType = 'note' | 'quiz' | 'ppt' | 'audio' | 'video'
 
 /**
- * Item 详情
+ * Item details
  */
 export interface ItemDetail {
   id: string
@@ -17,21 +18,21 @@ export interface ItemDetail {
   order: number
   createdAt: Date
   updatedAt: Date
-  resource: Note | any // 实际的资源数据
+  resource: Note | Quiz | null // Underlying resource data
 }
 
 /**
- * 从 items 数组中派生 notes 数组
- * 提取为辅助函数以保持逻辑一致性
+ * Derive the notes array from the items array
+ * Extracted into a helper to keep the logic consistent
  */
 const deriveNotes = (items: ItemDetail[]): Note[] => {
   return items.filter((item) => item.type === 'note').map((item) => item.resource as Note)
 }
 
 interface ItemStore {
-  // 状态
+  // State
   items: ItemDetail[]
-  notes: Note[] // 派生状态，从items中过滤type='note'的项
+  notes: Note[] // Derived state: items from the list where type === 'note'
   currentNote: Note | null
   isEditing: boolean
   isSaving: boolean
@@ -41,7 +42,7 @@ interface ItemStore {
   setCurrentNote: (note: Note | null) => void
   setIsEditing: (isEditing: boolean) => void
 
-  // 异步操作
+  // Async operations
   loadItems: (notebookId: string) => Promise<void>
   loadNotes: (notebookId: string) => Promise<void>
   createNote: (notebookId: string, content: string, customTitle?: string) => Promise<Note>
@@ -66,7 +67,7 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
       const items = await window.api.items.getAll(notebookId)
       console.log(`[ItemStore] Loaded ${items.length} items`)
 
-      // 派生 notes 列表
+      // Derive the notes list
       const notes = deriveNotes(items)
 
       set({ items, notes })
@@ -77,7 +78,7 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
   },
 
   loadNotes: async (notebookId: string) => {
-    // loadNotes 实际上调用 loadItems，因为notes是从items派生的
+    // loadNotes actually calls loadItems because notes are derived from items
     await get().loadItems(notebookId)
   },
 
@@ -88,7 +89,7 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
       const note = await window.api.createNote(notebookId, content, customTitle)
       console.log('[ItemStore] Note created:', note.id)
 
-      // 重新加载 items 列表
+      // Reload the items list
       await get().loadItems(notebookId)
 
       set({
@@ -117,14 +118,14 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
           if (item.type === 'note' && item.resourceId === id) {
             return {
               ...item,
-              resource: { ...item.resource, ...updates, updatedAt: new Date() },
+              resource: { ...(item.resource as Note), ...updates, updatedAt: new Date() },
               updatedAt: new Date()
             }
           }
           return item
         })
 
-        // 重新派生 notes 数组，保持与 items 同步
+        // Re-derive the notes array to keep it in sync with items
         const notes = deriveNotes(updatedItems)
 
         const updatedCurrentNote =
@@ -158,7 +159,7 @@ export const useItemStore = create<ItemStore>()((set, get) => ({
           deletedItem?.type === 'note' && state.currentNote?.id === deletedItem.resourceId
 
         const updatedItems = state.items.filter((item) => item.id !== itemId)
-        // 重新派生 notes 数组，保持与 items 同步
+        // Re-derive the notes array to keep it in sync with items
         const notes = deriveNotes(updatedItems)
 
         return {

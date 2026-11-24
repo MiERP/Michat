@@ -18,10 +18,7 @@ export function registerValidatedHandler<TSchema extends z.ZodType, TResult>(
 export function registerStreamingHandler<TSchema extends z.ZodType, TResult>(
   channel: string,
   schema: TSchema,
-  handler: (
-    event: Electron.IpcMainInvokeEvent,
-    args: z.infer<TSchema>
-  ) => Promise<TResult>
+  handler: (event: Electron.IpcMainInvokeEvent, args: z.infer<TSchema>) => Promise<TResult>
 ): void {
   registeredChannels.add(channel)
   ipcMain.handle(channel, validateWithEvent(schema, handler))

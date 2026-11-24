@@ -1,51 +1,49 @@
 /**
  * Provider Descriptor
- * 供应商描述符,用于配置驱动的供应商注册
+ * Provider descriptor used for configuration-driven provider registration
  */
 
 import type { BaseProvider } from '../capabilities/BaseProvider'
 
 /**
- * Provider 能力配置
+ * Provider capability configuration
  */
 export interface ProviderCapabilities {
-  chat: boolean // 是否支持对话
-  embedding: boolean // 是否支持嵌入
-  imageGeneration?: boolean // 是否支持图像生成(未来扩展)
+  chat: boolean // Whether chat is supported
+  embedding: boolean // Whether embeddings are supported
 }
 
 /**
- * Provider 描述符
- * 用于配置驱动的供应商定义
+ * Provider descriptor
+ * Used for configuration-driven provider definitions
  */
 export interface ProviderDescriptor {
-  // 基本信息
-  name: string // 供应商标识(如 'openai', 'deepseek')
-  displayName: string // 显示名称(如 'OpenAI', 'DeepSeek')
-  isBuiltin: boolean // 是否为内置供应商
+  // Basic information
+  name: string // Provider identifier (e.g. 'openai', 'deepseek')
+  displayName: string // Display name (e.g. 'OpenAI', 'DeepSeek')
+  isBuiltin: boolean // Whether it is a built-in provider
   locality?: 'local' | 'remote' // local-first privacy boundary
 
-  // 默认配置
-  defaultBaseUrl: string // 默认 API 地址
-  defaultChatModel?: string // 默认对话模型
-  defaultEmbeddingModel?: string // 默认嵌入模型
-  defaultImageModel?: string // 默认图像生成模型(未来扩展)
+  // Default configuration
+  defaultBaseUrl: string // Default API base URL
+  defaultChatModel?: string // Default chat model
+  defaultEmbeddingModel?: string // Default embedding model
 
-  // 能力声明
+  // Capability declarations
   capabilities: ProviderCapabilities
 
-  // Provider 工厂函数
-  // 用于创建 Provider 实例
+  // Provider factory function
+  // Used to create Provider instances
   createProvider: (descriptor: ProviderDescriptor) => BaseProvider
 }
 
 /**
- * 自定义供应商配置
- * 用户通过 UI 添加自定义供应商时使用的配置
+ * Custom provider configuration
+ * Configuration used when users add a custom provider through the UI
  */
 export interface CustomProviderConfig {
-  providerName: string // 供应商名称
-  displayName: string // 显示名称
-  baseUrl: string // API 地址
-  apiKey: string // API Key
+  providerName: string // Provider name
+  displayName: string // Display name
+  baseUrl: string // API base URL
+  apiKey: string // API key
 }

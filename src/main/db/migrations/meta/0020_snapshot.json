@@ -2,7 +2,7 @@
   "version": "6",
   "dialect": "sqlite",
   "id": "535c6bef-4fdf-4ace-bb59-5792096d1bf4",
-  "prevId": "f2ac9529-1af0-4ce4-908e-954f788c7a72",
+  "prevId": "f711ff9f-09e7-487a-be11-ba4315d47af7",
   "tables": {
     "background_jobs": {
       "name": "background_jobs",
@@ -520,6 +520,14 @@
             "section_id"
           ],
           "isUnique": false
+        },
+        "idx_chunks_document_hash": {
+          "name": "idx_chunks_document_hash",
+          "columns": [
+            "document_id",
+            "content_hash"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -810,6 +818,13 @@
           "name": "idx_documents_status",
           "columns": [
             "status"
+          ],
+          "isUnique": false
+        },
+        "idx_documents_memory_session": {
+          "name": "idx_documents_memory_session",
+          "columns": [
+            "memory_of_session_id"
           ],
           "isUnique": false
         }

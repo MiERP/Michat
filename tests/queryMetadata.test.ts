@@ -41,9 +41,7 @@ describe('detectQueryMetadata', () => {
 
 describe('normalizeMetadataValue', () => {
   it('folds Vietnamese diacritics and punctuation for matching', () => {
-    expect(normalizeMetadataValue('15/2024/NĐ-CP')).toBe(
-      normalizeMetadataValue('15/2024/ND-CP')
-    )
+    expect(normalizeMetadataValue('15/2024/NĐ-CP')).toBe(normalizeMetadataValue('15/2024/ND-CP'))
     expect(normalizeMetadataValue('BỘ TƯ PHÁP')).toBe(normalizeMetadataValue('Bo Tu Phap'))
   })
 })

@@ -38,7 +38,10 @@ describe('preload surface', () => {
     await loadPreload()
 
     expect(electron.exposeInMainWorld).toHaveBeenCalledTimes(1)
-    const [name, api] = electron.exposeInMainWorld.mock.calls[0] as [string, Record<string, unknown>]
+    const [name, api] = electron.exposeInMainWorld.mock.calls[0] as [
+      string,
+      Record<string, unknown>
+    ]
 
     expect(name).toBe('api')
     expect(api.ipcRenderer).toBeUndefined()

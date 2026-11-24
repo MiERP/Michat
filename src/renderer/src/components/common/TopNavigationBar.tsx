@@ -23,13 +23,13 @@ export default function TopNavigationBar({
   const { currentNotebook, openedNotebooks, removeOpenedNotebook, setCurrentNotebook } =
     useNotebookStore()
 
-  // 确定当前激活的标签
+  // Determine the active tab
   const [activeTab, setActiveTab] = useState<string>(() => {
     if (isHomePage) return 'home'
     return currentNotebook?.id ?? 'home'
   })
 
-  // 当 isHomePage 或 currentNotebook 改变时，更新 activeTab
+  // Update activeTab when isHomePage or currentNotebook changes
   if (isHomePage && activeTab !== 'home') {
     setActiveTab('home')
   } else if (!isHomePage && currentNotebook && activeTab !== currentNotebook.id) {
@@ -49,20 +49,20 @@ export default function TopNavigationBar({
   const handleCloseOpenedNotebook = (id: string, e: React.MouseEvent): void => {
     e.stopPropagation()
 
-    // 如果关闭的是当前笔记本，需要跳转
+    // If the current notebook is being closed, navigate away
     if (currentNotebook?.id === id && !isHomePage) {
-      // 找到当前笔记本在列表中的索引
+      // Find the current notebook's index in the list
       const currentIndex = openedNotebooks.findIndex((nb) => nb.id === id)
       const otherNotebooks = openedNotebooks.filter((nb) => nb.id !== id)
 
       if (otherNotebooks.length > 0) {
-        // 如果当前不是第一个，跳转到上一个；否则跳转到下一个
+        // If it is not the first, go to the previous one; otherwise go to the next
         const targetNotebook =
           currentIndex > 0 ? openedNotebooks[currentIndex - 1] : openedNotebooks[1]
         setCurrentNotebook(targetNotebook.id)
         navigate(`/notebook/${targetNotebook.id}`)
       } else {
-        // 没有其他笔记本，跳转到首页
+        // No other notebooks: go to the home page
         navigate('/')
       }
     }
@@ -78,10 +78,10 @@ export default function TopNavigationBar({
       className="brand-topbar h-12 shrink-0 flex items-center justify-between px-2 gap-0.5"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      {/* macOS 左侧空白区域（留给窗口控制按钮） */}
+      {/* macOS left spacer (reserved for window controls) */}
       {isMac() && <div className="w-20"></div>}
 
-      {/* Linux 左侧设置按钮区域 */}
+      {/* Linux left settings button area */}
       {isLinux() && (
         <div className="flex items-center gap-2">
           <Button
@@ -97,14 +97,14 @@ export default function TopNavigationBar({
         </div>
       )}
 
-      {/* 导航标签 */}
+      {/* Navigation tabs */}
       <div className="flex items-center gap-2 flex-1">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1">
           <TabsList
             className="bg-transparent border-0 gap-2 h-auto p-0 justify-start"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
-            {/* 首页标签 */}
+            {/* Home tab */}
             <TabsTrigger
               value="home"
               className="brand-navigation-tab h-7 gap-2 px-3 rounded-md border transition-all"
@@ -113,7 +113,7 @@ export default function TopNavigationBar({
               <span>{t('home')}</span>
             </TabsTrigger>
 
-            {/* 打开的笔记本标签 */}
+            {/* Open notebook tabs */}
             {openedNotebooks.map((notebook) => (
               <TabsTrigger
                 key={notebook.id}
@@ -132,7 +132,7 @@ export default function TopNavigationBar({
               </TabsTrigger>
             ))}
 
-            {/* 新建按钮 */}
+            {/* New notebook button */}
             <Button
               onClick={onCreateClick}
               variant="ghost"
@@ -146,7 +146,7 @@ export default function TopNavigationBar({
         </Tabs>
       </div>
 
-      {/* 非Linux平台的设置按钮（Windows和macOS保持在右侧） */}
+      {/* Settings button for non-Linux platforms (kept on the right on Windows and macOS) */}
       {!isLinux() && (
         <Button
           onClick={handleSettingsClick}
@@ -160,7 +160,7 @@ export default function TopNavigationBar({
         </Button>
       )}
 
-      {/* Windows 右侧空白区域（留给窗口控制按钮） */}
+      {/* Windows right spacer (reserved for window controls) */}
       {isWindows() && <div className="w-32"></div>}
     </div>
   )

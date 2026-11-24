@@ -1,5 +1,23 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTempUserData, closeAndRemove } from './helpers/tempUserData'
+import type { Database } from '../../src/main/db'
+import type { BackgroundJobService } from '../../src/main/services/BackgroundJobService'
+
+type DbModule = typeof import('../../src/main/db')
+type SchemaModule = typeof import('../../src/main/db/schema')
+
+type LinkServiceStub = {
+  generateLinksForDocument: (documentId: string) => Promise<number>
+  decayLinks: () => number
+}
+
+type BackgroundJobsContext = {
+  dbModule: DbModule
+  schema: SchemaModule
+  db: Database
+  notebookId: string
+  createService: (linkService?: LinkServiceStub | null) => BackgroundJobService
+}
 
 let userDataDir = ''
 
@@ -11,7 +29,7 @@ vi.mock('electron', () => ({
 }))
 
 describe('BackgroundJobService durability', () => {
-  let context: any
+  let context: BackgroundJobsContext | undefined
 
   beforeEach(async () => {
     userDataDir = await createTempUserData('michat-jobs')
@@ -30,10 +48,10 @@ describe('BackgroundJobService durability', () => {
       .values({ id: notebookId, title: 'Jobs Test', createdAt: new Date(), updatedAt: new Date() })
       .run()
 
-    const createService = (linkService: any = null) =>
+    const createService = (linkService: LinkServiceStub | null = null): BackgroundJobService =>
       new BackgroundJobService(
         {} as never,
-        linkService ?? { generateLinksForDocument: async () => 0, decayLinks: () => 0 },
+        (linkService ?? { generateLinksForDocument: async () => 0, decayLinks: () => 0 }) as never,
         undefined,
         0, // idle gate off
         0 // heavy cooldown off
@@ -50,7 +68,7 @@ describe('BackgroundJobService durability', () => {
   })
 
   it('deduplicates identical pending jobs', () => {
-    const { createService, notebookId } = context
+    const { createService, notebookId } = context!
     const service = createService()
 
     const first = service.enqueueDecayLinks(notebookId)
@@ -61,7 +79,7 @@ describe('BackgroundJobService durability', () => {
   })
 
   it('recovers jobs stuck in running state from a previous crash', async () => {
-    const { db, schema, createService, notebookId } = context
+    const { db, schema, createService, notebookId } = context!
     db.insert(schema.backgroundJobs)
       .values({
         id: 'job_stale',
@@ -93,7 +111,7 @@ describe('BackgroundJobService durability', () => {
   })
 
   it('applies retry backoff on failure and skips until retryAt elapses', async () => {
-    const { db, schema, createService, notebookId } = context
+    const { db, schema, createService, notebookId } = context!
     const service = createService({
       generateLinksForDocument: async () => {
         throw new Error('boom')
@@ -110,7 +128,11 @@ describe('BackgroundJobService durability', () => {
     await service.tick()
 
     const { eq } = await import('drizzle-orm')
-    let row = db.select().from(schema.backgroundJobs).where(eq(schema.backgroundJobs.id, jobId)).get()
+    let row = db
+      .select()
+      .from(schema.backgroundJobs)
+      .where(eq(schema.backgroundJobs.id, jobId))
+      .get()
     expect(row.status).toBe('pending')
     expect(row.attempts).toBe(1)
     expect(row.retryAt.getTime()).toBeGreaterThan(Date.now())
@@ -122,7 +144,7 @@ describe('BackgroundJobService durability', () => {
   })
 
   it('prunes completed jobs older than the retention window', () => {
-    const { db, schema, createService, notebookId } = context
+    const { db, schema, createService, notebookId } = context!
     db.insert(schema.backgroundJobs)
       .values({
         id: 'job_old_done',
@@ -155,12 +177,12 @@ describe('BackgroundJobService durability', () => {
     service.stop()
 
     const rows = db.select().from(schema.backgroundJobs).all()
-    expect(rows.some((row: any) => row.id === 'job_old_done')).toBe(false)
-    expect(rows.some((row: any) => row.id === 'job_recent_done')).toBe(true)
+    expect(rows.some((row) => row.id === 'job_old_done')).toBe(false)
+    expect(rows.some((row) => row.id === 'job_recent_done')).toBe(true)
   })
 
   it('shutdown waits for the active job to settle', async () => {
-    const { createService, notebookId } = context
+    const { createService, notebookId } = context!
     let resolveRun: (() => void) | null = null
     const service = createService({
       generateLinksForDocument: () =>

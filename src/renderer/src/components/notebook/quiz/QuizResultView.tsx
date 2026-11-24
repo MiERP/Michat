@@ -16,14 +16,14 @@ export default function QuizResultView() {
     submitQuiz
   } = useQuizStore()
 
-  // 提交答题会话（保存到数据库）
+  // Submit the quiz session (saved to the database)
   const handleSubmit = useCallback(async () => {
     await submitQuiz()
   }, [submitQuiz])
 
   const hasSubmittedRef = useRef(false)
 
-  // 首次进入结果页自动提交
+  // Automatically submit when first entering the result page
   useEffect(() => {
     if (!currentQuiz || hasSubmittedRef.current) return
 
@@ -59,7 +59,7 @@ export default function QuizResultView() {
   return (
     <div className="h-full flex items-center justify-center p-8">
       <div className="w-full space-y-8">
-        {/* 标题 */}
+        {/* Title */}
         <div className="text-center">
           <div className="flex items-center justify-center gap-3 mb-4">
             <Trophy className="w-8 h-8 text-primary" />
@@ -67,7 +67,7 @@ export default function QuizResultView() {
           </div>
         </div>
 
-        {/* 分数展示 */}
+        {/* Score display */}
         <div className="text-center space-y-3">
           <div className="text-7xl font-bold text-primary">
             {correctCount}/{totalQuestions}
@@ -77,7 +77,7 @@ export default function QuizResultView() {
           </p>
         </div>
 
-        {/* 统计网格 */}
+        {/* Stats grid */}
         <div className="grid grid-cols-3 gap-6 text-center py-6">
           <div className="space-y-2">
             <p className="text-4xl font-semibold text-green-600 dark:text-green-400">
@@ -95,12 +95,12 @@ export default function QuizResultView() {
           </div>
         </div>
 
-        {/* 鼓励文案 */}
+        {/* Encouragement text */}
         <div className="text-center">
           <p className="text-xl font-medium text-primary">{getEncouragementText()}</p>
         </div>
 
-        {/* 操作按钮 */}
+        {/* Action buttons */}
         <div className="flex gap-3 justify-center pt-4">
           <Button variant="outline" size="lg" onClick={handleReview}>
             {t('viewDetails')}

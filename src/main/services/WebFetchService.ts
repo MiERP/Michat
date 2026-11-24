@@ -1,6 +1,6 @@
 /**
  * WebFetchService
- * 网页抓取服务，支持提取正文和转换为 Markdown
+ * Web fetch service with body extraction and Markdown conversion
  */
 
 import * as cheerio from 'cheerio'
@@ -105,7 +105,7 @@ function createPinnedDispatcher(addresses: string[]): Agent {
 }
 
 /**
- * 网页抓取服务
+ * Web fetch service
  */
 export class WebFetchService {
   private static readonly MAX_REDIRECTS = 5
@@ -121,19 +121,19 @@ export class WebFetchService {
 
   constructor(fetchImpl: FetchLike = undiciFetch) {
     this.fetchImpl = fetchImpl
-    // 配置 Turndown
+    // Configure Turndown
     this.turndown = new TurndownService({
       headingStyle: 'atx',
       codeBlockStyle: 'fenced',
       bulletListMarker: '-'
     })
 
-    // 移除不需要的元素
+    // Remove unwanted elements
     this.turndown.remove(['script', 'style', 'nav', 'footer', 'header', 'aside', 'iframe'])
   }
 
   /**
-   * 抓取网页内容
+   * Fetch web page content
    */
   async fetchUrl(url: string, options?: FetchOptions): Promise<FetchResult> {
     const opts = { ...this.defaultOptions, ...options }
@@ -219,7 +219,7 @@ export class WebFetchService {
   }
 
   /**
-   * 解析 HTML 内容
+   * Parse HTML content
    */
   parseHtml(html: string, url: string, options?: FetchOptions): FetchResult {
     const opts = { ...this.defaultOptions, ...options }
@@ -258,7 +258,7 @@ export class WebFetchService {
   }
 
   /**
-   * 提取主要内容
+   * Extract the main content
    */
   private extractMainContent($: cheerio.CheerioAPI): string {
     $(
@@ -292,7 +292,7 @@ export class WebFetchService {
   }
 
   /**
-   * HTML 转 Markdown
+   * Convert HTML to Markdown
    */
   htmlToMarkdown(html: string): string {
     try {
@@ -304,7 +304,7 @@ export class WebFetchService {
   }
 
   /**
-   * 清理内容
+   * Clean up content
    */
   private cleanContent(content: string): string {
     return content
@@ -316,7 +316,7 @@ export class WebFetchService {
   }
 
   /**
-   * 验证 URL 是否有效
+   * Validate whether a URL is valid
    */
   isValidUrl(url: string): boolean {
     try {

@@ -26,7 +26,10 @@ function isLocalBaseUrl(value: unknown): boolean {
   if (typeof value !== 'string' || value.trim() === '') return false
   try {
     const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && LOCAL_HOSTS.has(parsed.hostname)
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      LOCAL_HOSTS.has(parsed.hostname)
+    )
   } catch {
     return false
   }

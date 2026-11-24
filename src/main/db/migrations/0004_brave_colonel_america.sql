@@ -1,5 +1,5 @@
--- 为 chat_sessions 表添加外键约束
--- SQLite 不支持直接添加外键，需要重建表
+-- Add foreign key constraints to chat_sessions
+-- SQLite cannot add foreign keys in place; rebuild the table
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_chat_sessions` (
 	`id` text PRIMARY KEY NOT NULL,

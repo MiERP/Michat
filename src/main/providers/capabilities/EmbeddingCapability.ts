@@ -1,50 +1,50 @@
 /**
- * EmbeddingCapability 接口
- * 定义嵌入能力
+ * EmbeddingCapability interface
+ * Defines the embedding capability
  */
 
 /**
- * Embedding 配置
+ * Embedding configuration
  */
 export interface EmbeddingConfig {
-  model?: string // embedding 模型名称
-  dimensions?: number // 向量维度(部分模型支持)
+  model?: string // Embedding model name
+  dimensions?: number // Vector dimensions (supported by some models)
 }
 
 /**
- * Embedding 结果
+ * Embedding result
  */
 export interface EmbeddingResult {
-  embedding: Float32Array // 向量数据
-  model: string // 使用的模型
-  dimensions: number // 向量维度
-  tokensUsed: number // 消耗的 token 数
+  embedding: Float32Array // Vector data
+  model: string // Model used
+  dimensions: number // Vector dimensions
+  tokensUsed: number // Number of tokens consumed
 }
 
 /**
- * EmbeddingCapability 嵌入能力接口
- * 实现此接口的 Provider 支持嵌入向量生成功能
+ * EmbeddingCapability embedding capability interface
+ * Providers implementing this interface support embedding vector generation
  */
 export interface EmbeddingCapability {
   /**
-   * 生成单个文本的 Embedding
-   * @param text - 输入文本
-   * @param config - Embedding 配置
-   * @returns Promise<EmbeddingResult> - Embedding 结果
+   * Generate an embedding for a single text
+   * @param text - Input text
+   * @param config - Embedding configuration
+   * @returns Promise<EmbeddingResult> - Embedding result
    */
   createEmbedding(text: string, config?: EmbeddingConfig): Promise<EmbeddingResult>
 
   /**
-   * 批量生成 Embedding
-   * @param texts - 输入文本数组
-   * @param config - Embedding 配置
-   * @returns Promise<EmbeddingResult[]> - Embedding 结果数组
+   * Batch generate embeddings
+   * @param texts - Array of input texts
+   * @param config - Embedding configuration
+   * @returns Promise<EmbeddingResult[]> - Array of embedding results
    */
   createEmbeddings(texts: string[], config?: EmbeddingConfig): Promise<EmbeddingResult[]>
 
   /**
-   * 获取默认 Embedding 模型
-   * @returns 默认 Embedding 模型名称
+   * Get the default embedding model
+   * @returns Default embedding model name
    */
   getDefaultEmbeddingModel(): string
 }

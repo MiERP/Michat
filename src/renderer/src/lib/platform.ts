@@ -1,14 +1,14 @@
 /**
- * 平台检测工具
- * 使用主进程的 process.platform 替代废弃的 navigator.platform
+ * Platform detection utilities
+ * Uses the main process's process.platform instead of the deprecated navigator.platform
  */
 
-// 缓存平台信息，避免重复 IPC 调用
+// Cache platform info to avoid repeated IPC calls
 let cachedPlatform: string | null = null
 
 /**
- * 异步获取平台信息（推荐）
- * 从主进程获取准确的平台信息并缓存
+ * Get platform info asynchronously (recommended)
+ * Fetch accurate platform info from the main process and cache it
  */
 export async function getPlatform(): Promise<string> {
   if (cachedPlatform) return cachedPlatform
@@ -17,18 +17,18 @@ export async function getPlatform(): Promise<string> {
 }
 
 /**
- * 同步获取平台信息
- * 使用 userAgentData（现代标准）或缓存值
- * 如果都不可用，回退到 navigator.platform
+ * Get platform info synchronously
+ * Uses userAgentData (modern standard) or the cached value
+ * Falls back to navigator.platform when neither is available
  */
 export function getPlatformSync(): 'darwin' | 'win32' | 'linux' | 'unknown' {
-  // 优先使用缓存
+  // Prefer the cached value
   if (cachedPlatform) {
     return cachedPlatform as 'darwin' | 'win32' | 'linux' | 'unknown'
   }
 
-  // 使用 userAgentData（现代标准，chromium 90+）
-  const ua = (navigator as any).userAgentData
+  // Use userAgentData (modern standard, Chromium 90+)
+  const ua = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
   if (ua?.platform) {
     const platform = ua.platform.toLowerCase()
     if (platform.includes('mac')) return 'darwin'
@@ -36,7 +36,7 @@ export function getPlatformSync(): 'darwin' | 'win32' | 'linux' | 'unknown' {
     if (platform.includes('linux')) return 'linux'
   }
 
-  // 最后备选：旧版 navigator.platform（兼容性考虑）
+  // Last resort: legacy navigator.platform (for compatibility)
   const p = navigator.platform.toUpperCase()
   if (p.includes('MAC')) return 'darwin'
   if (p.includes('WIN')) return 'win32'
@@ -46,23 +46,23 @@ export function getPlatformSync(): 'darwin' | 'win32' | 'linux' | 'unknown' {
 }
 
 /**
- * 判断是否为 macOS
+ * Whether the platform is macOS
  */
 export const isMac = (): boolean => getPlatformSync() === 'darwin'
 
 /**
- * 判断是否为 Windows
+ * Whether the platform is Windows
  */
 export const isWindows = (): boolean => getPlatformSync() === 'win32'
 
 /**
- * 判断是否为 Linux
+ * Whether the platform is Linux
  */
 export const isLinux = (): boolean => getPlatformSync() === 'linux'
 
 /**
- * 初始化平台检测
- * 在应用启动时调用，预加载平台信息到缓存
+ * Initialize platform detection
+ * Call at app startup to preload platform info into the cache
  */
 export async function initPlatform(): Promise<void> {
   await getPlatform()

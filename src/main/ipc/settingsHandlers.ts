@@ -4,7 +4,7 @@ import { SettingsSchemas, validate } from './validation'
 import { registerNoArgHandler } from './handlerRegistry'
 
 /**
- * 向所有窗口广播设置变化
+ * Broadcasts settings changes to every window
  */
 function broadcastSettingsChange(newSettings: AppSettings, oldSettings: AppSettings): void {
   BrowserWindow.getAllWindows().forEach((window) => {
@@ -15,15 +15,15 @@ function broadcastSettingsChange(newSettings: AppSettings, oldSettings: AppSetti
 }
 
 /**
- * 注册设置相关的 IPC Handlers
+ * Registers the settings IPC handlers
  */
 export function registerSettingsHandlers(): void {
-  // 获取所有设置
+  // Get all settings
   registerNoArgHandler('settings:getAll', async () => {
     return await settingsManager.getAllSettings()
   })
 
-  // 获取单个设置（带参数验证）
+  // Get a single setting (with argument validation)
   ipcMain.handle(
     'settings:get',
     validate(SettingsSchemas.get, async (args) => {
@@ -31,7 +31,7 @@ export function registerSettingsHandlers(): void {
     })
   )
 
-  // 更新设置（带参数验证）
+  // Update settings (with argument validation)
   ipcMain.handle(
     'settings:update',
     validate(SettingsSchemas.update, async (args) => {
@@ -40,7 +40,7 @@ export function registerSettingsHandlers(): void {
     })
   )
 
-  // 设置单个值（带参数验证）
+  // Set a single value (with argument validation)
   ipcMain.handle(
     'settings:set',
     validate(SettingsSchemas.set, async (args) => {
@@ -51,18 +51,18 @@ export function registerSettingsHandlers(): void {
     })
   )
 
-  // 重置设置
+  // Reset settings
   registerNoArgHandler('settings:reset', async () => {
     await settingsManager.resetSettings()
     return await settingsManager.getAllSettings()
   })
 
-  // 获取默认提示词
+  // Get the default prompts
   registerNoArgHandler('settings:getDefaultPrompts', async () => {
     return defaultSettings.prompts
   })
 
-  // 监听设置变化并广播到所有窗口
+  // Listen for settings changes and broadcast them to every window
   settingsManager.onSettingsChange((newSettings, oldSettings) => {
     console.log('[IPC] Settings changed, broadcasting to all windows')
     broadcastSettingsChange(newSettings, oldSettings)

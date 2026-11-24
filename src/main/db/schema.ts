@@ -1,8 +1,17 @@
 import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core'
+import type { ChatMessageMetadata } from '../../shared/types/chat'
+import type { QuizQuestion } from '../../shared/types/quiz'
 
 /**
- * 笔记本表
- * 用于存储用户创建的笔记本
+ * JSON metadata stored on notebooks and documents. Values are deliberately
+ * untyped because each feature owns its own metadata shape and consumers
+ * narrow the fields they read.
+ */
+type JsonMetadata = Record<string, unknown>
+
+/**
+ * Notebooks table
+ * Stores notebooks created by the user
  */
 export const notebooks = sqliteTable(
   'notebooks',
@@ -11,19 +20,19 @@ export const notebooks = sqliteTable(
     title: text('title').notNull(),
     description: text('description'),
     /** JSON: chứa notebookSummary (tóm tắt thống nhất notebook) và metadata khác. */
-    metadata: text('metadata', { mode: 'json' }).$type<Record<string, any>>(),
+    metadata: text('metadata', { mode: 'json' }).$type<JsonMetadata>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
-    // 优化按更新时间查询笔记本的性能
+    // Speeds up notebook lookups ordered by update time
     updatedIdx: index('idx_notebooks_updated').on(table.updatedAt)
   })
 )
 
 /**
- * 聊天会话表
- * 用于存储每个笔记本下的聊天会话
+ * Chat sessions table
+ * Stores the chat sessions belonging to each notebook
  */
 export const chatSessions = sqliteTable(
   'chat_sessions',
@@ -33,27 +42,27 @@ export const chatSessions = sqliteTable(
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
-    //  session 相关字段
-    summary: text('summary'), // （如果是生成的）
-    totalTokens: integer('total_tokens').notNull().default(0), // 当前会话累计 token 数
+    //  Session-related fields
+    summary: text('summary'), // (if generated)
+    totalTokens: integer('total_tokens').notNull().default(0), // cumulative token count for this session
     status: text('status', { enum: ['active', 'archived'] })
       .notNull()
-      .default('active'), // 会话状态
+      .default('active'), // session status
     parentSessionId: text('parent_session_id').references(() => chatSessions.id, {
       onDelete: 'set null'
-    }), // 指向上一个被切换的 session
+    }), // points to the previously active session
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
-    // 优化按笔记本查询会话的性能
+    // Speeds up session lookups by notebook
     notebookIdx: index('idx_sessions_notebook').on(table.notebookId, table.updatedAt)
   })
 )
 
 /**
- * 聊天消息表
- * 存储每个会话中的所有消息（用户消息和AI回复）
+ * Chat messages table
+ * Stores every message in each session (user messages and AI replies)
  */
 export const chatMessages = sqliteTable(
   'chat_messages',
@@ -64,18 +73,18 @@ export const chatMessages = sqliteTable(
       .references(() => chatSessions.id, { onDelete: 'cascade' }),
     role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
     content: text('content').notNull(),
-    reasoningContent: text('reasoning_content'), // DeepSeek Reasoner 推理过程内容
-    metadata: text('metadata', { mode: 'json' }).$type<Record<string, any>>(),
+    reasoningContent: text('reasoning_content'), // DeepSeek Reasoner chain-of-thought content
+    metadata: text('metadata', { mode: 'json' }).$type<ChatMessageMetadata>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
-    // 优化按会话查询消息的性能
+    // Speeds up message lookups by session
     sessionIdx: index('idx_messages_session').on(table.sessionId, table.createdAt)
   })
 )
 
 /**
- * TypeScript 类型导出（从 Drizzle Schema 推导）
+ * TypeScript type exports (inferred from the Drizzle schema)
  */
 export type Notebook = typeof notebooks.$inferSelect
 export type NewNotebook = typeof notebooks.$inferInsert
@@ -87,8 +96,8 @@ export type ChatMessage = typeof chatMessages.$inferSelect
 export type NewChatMessage = typeof chatMessages.$inferInsert
 
 /**
- * 笔记表
- * 存储每个笔记本下的笔记
+ * Notes table
+ * Stores the notes belonging to each notebook
  */
 export const notes = sqliteTable(
   'notes',
@@ -103,7 +112,7 @@ export const notes = sqliteTable(
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
-    // 优化按笔记本查询笔记的性能
+    // Speeds up note lookups by notebook
     notebookIdx: index('idx_notes_notebook').on(table.notebookId, table.updatedAt)
   })
 )
@@ -111,11 +120,11 @@ export const notes = sqliteTable(
 export type Note = typeof notes.$inferSelect
 export type NewNote = typeof notes.$inferInsert
 
-// ==================== RAG 相关表 ====================
+// ==================== RAG-related tables ====================
 
 /**
- * 知识库文档表
- * 存储上传的文档元信息（知识来源）
+ * Knowledge base documents table
+ * Stores metadata for uploaded documents (knowledge sources)
  */
 export const documents = sqliteTable(
   'documents',
@@ -126,16 +135,16 @@ export const documents = sqliteTable(
       .references(() => notebooks.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     type: text('type', { enum: ['file', 'note', 'url', 'text', 'memory'] }).notNull(),
-    sourceUri: text('source_uri'), // 原始文件路径或 URL
-    localFilePath: text('local_file_path'), // 本地拷贝文件路径
+    sourceUri: text('source_uri'), // original file path or URL
+    localFilePath: text('local_file_path'), // path of the local copy
     sourceNoteId: text('source_note_id').references(() => notes.id, { onDelete: 'set null' }),
     memoryOfSessionId: text('memory_of_session_id'), // memory: session nguồn của ký ức
-    content: text('content'), // 原始内容（可选存储）
-    contentHash: text('content_hash'), // 内容哈希，用于检测变更
+    content: text('content'), // raw content (optionally stored)
+    contentHash: text('content_hash'), // content hash used to detect changes
     contentMdHash: text('content_md_hash'), // markdown chuẩn hóa (canonical) hash — phát hiện thay đổi do normalizer
-    mimeType: text('mime_type'), // 文件类型
-    fileSize: integer('file_size'), // 文件大小（字节）
-    metadata: text('metadata', { mode: 'json' }).$type<Record<string, any>>(),
+    mimeType: text('mime_type'), // file type
+    fileSize: integer('file_size'), // file size in bytes
+    metadata: text('metadata', { mode: 'json' }).$type<JsonMetadata>(),
     status: text('status', { enum: ['pending', 'processing', 'indexed', 'failed'] })
       .notNull()
       .default('pending'),
@@ -146,7 +155,8 @@ export const documents = sqliteTable(
   },
   (table) => ({
     notebookIdx: index('idx_documents_notebook').on(table.notebookId, table.updatedAt),
-    statusIdx: index('idx_documents_status').on(table.status)
+    statusIdx: index('idx_documents_status').on(table.status),
+    memoryIdx: index('idx_documents_memory_session').on(table.memoryOfSessionId)
   })
 )
 
@@ -180,8 +190,8 @@ export const documentMetadataValues = sqliteTable(
 )
 
 /**
- * 文档分块表
- * 存储分块后的文本内容（RAG 的最小知识单元）
+ * Document chunks table
+ * Stores the chunked text content (the smallest knowledge unit in RAG)
  */
 export const chunks = sqliteTable(
   'chunks',
@@ -195,18 +205,19 @@ export const chunks = sqliteTable(
       .references(() => notebooks.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
     contentHash: text('content_hash'), // block hash (md5 nội dung chunk) — cho incremental reindex
-    chunkIndex: integer('chunk_index').notNull(), // 在文档中的顺序
-    startOffset: integer('start_offset'), // 原文起始位置
-    endOffset: integer('end_offset'), // 原文结束位置
-    metadata: text('metadata', { mode: 'json' }).$type<Record<string, any>>(),
-    tokenCount: integer('token_count'), // token 估算值
+    chunkIndex: integer('chunk_index').notNull(), // position within the document
+    startOffset: integer('start_offset'), // start position in the source text
+    endOffset: integer('end_offset'), // end position in the source text
+    metadata: text('metadata', { mode: 'json' }).$type<JsonMetadata>(),
+    tokenCount: integer('token_count'), // estimated token count
     sectionId: text('section_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
     documentIdx: index('idx_chunks_document').on(table.documentId),
     notebookIdx: index('idx_chunks_notebook').on(table.notebookId),
-    sectionIdx: index('idx_chunks_section').on(table.sectionId)
+    sectionIdx: index('idx_chunks_section').on(table.sectionId),
+    documentHashIdx: index('idx_chunks_document_hash').on(table.documentId, table.contentHash)
   })
 )
 
@@ -249,8 +260,8 @@ export type Section = typeof sections.$inferSelect
 export type NewSection = typeof sections.$inferInsert
 
 /**
- * 向量嵌入表（元数据）
- * 存储 chunk 的向量元信息，实际向量存储在 vec0 虚拟表中
+ * Vector embeddings table (metadata)
+ * Stores vector metadata for each chunk; the actual vectors live in the vec0 virtual table
  */
 export const embeddings = sqliteTable(
   'embeddings',
@@ -262,8 +273,8 @@ export const embeddings = sqliteTable(
     notebookId: text('notebook_id')
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
-    model: text('model').notNull(), // embedding 模型名称
-    dimensions: integer('dimensions').notNull(), // 向量维度
+    model: text('model').notNull(), // embedding model name
+    dimensions: integer('dimensions').notNull(), // vector dimensions
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
@@ -392,8 +403,8 @@ export type BackgroundJob = typeof backgroundJobs.$inferSelect
 export type NewBackgroundJob = typeof backgroundJobs.$inferInsert
 
 /**
- * 题库表
- * 存储笔记本的答题题库
+ * Quizzes table
+ * Stores the quiz question bank for a notebook
  */
 export const quizzes = sqliteTable(
   'quizzes',
@@ -403,9 +414,11 @@ export const quizzes = sqliteTable(
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
-    version: integer('version').notNull().default(1), // 版本号
-    questionsData: text('questions_data', { mode: 'json' }).notNull(), // 题目数组
-    chunkMapping: text('chunk_mapping', { mode: 'json' }).notNull(), // questionId -> chunkIds映射
+    version: integer('version').notNull().default(1), // version number
+    questionsData: text('questions_data', { mode: 'json' }).$type<QuizQuestion[]>().notNull(), // array of questions
+    chunkMapping: text('chunk_mapping', { mode: 'json' })
+      .$type<Record<string, string[]>>()
+      .notNull(), // questionId -> chunkIds mapping
     metadata: text('metadata', { mode: 'json' }).$type<{
       model: string
       totalQuestions: number
@@ -428,8 +441,8 @@ export type Quiz = typeof quizzes.$inferSelect
 export type NewQuiz = typeof quizzes.$inferInsert
 
 /**
- * 答题会话表
- * 存储用户的答题记录
+ * Quiz sessions table
+ * Stores the user's quiz attempts
  */
 export const quizSessions = sqliteTable(
   'quiz_sessions',
@@ -458,8 +471,8 @@ export type QuizSession = typeof quizSessions.$inferSelect
 export type NewQuizSession = typeof quizSessions.$inferInsert
 
 /**
- * Items 表
- * 统一管理笔记本下的所有内容项（笔记、题库、PPT、音频等）
+ * Items table
+ * Manages all content items under a notebook (notes, quizzes, PPT, audio, etc.)
  */
 export const items = sqliteTable(
   'items',
@@ -469,17 +482,17 @@ export const items = sqliteTable(
       .notNull()
       .references(() => notebooks.id, { onDelete: 'cascade' }),
     type: text('type', { enum: ['note', 'quiz', 'ppt', 'audio', 'video'] }).notNull(),
-    resourceId: text('resource_id').notNull(), // 指向实际资源的 ID (notes.id, quizzes.id 等)
-    order: integer('order').notNull().default(0), // 排序，数值越小越靠前
+    resourceId: text('resource_id').notNull(), // ID of the backing resource (notes.id, quizzes.id, etc.)
+    order: integer('order').notNull().default(0), // sort order; lower values come first
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({
-    // 优化按笔记本查询并排序的性能
+    // Speeds up notebook lookups with ordering
     notebookOrderIdx: index('idx_items_notebook_order').on(table.notebookId, table.order),
-    // 优化按类型查询的性能
+    // Speeds up lookups by type
     typeIdx: index('idx_items_type').on(table.type),
-    // 优化按资源 ID 查找对应 item 的性能
+    // Speeds up finding an item by resource ID
     resourceIdx: index('idx_items_resource').on(table.type, table.resourceId)
   })
 )

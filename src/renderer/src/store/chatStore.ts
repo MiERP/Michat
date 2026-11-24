@@ -38,7 +38,7 @@ interface ChatStore {
   setStreamingMessage: (notebookId: string, messageId: string | null) => void
   isNotebookStreaming: (notebookId: string) => boolean
 
-  // 异步操作
+  // Async operations
   loadSessions: (notebookId: string) => Promise<void>
   loadActiveSession: (notebookId: string) => Promise<void>
   loadMessages: (sessionId: string) => Promise<void>
@@ -88,10 +88,10 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       const newStreamingMessages = { ...state.streamingMessages }
 
       if (messageId) {
-        // 设置该Notebook的流式消息
+        // Set the streaming message for this notebook
         newStreamingMessages[notebookId] = messageId
       } else {
-        // 清除该Notebook的流式消息
+        // Clear the streaming message for this notebook
         delete newStreamingMessages[notebookId]
       }
 
@@ -139,7 +139,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   loadMessages: async (sessionId) => {
     const dbMessages = await window.api.getMessages(sessionId)
 
-    // 从缓存中恢复正在流式传输的消息内容
+    // Restore in-flight streaming message content from the cache
     const state = get()
     if (state.currentSession?.id !== sessionId) return
     const messages = dbMessages.map((msg: ChatMessage) => {
@@ -147,7 +147,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       const message = { ...msg, notebookId: state.currentSession!.notebookId }
       const cached = state.messageToNotebook[msg.id]
       if (cached) {
-        // 如果缓存中有内容，说明这条消息正在流式传输，使用缓存的内容
+        // If the cache has content, the message is still streaming; use the cached content
         return {
           ...message,
           content: cached.content,
@@ -170,13 +170,13 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   },
 
   sendMessage: async (sessionId, content) => {
-    // 1. 找到session对应的notebookId
+    // 1. Find the notebookId for the session
     const session = get().currentSession
     if (!session || session.id !== sessionId) return
 
     const notebookId = session.notebookId
 
-    // 2. 添加用户消息到 UI
+    // 2. Add the user message to the UI
     const userMessage: ChatMessage = {
       id: `temp_user_${Date.now()}`,
       sessionId,
@@ -187,7 +187,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }
     get().addMessage(userMessage)
 
-    // 3. 发送消息并获取 assistant messageId (kèm phạm vi tri thức đang chọn)
+    // 3. Send the message and get the assistant messageId (with the selected knowledge scope)
     let result: Awaited<ReturnType<typeof window.api.sendMessage>>
     try {
       result = await window.api.sendMessage(sessionId, content, get().ragScope ?? undefined)
@@ -210,7 +210,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
     const messageId = result.messageId
 
-    // 4. 添加 assistant 消息占位符（包含推理字段）
+    // 4. Add the assistant message placeholder (including reasoning fields)
     const assistantMessage: ChatMessage = {
       id: messageId,
       sessionId,
@@ -230,7 +230,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }
     get().setStreamingMessage(notebookId, messageId)
 
-    // 5. 初始化缓存，记录 messageId -> {notebookId, content, reasoningContent}
+    // 5. Initialize the cache mapping messageId -> {notebookId, content, reasoningContent}
     set((state) => ({
       messageToNotebook: {
         ...state.messageToNotebook,
@@ -251,23 +251,23 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     try {
       Logger.info('ChatStore', `Aborting message: ${messageId}`)
 
-      // 乐观更新: 立即标记消息为非流式
+      // Optimistic update: immediately mark the message as not streaming
       set((state) => ({
         messages: state.messages.map((msg) =>
           msg.id === messageId ? { ...msg, isStreaming: false, isReasoningStreaming: false } : msg
         )
       }))
 
-      // 调用 IPC 中止请求
+      // Call IPC to abort the request
       const result = await window.api.abortMessage(messageId)
 
       if (result.success) {
         Logger.info('ChatStore', 'Message aborted successfully')
 
-        // 立即清理流状态
+        // Clean up the streaming state immediately
         state.setStreamingMessage(notebookId, null)
 
-        // 清理缓存
+        // Clean up the cache
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [messageId]: _removed, ...rest } = get().messageToNotebook
         set({ messageToNotebook: rest })
@@ -281,9 +281,9 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 }))
 
 /**
- * 设置流式消息监听器（基于 AI SDK 流式协议）
- * 在应用启动时调用一次
- * 返回清理函数
+ * Set up the streaming message listener (based on the AI SDK streaming protocol)
+ * Call once at app startup
+ * Returns a cleanup function
  */
 export function setupChatListeners() {
   // Guard: only run in Electron context where window.api is available
@@ -300,10 +300,10 @@ export function setupChatListeners() {
     const cached = store.messageToNotebook[messageId]
     if (!cached) return
 
-    // 处理不同类型的流式部分
+    // Handle the different stream part types
     switch (type) {
       case 'reasoning-start':
-        // 推理块开始，标记推理状态
+        // Reasoning block started; mark the reasoning state
         useChatStore.setState((state) => ({
           messages: state.messages.map((msg) =>
             msg.id === messageId ? { ...msg, isReasoningStreaming: true } : msg
@@ -332,7 +332,7 @@ export function setupChatListeners() {
       }
 
       case 'reasoning-end':
-        // 推理块结束
+        // Reasoning block ended
         useChatStore.setState((state) => ({
           messages: state.messages.map((msg) =>
             msg.id === messageId ? { ...msg, isReasoningStreaming: false } : msg
@@ -367,10 +367,10 @@ export function setupChatListeners() {
           )
         }))
 
-        // 流式传输完成
+        // Streaming complete
         store.setStreamingMessage(cached.notebookId, null)
 
-        // 清理缓存
+        // Clean up the cache
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [messageId]: _removed, ...rest } = store.messageToNotebook
         useChatStore.setState({ messageToNotebook: rest })
@@ -412,7 +412,7 @@ export function setupChatListeners() {
     useChatStore.getState().setStreamingMessage(notebookId, messageId)
   })
 
-  // 监听错误
+  // Listen for errors
   const cleanupError = window.api.onMessageError((data) => {
     const { messageId, error } = data
     const store = useChatStore.getState()
@@ -429,7 +429,12 @@ export function setupChatListeners() {
       messages: state.messages.some((message) => message.id === messageId)
         ? state.messages.map((message) =>
             message.id === messageId
-              ? { ...message, content: errorContent, isStreaming: false, isReasoningStreaming: false }
+              ? {
+                  ...message,
+                  content: errorContent,
+                  isStreaming: false,
+                  isReasoningStreaming: false
+                }
               : message
           )
         : state.messages

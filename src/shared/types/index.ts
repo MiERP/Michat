@@ -1,37 +1,36 @@
 /**
- * 共享的类型定义
- * 基于 Drizzle 推导的数据库 schema,确保类型定义的单一数据源
+ * Shared type definitions
+ * Based on the Drizzle database schema to keep a single source of truth
  */
 
-// 导出知识库类型
+// Export knowledge base types
 export * from './knowledge'
 export * from './retrieval'
 
-// 导出聊天类型
+// Export chat types
 export * from './chat'
 
-// 导出 Result 错误处理类型
+// Export Result error handling types
 export * from './result'
 
-// 导出答题类型
+// Export quiz types
 export * from './quiz'
-export * from './license'
 
 /**
- * 笔记本接口
- * 与 Drizzle schema 推导的类型兼容
+ * Notebook interface
+ * Compatible with types inferred from the Drizzle schema
  */
 export interface Notebook {
   id: string
   title: string
-  description?: string | null | undefined // 兼容 Drizzle 推导的可选字段
+  description?: string | null | undefined // Compatible with optional fields inferred by Drizzle
   createdAt: Date
   updatedAt: Date
 }
 
 /**
- * 笔记接口
- * 与 Drizzle schema 推导的类型兼容
+ * Note interface
+ * Compatible with types inferred from the Drizzle schema
  */
 export interface Note {
   id: string
@@ -43,11 +42,11 @@ export interface Note {
 }
 
 /**
- * Provider 配置接口
+ * Provider configuration interface
  */
 export interface ProviderConfig {
   providerName: string
-  config: any
+  config: Record<string, unknown>
   enabled: boolean
   updatedAt: number
 }
@@ -62,7 +61,7 @@ export interface PublicProviderConfig {
 }
 
 /**
- * 模型类型枚举
+ * Model type enum
  */
 export enum ModelType {
   CHAT = 'chat',
@@ -75,7 +74,7 @@ export enum ModelType {
 }
 
 /**
- * 模型接口
+ * Model interface
  */
 export interface Model {
   id: string
@@ -83,12 +82,12 @@ export interface Model {
   owned_by?: string
   created?: number
   type?: ModelType
-  max_context?: number // 最大上下文长度 (来自内置配置)
-  description?: string // 模型描述 (来自内置配置)
+  max_context?: number // Maximum context length (from built-in configuration)
+  description?: string // Model description (from built-in configuration)
 }
 
 /**
- * 分类后的模型列表接口
+ * Categorized model list interface
  */
 export interface CategorizedModels {
   chat: Model[]
@@ -98,15 +97,15 @@ export interface CategorizedModels {
 }
 
 /**
- * 应用设置接口
+ * Application settings interface
  */
 export interface AppSettings {
   theme: 'light' | 'dark'
   language: 'vi-VN' | 'en-US'
   autoLaunch: boolean
   hasCompletedOnboarding: boolean
-  defaultChatModel?: string // 默认对话模型
-  defaultEmbeddingModel?: string // 默认嵌入模型
+  defaultChatModel?: string // Default chat model
+  defaultEmbeddingModel?: string // Default embedding model
   rerankEnabled?: boolean
   rerankTopN?: number
   rerankUseHeuristicFallback?: boolean
@@ -124,8 +123,8 @@ export interface AppSettings {
   ragRetrievalDebugEnabled?: boolean
   prompts?: {
     quiz?: {
-      'vi-VN'?: string // 中文答题生成提示词
-      'en-US'?: string // 英文答题生成提示词
+      'vi-VN'?: string // Quiz generation prompt (Vietnamese)
+      'en-US'?: string // Quiz generation prompt (English)
     }
     chat?: {
       'vi-VN'?: string
@@ -135,24 +134,24 @@ export interface AppSettings {
 }
 
 /**
- * 快捷键动作枚举
+ * Shortcut action enum
  */
 export enum ShortcutAction {
-  // 笔记本管理
+  // Notebook management
   CREATE_NOTEBOOK = 'create_notebook',
   CLOSE_NOTEBOOK = 'close_notebook',
 
-  // 面板切换
-  TOGGLE_KNOWLEDGE_BASE = 'toggle_knowledge_base', // 知识库
-  TOGGLE_CREATIVE_SPACE = 'toggle_creative_space' // 创造空间
+  // Panel switching
+  TOGGLE_KNOWLEDGE_BASE = 'toggle_knowledge_base', // Knowledge base
+  TOGGLE_CREATIVE_SPACE = 'toggle_creative_space' // Creative space
 }
 
 /**
- * 快捷键配置接口
+ * Shortcut configuration interface
  */
 export interface ShortcutConfig {
   action: ShortcutAction
-  accelerator: string // 如 "CommandOrControl+N"
+  accelerator: string // e.g. "CommandOrControl+N"
   enabled: boolean
   description: string // i18n key
 }

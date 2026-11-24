@@ -1,6 +1,6 @@
 /**
  * Knowledge IPC Handlers
- * 知识库相关的 IPC 处理函数
+ * IPC handlers for the knowledge base
  */
 
 import { ipcMain, IpcMainInvokeEvent, dialog, shell } from 'electron'
@@ -17,7 +17,7 @@ import { registerNoArgHandler } from './handlerRegistry'
 import { isAllowedExternalOpenUrl, normalizeFsPath } from '../security/guards'
 
 /**
- * 注册知识库相关 IPC Handlers
+ * Registers the knowledge base IPC handlers
  */
 export function registerKnowledgeHandlers(
   providerManager: ProviderManager,
@@ -41,7 +41,7 @@ export function registerKnowledgeHandlers(
     }
   }
 
-  // 添加文档（文本内容）
+  // Add a document (text content)
   ipcMain.handle('knowledge:add-document', async (event: IpcMainInvokeEvent, args: unknown) => {
     const validated = await validate(KnowledgeSchemas.addDocument, async (params) => {
       Logger.debug('KnowledgeHandlers', 'add-document:', {
@@ -76,7 +76,7 @@ export function registerKnowledgeHandlers(
           params.notebookId,
           params.options,
           (stage, progress) => {
-            // 发送进度更新
+            // Send a progress update
             event.sender.send('knowledge:index-progress', {
               notebookId: params.notebookId,
               stage,
@@ -97,7 +97,7 @@ export function registerKnowledgeHandlers(
     return validated
   })
 
-  // 从文件添加文档
+  // Add a document from a file
   ipcMain.handle(
     'knowledge:add-document-from-file',
     async (event: IpcMainInvokeEvent, args: unknown) => {
@@ -148,7 +148,7 @@ export function registerKnowledgeHandlers(
     }
   )
 
-  // 从文件夹批量添加文档
+  // Add documents from a folder in bulk
   ipcMain.handle(
     'knowledge:add-documents-from-folder',
     async (event: IpcMainInvokeEvent, args: unknown) => {
@@ -203,7 +203,7 @@ export function registerKnowledgeHandlers(
     }
   )
 
-  // 从 URL 添加文档
+  // Add a document from a URL
   ipcMain.handle(
     'knowledge:add-document-from-url',
     async (event: IpcMainInvokeEvent, args: unknown) => {
@@ -236,7 +236,7 @@ export function registerKnowledgeHandlers(
     }
   )
 
-  // 从 Note 添加到知识库
+  // Add a note to the knowledge base
   ipcMain.handle('knowledge:add-note', async (event: IpcMainInvokeEvent, args: unknown) => {
     const validated = await validate(KnowledgeSchemas.addNote, async (params) => {
       Logger.debug('KnowledgeHandlers', 'add-note:', params)
@@ -271,7 +271,7 @@ export function registerKnowledgeHandlers(
     return validated
   })
 
-  // 搜索知识库
+  // Search the knowledge base
   ipcMain.handle(
     'knowledge:search',
     validate(KnowledgeSchemas.search, async (params) => {
@@ -296,7 +296,7 @@ export function registerKnowledgeHandlers(
     })
   )
 
-  // 获取文档列表
+  // Get the document list
   ipcMain.handle(
     'knowledge:get-documents',
     validate(KnowledgeSchemas.getDocuments, async (params) => {
@@ -312,7 +312,7 @@ export function registerKnowledgeHandlers(
     })
   )
 
-  // 获取单个文档
+  // Get a single document
   ipcMain.handle(
     'knowledge:get-document',
     validate(KnowledgeSchemas.getDocument, async (params) => {
@@ -328,7 +328,7 @@ export function registerKnowledgeHandlers(
     })
   )
 
-  // 获取文档的 chunks
+  // Get the document's chunks
   ipcMain.handle(
     'knowledge:update-document-metadata',
     validate(KnowledgeSchemas.updateDocumentMetadata, async (params) => {
@@ -357,7 +357,7 @@ export function registerKnowledgeHandlers(
     })
   )
 
-  // 获取指定页面内容（用于 citation 预览）
+  // Get the content of a specific page (used for citation previews)
   ipcMain.handle(
     'knowledge:get-document-page',
     validate(KnowledgeSchemas.getDocumentPage, async (params) => {
@@ -377,7 +377,7 @@ export function registerKnowledgeHandlers(
     })
   )
 
-  // 删除文档
+  // Delete a document
   ipcMain.handle(
     'knowledge:delete-document',
     validate(KnowledgeSchemas.deleteDocument, async (params) => {
@@ -393,7 +393,7 @@ export function registerKnowledgeHandlers(
     })
   )
 
-  // 重建索引
+  // Rebuild the index
   ipcMain.handle('knowledge:reindex-document', async (event: IpcMainInvokeEvent, args: unknown) => {
     const validated = await validate(KnowledgeSchemas.reindexDocument, async (params) => {
       Logger.debug('KnowledgeHandlers', 'reindex-document:', params.documentId)
@@ -581,7 +581,7 @@ export function registerKnowledgeHandlers(
     })
   )
 
-  // 获取知识库统计信息
+  // Get knowledge base statistics
   ipcMain.handle(
     'knowledge:get-stats',
     validate(KnowledgeSchemas.getStats, async (params) => {
@@ -610,7 +610,7 @@ export function registerKnowledgeHandlers(
     }
   })
 
-  // 打开文件选择对话框
+  // Open the file picker dialog
   registerNoArgHandler('knowledge:select-files', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
@@ -638,7 +638,7 @@ export function registerKnowledgeHandlers(
     return selectedPaths
   })
 
-  // 打开文件夹选择对话框
+  // Open the folder picker dialog
   registerNoArgHandler('knowledge:select-folder', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory']
@@ -653,7 +653,7 @@ export function registerKnowledgeHandlers(
     return selectedFolderPath
   })
 
-  // 打开文档源文件
+  // Open the document's source file
   ipcMain.handle(
     'knowledge:open-source',
     validate(KnowledgeSchemas.openSource, async (params) => {
@@ -665,7 +665,7 @@ export function registerKnowledgeHandlers(
           return { success: false, error: 'Document not found' }
         }
 
-        // 根据文档类型处理
+        // Handle according to the document type
         if (doc.type === 'file') {
           const filePathToOpen = doc.localFilePath
           if (!filePathToOpen) {

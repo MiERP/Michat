@@ -60,7 +60,12 @@ export function parseQuizPayload(raw: string): unknown | null {
   for (const candidate of extractJsonObjects(raw)) {
     const parsed = tryParse(candidate)
     if (Array.isArray(parsed)) return { questions: parsed }
-    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).questions)) {
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'questions' in parsed &&
+      Array.isArray(parsed.questions)
+    ) {
       return parsed
     }
   }
@@ -81,10 +86,7 @@ export interface SanitizedQuizQuestion {
  * Coerce a model answer into the shape the app expects instead of rejecting it
  * on length limits: local models routinely exceed the requested caps.
  */
-export function sanitizeQuizQuestions(
-  payload: unknown,
-  maxCount: number
-): SanitizedQuizQuestion[] {
+export function sanitizeQuizQuestions(payload: unknown, maxCount: number): SanitizedQuizQuestion[] {
   const container = payload as { questions?: unknown } | null
   const rawQuestions = Array.isArray(container?.questions) ? container.questions : []
   const result: SanitizedQuizQuestion[] = []
@@ -97,9 +99,11 @@ export function sanitizeQuizQuestions(
       .trim()
       .slice(0, 500)
     const optionsRaw = Array.isArray(item.options) ? item.options : []
-    const options = optionsRaw
-      .slice(0, 4)
-      .map((option) => String(option ?? '').trim().slice(0, 200))
+    const options = optionsRaw.slice(0, 4).map((option) =>
+      String(option ?? '')
+        .trim()
+        .slice(0, 200)
+    )
     if (!questionText || options.length !== 4) continue
 
     let correctAnswer = Number(item.correctAnswer)
@@ -114,7 +118,11 @@ export function sanitizeQuizQuestions(
     const hints = Array.isArray(item.hints)
       ? item.hints
           .slice(0, 2)
-          .map((hint) => String(hint ?? '').trim().slice(0, 200))
+          .map((hint) =>
+            String(hint ?? '')
+              .trim()
+              .slice(0, 200)
+          )
           .filter(Boolean)
       : []
 

@@ -21,7 +21,7 @@ const ShortcutSchemas = {
 }
 
 /**
- * 注册快捷键相关的 IPC Handlers
+ * Registers the shortcut-related IPC handlers
  */
 export function registerShortcutHandlers(
   shortcutManager: ShortcutManager,

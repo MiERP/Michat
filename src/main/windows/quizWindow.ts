@@ -8,15 +8,15 @@ import { isAllowedExternalOpenUrl } from '../security/guards'
 let quizWindow: BrowserWindow | null = null
 
 /**
- * 创建答题窗口
- * @param notebookId - 笔记本 ID（用于生成新答题）
- * @param quizId - 答题 ID（用于查看特定版本，可选）
+ * Creates the quiz window
+ * @param notebookId - notebook ID (used to generate a new quiz)
+ * @param quizId - quiz ID (used to view a specific version, optional)
  */
 export function createQuizWindow(notebookId: string, quizId?: string): void {
-  // 如果答题窗口已经存在，则聚焦并返回
+  // If the quiz window already exists, focus it and return
   if (quizWindow && !quizWindow.isDestroyed()) {
     quizWindow.focus()
-    // 如果传入了新的路由参数，更新 URL
+    // If new route parameters were passed in, update the URL
     const route = quizId ? `/quiz/view/${quizId}` : `/quiz/${notebookId}`
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
       quizWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#${route}`)
@@ -28,11 +28,11 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
     return
   }
 
-  // 根据用户主题设置背景色
+  // Set the background color according to the user's theme
   const theme = settingsManager.getSettingSync('theme')
   const backgroundColor = theme === 'dark' ? '#1a1b1e' : '#fafafa'
 
-  // 创建答题窗口
+  // Create the quiz window
   quizWindow = new BrowserWindow({
     width: 900,
     height: 700,
@@ -77,7 +77,7 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
     quizWindow = null
   })
 
-  // 监听主题变化
+  // Listen for theme changes
   settingsManager.onSettingsChangeSync((newSettings) => {
     if (quizWindow && !quizWindow.isDestroyed()) {
       const newBackgroundColor = newSettings.theme === 'dark' ? '#1a1b1e' : '#fafafa'
@@ -85,7 +85,7 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
     }
   })
 
-  // 加载答题页面
+  // Load the quiz page
   const route = quizId ? `/quiz/view/${quizId}` : `/quiz/${notebookId}`
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     quizWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#${route}`)
@@ -97,14 +97,14 @@ export function createQuizWindow(notebookId: string, quizId?: string): void {
 }
 
 /**
- * 获取答题窗口实例
+ * Returns the quiz window instance
  */
 export function getQuizWindow(): BrowserWindow | null {
   return quizWindow
 }
 
 /**
- * 销毁答题窗口
+ * Destroys the quiz window
  */
 export function destroyQuizWindow(): void {
   if (quizWindow && !quizWindow.isDestroyed()) {

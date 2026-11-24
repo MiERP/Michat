@@ -3,7 +3,7 @@ import Logger from '../../shared/utils/logger'
 import { registerNoArgHandler } from './handlerRegistry'
 
 /**
- * 注册更新相关的 IPC Handlers
+ * Registers the update-related IPC handlers
  */
 export function registerUpdateHandlers(updateService: UpdateService): void {
   registerNoArgHandler('update:check', async () => {

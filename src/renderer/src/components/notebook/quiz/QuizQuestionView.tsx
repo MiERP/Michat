@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Lightbulb, Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useQuizStore } from '../../../store/quizStore'
-import type { QuizQuestion } from '../../../../../shared/types/quiz'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
 import { cn } from '../../../lib/utils'
@@ -38,7 +37,7 @@ export default function QuizQuestionView() {
   // Lưu theo từng câu hỏi để không hiển thị nhầm nguồn của câu trước đó.
   useEffect(() => {
     if (!currentQuiz || !shouldShowExplanation) return
-    const quizQuestions = currentQuiz.questionsData as any as QuizQuestion[]
+    const quizQuestions = currentQuiz.questionsData
     const activeQuestion = quizQuestions[currentQuestionIndex]
     if (!activeQuestion || fetchedRef.current.has(activeQuestion.id)) return
 
@@ -64,7 +63,7 @@ export default function QuizQuestionView() {
 
   if (!currentQuiz) return null
 
-  const questions = currentQuiz.questionsData as any as QuizQuestion[]
+  const questions = currentQuiz.questionsData
   const currentQuestion = questions[currentQuestionIndex]
   const totalQuestions = getTotalQuestions()
   const selectedAnswer = answers[currentQuestion.id]
@@ -72,7 +71,7 @@ export default function QuizQuestionView() {
   const questionSources = sourcesByQuestion[currentQuestion.id] ?? []
 
   const handleSelectAnswer = (answerIndex: number) => {
-    // 查看详情模式下不允许修改答案
+    // Answers cannot be changed in review mode
     if (isReviewMode) return
 
     if (!showExplanation) {
@@ -88,7 +87,7 @@ export default function QuizQuestionView() {
         setShowExplanation(false)
       }
     } else {
-      // 最后一题，显示结果
+      // Last question: show results
       setResultMode(true)
     }
   }
@@ -107,7 +106,7 @@ export default function QuizQuestionView() {
   return (
     <div className="h-full flex flex-col p-8">
       <div className="w-full flex flex-col gap-6 h-full">
-        {/* 头部 */}
+        {/* Header */}
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-semibold text-foreground">
             {t('question')} {currentQuestionIndex + 1}/{totalQuestions}
@@ -118,14 +117,14 @@ export default function QuizQuestionView() {
           </Button>
         </div>
 
-        {/* 内容区域 */}
+        {/* Content area */}
         <div className="flex-1 overflow-auto flex flex-col gap-6">
-          {/* 题目文本 */}
+          {/* Question text */}
           <p className="text-lg leading-relaxed font-medium text-foreground">
             {currentQuestion.questionText}
           </p>
 
-          {/* 选项列表 */}
+          {/* Option list */}
           <div className="flex flex-col gap-3">
             {currentQuestion.options.map((option, index) => {
               const isSelected = selectedAnswer === index
@@ -137,7 +136,7 @@ export default function QuizQuestionView() {
                   key={index}
                   className={cn(
                     'flex items-center gap-4 p-4 rounded-lg border transition-colors',
-                    // 查看详情模式：禁用点击
+                    // Review mode: disable clicks
                     isReviewMode ? 'cursor-default' : 'cursor-pointer',
                     isSelected && !showResult && 'border-primary bg-primary/5',
                     showResult &&
@@ -166,7 +165,7 @@ export default function QuizQuestionView() {
             })}
           </div>
 
-          {/* 提示（可折叠） */}
+          {/* Hint (collapsible) */}
           {showHint && (
             <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
               <div className="flex items-start gap-2">
@@ -180,7 +179,7 @@ export default function QuizQuestionView() {
             </div>
           )}
 
-          {/* 答案解释（答题后或查看详情时显示） */}
+          {/* Answer explanation (shown after answering or in review mode) */}
           {shouldShowExplanation && selectedAnswer !== undefined && (
             <div
               className={cn(
@@ -245,7 +244,7 @@ export default function QuizQuestionView() {
           )}
         </div>
 
-        {/* 底部按钮 */}
+        {/* Bottom buttons */}
         <div
           className={cn(
             'pt-6 border-t',

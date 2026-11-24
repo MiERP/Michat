@@ -30,7 +30,9 @@ describe('PdfLoader main-process compatibility', () => {
       const { PdfLoader } = await import('../src/main/services/loaders/PdfLoader')
       const loader = new PdfLoader()
 
-      await expect(loader.loadFromBuffer(Buffer.from('not a pdf'))).rejects.toThrow('Failed to parse PDF')
+      await expect(loader.loadFromBuffer(Buffer.from('not a pdf'))).rejects.toThrow(
+        'Failed to parse PDF'
+      )
       expect(globalThis.DOMMatrix).toBeTypeOf('function')
     } finally {
       if (originalDomMatrix) {

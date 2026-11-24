@@ -1,6 +1,6 @@
 import type Store from 'electron-store'
-import type { ProviderConfig } from './types'
-import type { PublicProviderConfig } from '../../shared/types'
+import type { ProviderConfig, StoreSchema } from './types'
+import type { Model, PublicProviderConfig } from '../../shared/types'
 import { enrichModelsWithType } from '../../shared/utils/modelClassifier'
 import {
   encryptProviderConfig,
@@ -24,17 +24,17 @@ function toPublicProvider(provider: ProviderConfig): PublicProviderConfig {
 }
 
 /**
- * 提供商配置管理器
+ * Provider configuration manager
  */
 export class ProviderConfigManager {
-  private getStore: () => Promise<Store<any>>
+  private getStore: () => Promise<Store<StoreSchema>>
 
-  constructor(getStore: () => Promise<Store<any>>) {
+  constructor(getStore: () => Promise<Store<StoreSchema>>) {
     this.getStore = getStore
   }
 
   /**
-   * 保存提供商配置（自动加密敏感字段）
+   * Saves a provider configuration (sensitive fields are encrypted automatically)
    *
    * The renderer never receives the stored key, so a save that omits apiKey
    * keeps the existing encrypted value. `clearApiKey` is the explicit way to
@@ -42,7 +42,7 @@ export class ProviderConfigManager {
    */
   async saveProviderConfig(
     providerName: string,
-    config: Record<string, any>,
+    config: Record<string, unknown>,
     enabled: boolean,
     options: { clearApiKey?: boolean } = {}
   ): Promise<{ encrypted: boolean }> {
@@ -50,7 +50,7 @@ export class ProviderConfigManager {
     const providers = store.get('providers', {})
     const existing = providers[providerName] as ProviderConfig | undefined
 
-    const nextConfig: Record<string, any> = { ...config }
+    const nextConfig: Record<string, unknown> = { ...config }
     let carriedEncryptedKey = false
 
     if (options.clearApiKey) {
@@ -64,7 +64,7 @@ export class ProviderConfigManager {
       }
     }
 
-    // 加密敏感字段（如 apiKey）. A key carried over from the store is already
+    // Encrypt sensitive fields (such as apiKey). A key carried over from the store is already
     // encrypted; re-encrypting it would double-encrypt the ciphertext.
     let encryptedConfig = nextConfig
     if (nextConfig.apiKey && !carriedEncryptedKey && isEncryptionAvailable()) {
@@ -90,7 +90,7 @@ export class ProviderConfigManager {
   }
 
   /**
-   * 获取提供商配置（自动解密敏感字段）
+   * Returns a provider configuration (sensitive fields are decrypted automatically)
    */
   async getProviderConfig(providerName: string): Promise<ProviderConfig | null> {
     const store = await this.getStore()
@@ -101,7 +101,7 @@ export class ProviderConfigManager {
       return null
     }
 
-    // 解密敏感字段
+    // Decrypt the sensitive fields
     const decryptedConfig = decryptProviderConfig(providerConfig.config)
 
     return {
@@ -111,14 +111,14 @@ export class ProviderConfigManager {
   }
 
   /**
-   * 获取所有提供商配置（自动解密敏感字段）
+   * Returns every provider configuration (sensitive fields are decrypted automatically)
    */
   async getAllProviderConfigs(): Promise<ProviderConfig[]> {
     const store = await this.getStore()
     const providers = store.get('providers', {})
 
-    // 解密每个配置
-    return Object.values(providers).map((providerConfig: any) => ({
+    // Decrypt each configuration
+    return Object.values(providers).map((providerConfig) => ({
       ...providerConfig,
       config: decryptProviderConfig(providerConfig.config)
     }))
@@ -140,7 +140,7 @@ export class ProviderConfigManager {
   }
 
   /**
-   * 删除提供商配置
+   * Deletes a provider configuration
    */
   async deleteProviderConfig(providerName: string): Promise<void> {
     const store = await this.getStore()
@@ -150,7 +150,7 @@ export class ProviderConfigManager {
   }
 
   /**
-   * 监听提供商配置变化
+   * Listens for provider configuration changes
    */
   async onProvidersChange(
     callback: (
@@ -167,9 +167,9 @@ export class ProviderConfigManager {
   }
 
   /**
-   * 保存提供商模型列表
+   * Saves the model list for a provider
    */
-  async saveProviderModels(providerName: string, models: any[]): Promise<void> {
+  async saveProviderModels(providerName: string, models: Model[]): Promise<void> {
     const store = await this.getStore()
     const modelsData = store.get('models', {})
 
@@ -181,16 +181,16 @@ export class ProviderConfigManager {
   }
 
   /**
-   * 获取提供商模型列表（带向后兼容）
+   * Returns the model list for a provider (with backward compatibility)
    */
-  async getProviderModels(providerName: string): Promise<any[]> {
+  async getProviderModels(providerName: string): Promise<Model[]> {
     const store = await this.getStore()
     const modelsData = store.get('models', {})
     const providerModels = modelsData[providerName]
 
     let models = providerModels?.models || []
 
-    // 向后兼容：如果模型没有 type 字段，自动添加
+    // Backward compatibility: add a type field automatically when a model lacks one
     const hasTypeField = models.length > 0 && models.some((m) => m.type)
 
     if (!hasTypeField && models.length > 0) {
@@ -198,7 +198,7 @@ export class ProviderConfigManager {
         `[ProviderConfigManager] Migrating models for ${providerName} - adding type field`
       )
       models = enrichModelsWithType(models)
-      // 更新存储
+      // Update the store
       await this.saveProviderModels(providerName, models)
     }
 

@@ -10,7 +10,7 @@ interface I18nStore {
 }
 
 export const useI18nStore = create<I18nStore>((set) => {
-  // 设置监听器（只设置一次）
+  // Set up the listener (only once)
   if (typeof window !== 'undefined' && window.api) {
     window.api.settings.onSettingsChange((newSettings) => {
       const newLanguage = newSettings.language
@@ -35,9 +35,9 @@ export const useI18nStore = create<I18nStore>((set) => {
 
     changeLanguage: async (language) => {
       try {
-        // 先更新 UI
+        // Update the UI first
         set({ language })
-        // 然后保存到 electron-store
+        // Then persist to electron-store
         await window.api.settings.set('language', language)
       } catch (error) {
         console.error('Failed to save language:', error)

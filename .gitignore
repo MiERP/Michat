@@ -20,6 +20,9 @@ src/main/config/key-mi.lic
 # Testing
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
+blob-report/
 
 # IDE
 .idea/

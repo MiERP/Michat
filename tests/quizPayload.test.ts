@@ -22,7 +22,8 @@ describe('parseQuizPayload', () => {
   })
 
   it('repairs trailing commas', () => {
-    const raw = '{"questions":[{"id":"q1","questionText":"A?","options":["a","b","c","d"],"correctAnswer":0},],}'
+    const raw =
+      '{"questions":[{"id":"q1","questionText":"A?","options":["a","b","c","d"],"correctAnswer":0},],}'
     const parsed = parseQuizPayload(raw) as { questions: unknown[] }
     expect(parsed.questions).toHaveLength(1)
   })

@@ -46,6 +46,9 @@ jobs:
       - name: Encoding check
         run: pnpm check:encoding
 
+      - name: CJK check
+        run: pnpm check:cjk
+
       - name: Migration snapshots
         run: pnpm check:migrations
 
@@ -57,3 +60,13 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # Fresh clones have no runtime binaries/models (they are gitignored), so
+      # CI validates the model-less packaging path and the asar contents.
+      - name: Package smoke (Windows)
+        if: runner.os == 'Windows'
+        run: pnpm package:ci
+
+      - name: E2E smoke (Windows)
+        if: runner.os == 'Windows'
+        run: pnpm test:e2e

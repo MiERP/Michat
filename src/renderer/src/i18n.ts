@@ -1,14 +1,14 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 
-// 导入所有语言资源
-import zhCNCommon from './locales/vi-VN/common.json'
-import zhCNChat from './locales/vi-VN/chat.json'
-import zhCNSettings from './locales/vi-VN/settings.json'
-import zhCNNotebook from './locales/vi-VN/notebook.json'
-import zhCNUI from './locales/vi-VN/ui.json'
-import zhCNQuiz from './locales/vi-VN/quiz.json'
-import zhCNShortcuts from './locales/vi-VN/shortcuts.json'
+// Import all language resources
+import viVNCommon from './locales/vi-VN/common.json'
+import viVNChat from './locales/vi-VN/chat.json'
+import viVNSettings from './locales/vi-VN/settings.json'
+import viVNNotebook from './locales/vi-VN/notebook.json'
+import viVNUI from './locales/vi-VN/ui.json'
+import viVNQuiz from './locales/vi-VN/quiz.json'
+import viVNShortcuts from './locales/vi-VN/shortcuts.json'
 
 import enUSCommon from './locales/en-US/common.json'
 import enUSChat from './locales/en-US/chat.json'
@@ -20,13 +20,13 @@ import enUSShortcuts from './locales/en-US/shortcuts.json'
 
 const resources = {
   'vi-VN': {
-    common: zhCNCommon,
-    chat: zhCNChat,
-    settings: zhCNSettings,
-    notebook: zhCNNotebook,
-    ui: zhCNUI,
-    quiz: zhCNQuiz,
-    shortcuts: zhCNShortcuts
+    common: viVNCommon,
+    chat: viVNChat,
+    settings: viVNSettings,
+    notebook: viVNNotebook,
+    ui: viVNUI,
+    quiz: viVNQuiz,
+    shortcuts: viVNShortcuts
   },
   'en-US': {
     common: enUSCommon,
@@ -40,13 +40,13 @@ const resources = {
 }
 
 i18n
-  .use(initReactI18next) // 将 i18n 实例传递给 react-i18next
+  .use(initReactI18next) // Pass the i18n instance to react-i18next
   .init({
     resources,
-    lng: 'vi-VN', // 默认语言
+    lng: 'vi-VN', // Default language
     fallbackLng: 'vi-VN',
     interpolation: {
-      escapeValue: false // React 已经默认转义了
+      escapeValue: false // React escapes by default
     },
     react: {
       useSuspense: false

@@ -1,4 +1,3 @@
-/* eslint-disable no-irregular-whitespace */
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
@@ -13,7 +12,7 @@ let sqlite: Database.Database | null = null
 let db: ReturnType<typeof drizzle> | null = null
 let checkpointTimer: NodeJS.Timeout | null = null
 let truncateTimer: NodeJS.Timeout | null = null
-let isClosing = false // 防止重复关闭
+let isClosing = false // guard against double close
 let vectorIndexRebuilt = false
 
 /**
@@ -39,34 +38,34 @@ export function wasVectorIndexRebuilt(): boolean {
 }
 
 /**
- * 初始化数据库连接
- * 在 Electron 主进程的 app.whenReady() 中调用
+ * Initializes the database connection.
+ * Call inside app.whenReady() in the Electron main process.
  */
 export function initDatabase() {
   if (db && sqlite?.open) return db
   isClosing = false
   vectorIndexRebuilt = false
-  // 数据库文件存放在用户数据目录
+  // Database file lives in the user data directory
   const dbPath = join(app.getPath('userData'), 'michat.db')
 
   console.log('[Database] Initializing database at:', dbPath)
 
   try {
-    // 创建 SQLite 数据库实例
+    // Create the SQLite database instance
     sqlite = new Database(dbPath)
 
-    // 加载 sqlite-vec 扩展
+    // Load the sqlite-vec extension
     if (app.isPackaged) {
-      // 打包环境：手动构建到 .asar.unpacked 的路径
+      // Packaged build: manually resolve the .asar.unpacked path
       const platform = process.platform
       const arch = process.arch
 
-      // 映射平台和架构名称
+      // Map platform and architecture names
       const platformName = platform === 'win32' ? 'windows' : platform
       const packageName = `sqlite-vec-${platformName}-${arch}`
       const extension = platform === 'win32' ? 'dll' : platform === 'darwin' ? 'dylib' : 'so'
 
-      // 构建到解包目录的路径
+      // Build the path inside the unpacked directory
       const vecPath = join(
         process.resourcesPath,
         'app.asar.unpacked',
@@ -78,18 +77,18 @@ export function initDatabase() {
       console.log('[Database] Loading sqlite-vec from:', vecPath)
       sqlite.loadExtension(vecPath)
     } else {
-      // 开发环境：使用 sqlite-vec 默认加载
+      // Development: let sqlite-vec load with its defaults
       sqliteVec.load(sqlite)
     }
     console.log('[Database] sqlite-vec extension loaded')
 
-    // 验证 sqlite-vec 版本
+    // Verify the sqlite-vec version
     const vecVersion = sqlite.prepare('SELECT vec_version() as version').get() as {
       version: string
     }
     console.log('[Database] sqlite-vec version:', vecVersion?.version)
 
-    // 启用 WAL 模式以提高性能
+    // Enable WAL mode for better performance
     sqlite.pragma('journal_mode = WAL')
 
     // Explicitly enforce the schema's ON DELETE CASCADE relationships.
@@ -98,12 +97,12 @@ export function initDatabase() {
     // Overwrite deleted rows instead of leaving old content in free pages.
     sqlite.pragma('secure_delete = ON')
 
-    // 优化 WAL 配置
-    sqlite.pragma('wal_autocheckpoint = 100') // 每 100 页自动 checkpoint（降低默认值）
-    sqlite.pragma('synchronous = NORMAL') // WAL 模式推荐设置
-    sqlite.pragma('busy_timeout = 5000') // 5 秒超时，防止并发冲突
+    // Tune the WAL configuration
+    sqlite.pragma('wal_autocheckpoint = 100') // auto-checkpoint every 100 pages (lowered from the default)
+    sqlite.pragma('synchronous = NORMAL') // recommended setting for WAL mode
+    sqlite.pragma('busy_timeout = 5000') // 5-second timeout to avoid lock contention
 
-    // 记录当前配置
+    // Log the current configuration
     const journalMode = sqlite.pragma('journal_mode', { simple: true })
     const walCheckpoint = sqlite.pragma('wal_autocheckpoint', { simple: true })
     const syncMode = sqlite.pragma('synchronous', { simple: true })
@@ -113,10 +112,10 @@ export function initDatabase() {
       synchronous: syncMode
     })
 
-    // 创建 Drizzle 实例
+    // Create the Drizzle instance
     db = drizzle(sqlite, { schema })
 
-    // 数据库完整性检查
+    // Database integrity check
     const integrityCheck = sqlite.pragma('integrity_check', { simple: true })
     if (integrityCheck !== 'ok') {
       console.error('[Database] Integrity check failed:', integrityCheck)
@@ -124,7 +123,7 @@ export function initDatabase() {
       console.log('[Database] Integrity check passed')
     }
 
-    // 启动定期 checkpoint 机制
+    // Start the periodic checkpoint mechanism
     startPeriodicCheckpoint(dbPath)
 
     console.log('[Database] Database initialized successfully')
@@ -136,12 +135,12 @@ export function initDatabase() {
 }
 
 /**
- * 启动定期 checkpoint 机制
+ * Starts the periodic checkpoint mechanism
  */
 function startPeriodicCheckpoint(dbPath: string) {
   const walPath = `${dbPath}-wal`
 
-  // 每 30 秒检查 WAL 文件大小并执行 PASSIVE checkpoint
+  // Every 30 seconds, check the WAL file size and run a PASSIVE checkpoint
   checkpointTimer = setInterval(async () => {
     try {
       if (!sqlite || isClosing) return
@@ -159,11 +158,11 @@ function startPeriodicCheckpoint(dbPath: string) {
     } catch (error) {
       console.error('[Database] Error during periodic checkpoint:', error)
     }
-  }, 30000) // 30 ç§’
+  }, 30000) // 30 seconds
 
-  checkpointTimer.unref() // 不阻止进程退出
+  checkpointTimer.unref() // do not keep the process alive
 
-  // 每 5 分钟执行一次 TRUNCATE checkpoint，清理 WAL 文件
+  // Every 5 minutes, run a TRUNCATE checkpoint to shrink the WAL file
   truncateTimer = setInterval(() => {
     try {
       if (!sqlite || isClosing) return
@@ -174,13 +173,13 @@ function startPeriodicCheckpoint(dbPath: string) {
     } catch (error) {
       console.error('[Database] Error during truncate checkpoint:', error)
     }
-  }, 300000) // 5 分钟
+  }, 300000) // 5 minutes
 
   truncateTimer.unref()
 }
 
 /**
- * 执行主动 checkpoint（供外部调用）
+ * Runs an explicit checkpoint (for external callers)
  */
 export function executeCheckpoint(mode: 'PASSIVE' | 'FULL' | 'RESTART' | 'TRUNCATE' = 'PASSIVE') {
   if (!sqlite) return
@@ -209,16 +208,16 @@ export function vacuumDatabase(): void {
 }
 
 /**
- * 运行数据库迁移
- * 在初始化数据库后立即调用
+ * Runs database migrations.
+ * Call immediately after initializing the database.
  */
 export function runMigrations() {
   if (!db) {
     throw new Error('[Database] Database not initialized. Call initDatabase() first.')
   }
 
-  // __dirname 在编译后指向 out/main（所有代码打包到 out/main/index.js）
-  // 而 migrations 文件被复制到 out/main/db/migrations
+  // After compilation __dirname points to out/main (all code is bundled into out/main/index.js)
+  // while the migrations files are copied to out/main/db/migrations
   const builtMigrationsFolder = join(__dirname, 'db', 'migrations')
   const sourceMigrationsFolder = join(__dirname, 'migrations')
   const migrationsFolder = existsSync(builtMigrationsFolder)
@@ -236,9 +235,9 @@ export function runMigrations() {
 }
 
 /**
- * 初始化扩展表（向量检索 + 全文检索）
- * 创建 sqlite-vec 的 vec0 虚拟表和 FTS5 虚拟表
- * 在 runMigrations 后调用
+ * Initializes the extension tables (vector search + full-text search).
+ * Creates the sqlite-vec vec0 virtual table and the FTS5 virtual table.
+ * Call after runMigrations.
  */
 export function initExtensions() {
   if (!sqlite) {
@@ -248,8 +247,8 @@ export function initExtensions() {
   console.log('[Database] Initializing extension tables (Vector + FTS)...')
 
   try {
-    // 1. 创建向量索引虚拟表（如果不存在）
-    // 使用 cosine 距离度量，1024 维度（BAAI/bge-m3 默认维度）
+    // 1. Create the vector index virtual table (if it does not exist)
+    // Uses cosine distance with 1024 dimensions (the BAAI/bge-m3 default)
     sqlite.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
         embedding_id TEXT PRIMARY KEY,
@@ -303,8 +302,8 @@ export function initExtensions() {
       );
     `)
 
-    // 2. 创建 FTS5 全文索引虚拟表（如果不存在）
-    // tokenize="unicode61" 支持基础的多语言分词
+    // 2. Create the FTS5 full-text index virtual table (if it does not exist)
+    // tokenize="unicode61" provides basic multilingual tokenization
     sqlite.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
         chunk_id UNINDEXED,
@@ -322,8 +321,8 @@ export function initExtensions() {
 }
 
 /**
- * 获取数据库实例
- * 在需要执行数据库操作时调用
+ * Returns the database instance.
+ * Call when a database operation is needed.
  */
 export function getDatabase() {
   if (!db) {
@@ -333,8 +332,8 @@ export function getDatabase() {
 }
 
 /**
- * 优雅关闭数据库连接
- * 在 Electron app.on('before-quit') 中调用
+ * Closes the database connection gracefully.
+ * Call inside Electron's app.on('before-quit').
  */
 export function closeDatabase() {
   if (isClosing || !sqlite) {
@@ -346,7 +345,7 @@ export function closeDatabase() {
   console.log('[Database] Starting graceful database closure...')
 
   try {
-    // 清除定时器
+    // Clear the timers
     if (checkpointTimer) {
       clearInterval(checkpointTimer)
       checkpointTimer = null
@@ -356,12 +355,12 @@ export function closeDatabase() {
       truncateTimer = null
     }
 
-    // 执行最终 checkpoint，强制合并所有 WAL 数据到主数据库
+    // Run a final checkpoint to force all WAL data into the main database
     console.log('[Database] Executing final RESTART checkpoint before closing...')
     const checkpointResult = sqlite.pragma('wal_checkpoint(RESTART)')
     console.log('[Database] Final checkpoint result:', checkpointResult)
 
-    // 关闭数据库连接
+    // Close the database connection
     sqlite.close()
     console.log('[Database] Database connection closed successfully')
 
@@ -369,18 +368,18 @@ export function closeDatabase() {
     db = null
   } catch (error) {
     console.error('[Database] Error during database closure:', error)
-    // 即使出错也要清理引用
+    // Clear references even when an error occurred
     sqlite = null
     db = null
   }
 }
 
 /**
- * 获取原始 SQLite 实例（用于 pragma 等操作）
+ * Returns the raw SQLite instance (for pragma calls and similar operations)
  */
 export function getSqlite() {
   return sqlite
 }
 
-// 导出类型供其他模块使用
+// Export the type for other modules
 export type Database = NonNullable<typeof db>

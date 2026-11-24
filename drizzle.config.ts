@@ -1,17 +1,17 @@
 import type { Config } from 'drizzle-kit'
 
 export default {
-  // 数据库类型
+  // Database dialect
   dialect: 'sqlite',
 
-  // Schema 文件位置
+  // Schema file location
   schema: './src/main/db/schema.ts',
 
-  // 迁移文件输出目录
+  // Migration output directory
   out: './src/main/db/migrations',
 
-  // 开发时数据库文件路径（用于 drizzle-kit push）
-  // 生产环境的路径在运行时由 Electron app.getPath('userData') 决定
+  // Development database file path (used by drizzle-kit push)
+  // The production path is determined at runtime by Electron app.getPath('userData')
   dbCredentials: {
     url: './michat.db'
   }

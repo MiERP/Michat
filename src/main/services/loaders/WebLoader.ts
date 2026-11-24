@@ -1,6 +1,6 @@
 /**
  * WebLoader
- * 使用 @mozilla/readability 智能提取网页正文
+ * Uses @mozilla/readability to intelligently extract web page body content
  */
 
 import { readFile } from 'fs/promises'
@@ -12,8 +12,8 @@ import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
 
 /**
- * 网页加载器
- * 基于 Mozilla Readability（Firefox Reader View）
+ * Web page loader
+ * Based on Mozilla Readability (Firefox Reader View)
  */
 export class WebLoader implements IDocumentLoader {
   readonly supportedMimeTypes = ['text/html', 'application/xhtml+xml']
@@ -22,7 +22,7 @@ export class WebLoader implements IDocumentLoader {
   private turndownService: TurndownService
 
   constructor() {
-    // 初始化 HTML 转 Markdown 服务
+    // Initialize the HTML-to-Markdown service
     this.turndownService = new TurndownService({
       headingStyle: 'atx',
       codeBlockStyle: 'fenced'
@@ -47,21 +47,21 @@ export class WebLoader implements IDocumentLoader {
     const html = buffer.toString('utf-8')
 
     try {
-      // 使用 Readability 智能提取正文
+      // Use Readability to intelligently extract the body content
       const dom = new JSDOM(html, { url: 'https://example.com' })
       const reader = new Readability(dom.window.document)
       const article = reader.parse()
 
       if (!article) {
-        // 回退：使用 cheerio 直接提取
+        // Fallback: extract directly with cheerio
         Logger.warn('WebLoader', 'Readability failed, falling back to cheerio')
         return this.fallbackParse(html, opts)
       }
 
-      // 转换为 Markdown
+      // Convert to Markdown
       const markdown = this.turndownService.turndown(article.content || '')
 
-      // 提取章节结构
+      // Extract the section structure
       const sections = opts.preserveStructure
         ? this.extractSections(article.content || '')
         : undefined
@@ -91,15 +91,15 @@ export class WebLoader implements IDocumentLoader {
   }
 
   /**
-   * 回退解析（当 Readability 失败时）
+   * Fallback parsing (when Readability fails)
    */
   private fallbackParse(html: string, opts: LoadOptions): DocumentLoadResult {
     const $ = cheerio.load(html)
 
-    // 移除脚本、样式等
+    // Remove scripts, styles, and similar elements
     $('script, style, nav, footer, aside').remove()
 
-    // 尝试找到主内容区域
+    // Try to find the main content area
     const mainContent =
       $('article').html() ||
       $('main').html() ||
@@ -110,10 +110,10 @@ export class WebLoader implements IDocumentLoader {
 
     const markdown = this.turndownService.turndown(mainContent)
 
-    // 提取标题
+    // Extract the title
     const title = $('title').text().trim() || $('h1').first().text().trim() || undefined
 
-    // 提取章节
+    // Extract sections
     const sections = opts.preserveStructure ? this.extractSections(mainContent) : undefined
 
     return {
@@ -133,7 +133,7 @@ export class WebLoader implements IDocumentLoader {
   }
 
   /**
-   * 从 HTML 中提取章节结构
+   * Extract the section structure from HTML
    */
   private extractSections(html: string): SectionInfo[] {
     const $ = cheerio.load(html)
@@ -148,7 +148,7 @@ export class WebLoader implements IDocumentLoader {
 
       if (!title) continue
 
-      // 提取该标题后直到下一个同级或更高级标题的内容
+      // Capture content after this heading up to the next same-level or higher-level heading
       let contentHtml = ''
       let nextSibling = $heading.next()
       while (nextSibling.length) {
@@ -167,7 +167,7 @@ export class WebLoader implements IDocumentLoader {
         level,
         title,
         content: contentMarkdown,
-        startOffset: 0, // HTML 中难以精确定位
+        startOffset: 0, // Precise offsets are difficult to determine in HTML
         endOffset: 0
       })
     }
@@ -176,7 +176,7 @@ export class WebLoader implements IDocumentLoader {
   }
 
   /**
-   * 构建章节层级关系
+   * Build the section hierarchy
    */
   private buildHierarchy(flatSections: SectionInfo[]): SectionInfo[] {
     const root: SectionInfo[] = []

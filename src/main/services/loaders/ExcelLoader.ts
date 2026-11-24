@@ -21,7 +21,9 @@ interface TableBlock {
 }
 
 export class ExcelLoader implements IDocumentLoader {
-  readonly supportedMimeTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+  readonly supportedMimeTypes = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ]
 
   readonly supportedExtensions = ['xlsx']
 

@@ -20,9 +20,9 @@ export default function ReasoningContent({
   const { t } = useTranslation('chat')
   const [isExpanded, setIsExpanded] = useState(false)
 
-  // 监听思考状态变化，自动控制展开/折叠
-  // 思考开始 → 自动展开
-  // 思考结束 → 自动折叠
+  // Watch thinking state changes and toggle expand/collapse automatically
+  // Thinking starts → expand automatically
+  // Thinking ends → collapse automatically
   /* eslint-disable */
   useEffect(() => {
     if (isStreaming) {
@@ -33,21 +33,21 @@ export default function ReasoningContent({
   }, [isStreaming])
   /* eslint-enable */
 
-  // 如果没有内容且不在流式传输，不显示
+  // Hide when there is no content and streaming is not active
   if (!content && !isStreaming) {
     return <></>
   }
 
   return (
     <div className="border border-border rounded-lg overflow-hidden bg-muted/30 shadow-sm">
-      {/* 头部：展开/折叠按钮 */}
+      {/* Header: expand/collapse button */}
       <Button
         onClick={() => setIsExpanded(!isExpanded)}
         variant="ghost"
         className="w-full flex items-center justify-between px-3 py-1.5 text-xs h-auto hover:bg-muted/50"
       >
         <div className="flex items-center gap-1.5">
-          {/* 思考图标 */}
+          {/* Thinking icon */}
           <svg
             className="w-3.5 h-3.5 text-muted-foreground"
             fill="none"
@@ -62,18 +62,18 @@ export default function ReasoningContent({
             />
           </svg>
 
-          {/* 标题 */}
+          {/* Title */}
           <span className="font-medium text-foreground">
             {isStreaming ? t('thinkingInProgress') : t('thinkingProcess')}
           </span>
 
-          {/* 流式传输动画 */}
+          {/* Streaming animation */}
           {isStreaming && (
             <span className="inline-block w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
           )}
         </div>
 
-        {/* 展开/折叠图标 */}
+        {/* Expand/collapse icon */}
         <svg
           className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${
             isExpanded ? 'rotate-180' : ''
@@ -86,7 +86,7 @@ export default function ReasoningContent({
         </svg>
       </Button>
 
-      {/* 内容区域：展开时显示 */}
+      {/* Content area: shown when expanded */}
       {isExpanded && (
         <div className="border-t border-border">
           <ScrollArea>
@@ -113,13 +113,13 @@ export default function ReasoningContent({
                   >
                     {content}
                   </ReactMarkdown>
-                  {/* 流式传输光标 */}
+                  {/* Streaming cursor */}
                   {isStreaming && (
                     <span className="inline-block w-2 h-3 ml-1 bg-muted-foreground/50 animate-pulse" />
                   )}
                 </div>
               ) : (
-                // 空内容时显示占位符
+                // Show placeholder when there is no content
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>{t('thinkingShort')}</span>
                   <span className="inline-block w-2 h-3 bg-muted-foreground/50 animate-pulse" />

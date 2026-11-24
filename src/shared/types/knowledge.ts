@@ -1,27 +1,27 @@
 /**
- * 知识库相关类型定义
- * 基于 Drizzle 推导的数据库 schema,确保类型定义的单一数据源
+ * Knowledge base type definitions
+ * Based on the Drizzle database schema to keep a single source of truth
  */
 
 import type { Document, Chunk } from '../../main/db/schema'
 
 /**
- * 文档类型（直接使用 Drizzle 推导的类型）
+ * Document type (uses the type inferred by Drizzle directly)
  */
 export type KnowledgeDocument = Document
 
 /**
- * 文档分块（直接使用 Drizzle 推导的类型）
+ * Document chunk (uses the type inferred by Drizzle directly)
  */
 export type KnowledgeChunk = Chunk
 
 /**
- * 文档类型枚举
+ * Document type enum
  */
 export type DocumentType = 'file' | 'note' | 'url' | 'text'
 
 /**
- * 文档状态枚举
+ * Document status enum
  */
 export type DocumentStatus = 'pending' | 'processing' | 'indexed' | 'failed'
 
@@ -46,7 +46,7 @@ export interface SearchMetadataFilter extends RetrievalScope {
 }
 
 /**
- * 搜索结果
+ * Search results
  */
 export interface KnowledgeSearchResult {
   chunkId: string
@@ -63,7 +63,7 @@ export interface KnowledgeSearchResult {
 }
 
 /**
- * 索引进度
+ * Indexing progress
  */
 export interface IndexProgress {
   notebookId?: string
@@ -73,7 +73,7 @@ export interface IndexProgress {
 }
 
 /**
- * 知识库统计
+ * Knowledge base statistics
  */
 export interface KnowledgeStats {
   documentCount: number
@@ -82,7 +82,7 @@ export interface KnowledgeStats {
 }
 
 /**
- * 添加文档选项
+ * Add document options
  */
 export interface AddDocumentOptions {
   title: string
@@ -102,7 +102,7 @@ export interface AddDocumentOptions {
 export const REQUIRED_EMBEDDING_DIMENSIONS = 1024
 
 /**
- * 搜索选项
+ * Search options
  */
 export interface SearchOptions {
   topK?: number

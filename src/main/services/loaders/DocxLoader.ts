@@ -1,7 +1,6 @@
-/* eslint-disable no-irregular-whitespace */
 /**
  * DocxLoader
- * 使用 mammoth 解析 Word 文档，并提取结构信息
+ * Parses Word documents with mammoth and extracts structure information
  */
 
 import { readFile } from 'fs/promises'

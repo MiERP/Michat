@@ -69,10 +69,7 @@ export async function validateImportableFile(
   if (extension === 'pdf' && header.toString('latin1', 0, 5) !== '%PDF-') {
     throw new Error('File content does not match the .pdf extension')
   }
-  if (
-    ['docx', 'pptx', 'xlsx'].includes(extension) &&
-    !(header[0] === 0x50 && header[1] === 0x4b)
-  ) {
+  if (['docx', 'pptx', 'xlsx'].includes(extension) && !(header[0] === 0x50 && header[1] === 0x4b)) {
     throw new Error(`File content does not match the .${extension} extension`)
   }
   if (extension === 'doc') {

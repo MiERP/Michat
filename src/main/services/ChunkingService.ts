@@ -62,15 +62,15 @@ export class ChunkingService {
       '\n\n\n', // Nhiều dòng trống (ngăn cách chương/mục)
       '\n\n', // Ngắt đoạn văn
       '\n', // Ngắt dòng
-      '。', // Dấu chấm tiếng Trung
-      '.', // Dấu chấm tiếng Anh
-      '！',
+      '\u3002', // Chinese full stop
+      '.', // English full stop
+      '\uFF01',
       '!',
-      '？',
+      '\uFF1F',
       '?',
-      '；',
+      '\uFF1B',
       ';',
-      '，',
+      '\uFF0C',
       ',',
       ' ' // Khoảng trắng (biện pháp cuối cùng)
     ]
@@ -521,7 +521,7 @@ export class ChunkingService {
    */
   private splitIntoSentences(text: string): string[] {
     // Dùng regex để nhận diện dấu kết thúc câu
-    const sentenceEndings = /([。！？.!?]+)/g
+    const sentenceEndings = /([\u3002\uFF01\uFF1F.!?]+)/g
     const parts = text.split(sentenceEndings)
     const sentences: string[] = []
 

@@ -64,7 +64,11 @@ export async function detectMachineInfo(): Promise<MachineInfo> {
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
       { windowsHide: true, encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 }
     )
-    const line = String(stdout || '').trim().split(/\r?\n/).pop() || ''
+    const line =
+      String(stdout || '')
+        .trim()
+        .split(/\r?\n/)
+        .pop() || ''
     const parts = line.split('|')
 
     return {

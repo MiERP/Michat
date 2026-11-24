@@ -1,5 +1,5 @@
 /**
- * 更新状态枚举
+ * Update status enum
  */
 export enum UpdateStatus {
   IDLE = 'idle',
@@ -12,7 +12,7 @@ export enum UpdateStatus {
 }
 
 /**
- * 更新进度
+ * Update progress
  */
 export interface UpdateProgress {
   percent: number
@@ -20,19 +20,48 @@ export interface UpdateProgress {
   total: number
 }
 
+/** A downloadable file listed in electron-updater's update metadata. */
+export interface UpdateFileInfo {
+  url: string
+  sha512?: string
+  size?: number
+  blockMapSize?: number
+  isAdminRightsRequired?: boolean
+}
+
+/** A release note entry used when electron-updater returns a changelog list. */
+export interface ReleaseNoteInfo {
+  version: string
+  note: string | null
+}
+
 /**
- * 更新状态
- * info 字段使用 any 类型以兼容 electron-updater 的 UpdateInfo
+ * Update metadata compatible with electron-updater's UpdateInfo.
+ * Only the fields this app reads are declared; electron-updater objects with
+ * additional fields remain assignable.
+ */
+export interface UpdateInfo {
+  version: string
+  files?: UpdateFileInfo[]
+  releaseName?: string | null
+  releaseNotes?: string | Array<ReleaseNoteInfo> | null
+  releaseDate?: string
+  stagingPercentage?: number
+  minimumSystemVersion?: string
+}
+
+/**
+ * Update state
  */
 export interface UpdateState {
   status: UpdateStatus
-  info?: any
+  info?: UpdateInfo
   progress?: UpdateProgress
   error?: string
 }
 
 /**
- * 更新检查结果
+ * Update check result
  */
 export interface UpdateCheckResult {
   success: boolean
@@ -41,7 +70,7 @@ export interface UpdateCheckResult {
 }
 
 /**
- * 更新操作结果
+ * Update operation result
  */
 export interface UpdateOperationResult {
   success: boolean

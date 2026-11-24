@@ -1,74 +1,111 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DocumentMetadata } from '../shared/legalMetadata'
 import type {
+  AppSettings,
+  ChatMessageErrorEvent,
   ChatMessageCreatedEvent,
+  Note,
+  Notebook,
+  ProviderConfig,
   SendMessageResult,
   ShortcutAction,
   ShortcutConfig
 } from '../shared/types'
+import type { UpdateState } from '../shared/types/update'
+import type { StreamChunk } from '../shared/types/chat'
+import type { AddDocumentOptions, IndexProgress, SearchOptions } from '../shared/types/knowledge'
 
-async function invokeWithTimeout<T>(channel: string, timeout: number, ...args: any[]): Promise<T> {
+/** Payload emitted by the main process after an incremental auto-sync run. */
+interface AutoSyncEvent {
+  documentId: string
+  documentTitle: string
+  reason: 'file-changed' | 'note-updated'
+  result?: { created: number; reused: number; removed: number }
+  error?: string
+}
+
+/** Streaming chunk payload emitted over the `message-chunk` channel. */
+interface MessageChunkEvent {
+  messageId: string
+  type: 'reasoning-start' | 'reasoning-delta' | 'reasoning-end' | 'text-delta' | 'finish'
+  content?: string
+  reasoningId?: string
+  metadata?: StreamChunk['metadata']
+}
+
+interface QuizGenerateOptions {
+  questionCount?: number
+  difficulty?: 'easy' | 'medium' | 'hard'
+  customPrompt?: string
+  documentIds?: string[]
+}
+
+async function invokeWithTimeout<T>(
+  channel: string,
+  timeout: number,
+  ...args: unknown[]
+): Promise<T> {
   return Promise.race([
     ipcRenderer.invoke(channel, ...args),
     new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`IPC调用超时: ${channel} (${timeout}ms)`)), timeout)
+      setTimeout(() => reject(new Error(`IPC call timed out: ${channel} (${timeout}ms)`)), timeout)
     )
   ])
 }
 
 // Custom APIs for renderer
 const api = {
-  // 获取平台信息
+  // Get platform information
   getPlatform: (): Promise<string> => ipcRenderer.invoke('get-platform'),
 
-  // 获取应用版本号
+  // Get the app version
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
 
-  // 许可证
-  license: {
-    getStatus: () => ipcRenderer.invoke('license:get-status')
-  },
-
-  // 在默认浏览器中打开外部链接
+  // Open an external link in the default browser
   openExternalUrl: (url: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('open-external-url', url),
 
-  // 应用设置相关
+  // App settings
   settings: {
     getAll: () => ipcRenderer.invoke('settings:getAll'),
     get: (key: string) => ipcRenderer.invoke('settings:get', { key }),
-    update: (updates: any) => ipcRenderer.invoke('settings:update', { updates }),
-    set: (key: string, value: any) => ipcRenderer.invoke('settings:set', { key, value }),
+    update: (updates: Partial<AppSettings>) => ipcRenderer.invoke('settings:update', { updates }),
+    set: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
+      ipcRenderer.invoke('settings:set', { key, value }),
     reset: () => ipcRenderer.invoke('settings:reset'),
     getDefaultPrompts: () => ipcRenderer.invoke('settings:getDefaultPrompts'),
-    // 监听设置变化
-    onSettingsChange: (callback: (newSettings: any, oldSettings: any) => void) => {
-      const listener = (_event: any, newSettings: any, oldSettings: any) =>
-        callback(newSettings, oldSettings)
+    // Listen for settings changes
+    onSettingsChange: (callback: (newSettings: AppSettings, oldSettings: AppSettings) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        newSettings: AppSettings,
+        oldSettings: AppSettings
+      ) => callback(newSettings, oldSettings)
       ipcRenderer.on('settings:changed', listener)
-      // 返回清理函数
+      // Return a cleanup function
       return () => ipcRenderer.removeListener('settings:changed', listener)
     }
   },
 
-  // Notebook 相关
+  // Notebooks
   createNotebook: (title: string, description?: string) =>
     ipcRenderer.invoke('create-notebook', { title, description }),
   getAllNotebooks: () => ipcRenderer.invoke('get-all-notebooks'),
   getNotebook: (id: string) => ipcRenderer.invoke('get-notebook', { id }),
-  updateNotebook: (id: string, updates: any) =>
+  updateNotebook: (id: string, updates: Partial<Pick<Notebook, 'title' | 'description'>>) =>
     ipcRenderer.invoke('update-notebook', { id, updates }),
   deleteNotebook: (id: string) => ipcRenderer.invoke('delete-notebook', { id }),
 
-  // Note 相关
+  // Notes
   createNote: (notebookId: string, content: string, customTitle?: string) =>
     ipcRenderer.invoke('create-note', { notebookId, title: customTitle || '', content }),
   getNotes: (notebookId: string) => ipcRenderer.invoke('get-notes', { notebookId }),
   getNote: (id: string) => ipcRenderer.invoke('get-note', { id }),
-  updateNote: (id: string, updates: any) => ipcRenderer.invoke('update-note', { id, updates }),
+  updateNote: (id: string, updates: Partial<Pick<Note, 'title' | 'content'>>) =>
+    ipcRenderer.invoke('update-note', { id, updates }),
   deleteNote: (id: string) => ipcRenderer.invoke('delete-note', { id }),
 
-  // Items 相关（统一管理笔记、题库等）
+  // Items (unified management of notes, quizzes, etc.)
   items: {
     getAll: (notebookId: string) => ipcRenderer.invoke('items:get', { notebookId }),
     updateOrder: (itemId: string, order: number) =>
@@ -79,7 +116,7 @@ const api = {
       ipcRenderer.invoke('items:delete', { itemId, deleteResource })
   },
 
-  // Chat Session 相关
+  // Chat sessions
   createChatSession: (notebookId: string, title: string) =>
     ipcRenderer.invoke('create-chat-session', { notebookId, title }),
   getChatSessions: (notebookId: string) => ipcRenderer.invoke('get-chat-sessions', { notebookId }),
@@ -89,52 +126,56 @@ const api = {
     ipcRenderer.invoke('update-session-title', { sessionId, title }),
   deleteSession: (sessionId: string) => ipcRenderer.invoke('delete-session', { sessionId }),
 
-  // Chat Message 相关
+  // Chat messages
   getMessages: (sessionId: string) => invokeWithTimeout('get-messages', 10000, { sessionId }),
-  sendMessage: (
-    sessionId: string,
-    content: string,
-    scope?: unknown
-  ): Promise<SendMessageResult> =>
-    invokeWithTimeout('send-message', 60000, { sessionId, content, scope }), // 60秒超时（流式消息可能较长）
+  sendMessage: (sessionId: string, content: string, scope?: unknown): Promise<SendMessageResult> =>
+    invokeWithTimeout('send-message', 60000, { sessionId, content, scope }), // 60s timeout (streamed messages can be long)
   abortMessage: (messageId: string) => invokeWithTimeout('abort-message', 5000, { messageId }),
 
   // Emitted as soon as the assistant placeholder row exists.
   onMessageCreated: (callback: (data: ChatMessageCreatedEvent) => void) => {
-    const listener = (_event: any, data: ChatMessageCreatedEvent) => callback(data)
+    const listener = (_event: Electron.IpcRendererEvent, data: ChatMessageCreatedEvent) =>
+      callback(data)
     ipcRenderer.on('message-created', listener)
     return () => ipcRenderer.removeListener('message-created', listener)
   },
 
-  // 流式消息监听
-  onMessageChunk: (callback: (data: any) => void) => {
-    const listener = (_event: any, data: any) => callback(data)
+  // Streaming message listeners
+  onMessageChunk: (callback: (data: MessageChunkEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: MessageChunkEvent) => callback(data)
     ipcRenderer.on('message-chunk', listener)
-    // 返回清理函数
+    // Return a cleanup function
     return () => ipcRenderer.removeListener('message-chunk', listener)
   },
 
-  onMessageError: (callback: (data: any) => void) => {
-    const listener = (_event: any, data: any) => callback(data)
+  onMessageError: (callback: (data: ChatMessageErrorEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: ChatMessageErrorEvent) =>
+      callback(data)
     ipcRenderer.on('message-error', listener)
     return () => ipcRenderer.removeListener('message-error', listener)
   },
 
-  // Session 监听
-  onSessionAutoSwitched: (callback: (data: any) => void) => {
-    const listener = (_event: any, data: any) => callback(data)
+  // Session listeners
+  onSessionAutoSwitched: (
+    callback: (data: { oldSessionId: string; newSessionId: string }) => void
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      data: { oldSessionId: string; newSessionId: string }
+    ) => callback(data)
     ipcRenderer.on('session-auto-switched', listener)
     return () => ipcRenderer.removeListener('session-auto-switched', listener)
   },
 
   // Provider config
-  saveProviderConfig: (config: any) => invokeWithTimeout('save-provider-config', 5000, config),
+  saveProviderConfig: (config: ProviderConfig & { clearApiKey?: boolean }) =>
+    invokeWithTimeout('save-provider-config', 5000, config),
   getProviderConfig: (providerName: string) =>
     ipcRenderer.invoke('get-provider-config', { providerName }),
   getAllProviderConfigs: () => ipcRenderer.invoke('get-all-provider-configs'),
   deleteProviderConfig: (providerName: string) =>
     ipcRenderer.invoke('delete-provider-config', { providerName }),
-  validateProviderConfig: (providerName: string, config: any) =>
+  validateProviderConfig: (providerName: string, config: ProviderConfig['config']) =>
     invokeWithTimeout('validate-provider-config', 15000, { providerName, config }),
   fetchModels: (providerName: string, apiKey: string) =>
     invokeWithTimeout('fetch-models', 15000, { providerName, apiKey }),
@@ -158,10 +199,10 @@ const api = {
     getServerInfo: () => ipcRenderer.invoke('llama:get-server-info')
   },
 
-  // Knowledge 知识库相关
+  // Knowledge base
   knowledge: {
-    // 添加文档
-    addDocument: (notebookId: string, options: any) =>
+    // Add a document
+    addDocument: (notebookId: string, options: AddDocumentOptions) =>
       ipcRenderer.invoke('knowledge:add-document', { notebookId, options }),
     addDocumentFromFile: (notebookId: string, filePath: string) =>
       ipcRenderer.invoke('knowledge:add-document-from-file', { notebookId, filePath }),
@@ -172,11 +213,11 @@ const api = {
     addNote: (notebookId: string, noteId: string) =>
       ipcRenderer.invoke('knowledge:add-note', { notebookId, noteId }),
 
-    // 搜索
-    search: (notebookId: string, query: string, options?: any) =>
+    // Search
+    search: (notebookId: string, query: string, options?: SearchOptions) =>
       ipcRenderer.invoke('knowledge:search', { notebookId, query, options }),
 
-    // 文档管理
+    // Document management
     getDocuments: (notebookId: string) =>
       ipcRenderer.invoke('knowledge:get-documents', { notebookId }),
     getDocument: (documentId: string) =>
@@ -204,36 +245,37 @@ const api = {
     refreshDocumentMetadata: (documentId: string) =>
       ipcRenderer.invoke('knowledge:refresh-document-metadata', { documentId }),
 
-    // 统计
+    // Statistics
     getStats: (notebookId: string) => ipcRenderer.invoke('knowledge:get-stats', { notebookId }),
 
     // Kiểm tra số chiều embedding trước khi giữ lựa chọn model mới
     probeEmbeddingDimensions: () => ipcRenderer.invoke('knowledge:probe-embedding-dimensions'),
 
-    // 文件选择
+    // File selection
     selectFiles: () => ipcRenderer.invoke('knowledge:select-files'),
     selectFolder: () => ipcRenderer.invoke('knowledge:select-folder'),
 
-    // 打开源文件
+    // Open the source file
     openSource: (documentId: string) => ipcRenderer.invoke('knowledge:open-source', { documentId }),
 
-    // 进度监听
-    onIndexProgress: (callback: (data: any) => void) => {
-      const listener = (_event: any, data: any) => callback(data)
+    // Progress listener
+    onIndexProgress: (callback: (data: IndexProgress) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: IndexProgress) => callback(data)
       ipcRenderer.on('knowledge:index-progress', listener)
       return () => ipcRenderer.removeListener('knowledge:index-progress', listener)
     },
 
-    // 自动同步监听（watcher 触发的增量 reindex）
-    onAutoSynced: (callback: (data: any) => void) => {
-      const listener = (_event: any, data: any) => callback(data)
+    // Auto-sync listener (incremental reindex triggered by the watcher)
+    onAutoSynced: (callback: (data: AutoSyncEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: AutoSyncEvent) => callback(data)
       ipcRenderer.on('knowledge:auto-synced', listener)
       return () => ipcRenderer.removeListener('knowledge:auto-synced', listener)
     },
 
-    // 监听 tài liệu mới được nạp vào KB
+    // Listen for newly loaded documents in the KB
     onDocumentsChanged: (callback: (data: { notebookId: string }) => void) => {
-      const listener = (_event: any, data: any) => callback(data)
+      const listener = (_event: Electron.IpcRendererEvent, data: { notebookId: string }) =>
+        callback(data)
       ipcRenderer.on('knowledge:documents-changed', listener)
       return () => ipcRenderer.removeListener('knowledge:documents-changed', listener)
     },
@@ -249,42 +291,48 @@ const api = {
       ipcRenderer.invoke('knowledge:generate-links', { documentId })
   },
 
-  // Quiz 答题相关
+  // Quiz
   quiz: {
-    // 生成题目
-    generate: (notebookId: string, options?: any) =>
+    // Generate questions
+    generate: (notebookId: string, options?: QuizGenerateOptions) =>
       ipcRenderer.invoke('quiz:generate', { notebookId, options }),
-    // 获取最新题库
+    // Get the latest quiz
     getLatest: (notebookId: string) => ipcRenderer.invoke('quiz:get-latest', { notebookId }),
-    // 获取题库详情
+    // Get quiz details
     get: (quizId: string) => ipcRenderer.invoke('quiz:get', { quizId }),
-    // 提交答题会话
+    // Submit an answer session
     submitSession: (quizId: string, answers: Record<string, number>) =>
       ipcRenderer.invoke('quiz:submit-session', { quizId, answers }),
-    // 获取答题会话
+    // Get an answer session
     getSession: (sessionId: string) => ipcRenderer.invoke('quiz:get-session', { sessionId }),
-    // 获取 nguồn chunk của một câu hỏi
+    // Get the source chunks for a question
     getQuestionChunks: (quizId: string, questionId: string) =>
       ipcRenderer.invoke('quiz:get-question-chunks', { quizId, questionId }),
-    // 更新题库
+    // Update the quiz
     update: (quizId: string, updates: { title?: string }) =>
       ipcRenderer.invoke('quiz:update', { quizId, updates }),
-    // 删除题库
+    // Delete the quiz
     delete: (quizId: string) => ipcRenderer.invoke('quiz:delete', { quizId }),
-    // 打开答题窗口
+    // Open the quiz window
     openWindow: (notebookId: string, quizId?: string) =>
       ipcRenderer.invoke('quiz:open-window', { notebookId, quizId }),
-    // 监听生成进度
+    // Listen for generation progress
     onProgress: (
       callback: (data: { notebookId: string; stage: string; progress: number }) => void
     ) => {
-      const listener = (_event: any, data: any) => callback(data)
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { notebookId: string; stage: string; progress: number }
+      ) => callback(data)
       ipcRenderer.on('quiz:progress', listener)
       return () => ipcRenderer.removeListener('quiz:progress', listener)
     },
-    // 监听生成 kết thúc (thành công hoặc thất bại) để refresh danh sách
+    // Listen for generation completion (success or failure) to refresh the list
     onGenerated: (callback: (data: { notebookId: string; quizId?: string }) => void) => {
-      const listener = (_event: any, data: any) => callback(data)
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { notebookId: string; quizId?: string }
+      ) => callback(data)
       ipcRenderer.on('quiz:generated', listener)
       return () => ipcRenderer.removeListener('quiz:generated', listener)
     }
@@ -308,19 +356,19 @@ const api = {
     }
   },
 
-  // 应用更新相关
+  // App updates
   update: {
-    // 检查更新
+    // Check for updates
     check: () => ipcRenderer.invoke('update:check'),
-    // 下载更新
+    // Download an update
     download: () => ipcRenderer.invoke('update:download'),
-    // 安装更新（退出并安装）
+    // Install the update (quit and install)
     install: () => ipcRenderer.invoke('update:install'),
-    // 获取当前更新状态
+    // Get the current update state
     getState: () => ipcRenderer.invoke('update:get-state'),
-    // 监听更新状态变化
-    onStateChanged: (callback: (state: any) => void) => {
-      const listener = (_event: any, state: any) => callback(state)
+    // Listen for update state changes
+    onStateChanged: (callback: (state: UpdateState) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: UpdateState) => callback(state)
       ipcRenderer.on('update:state-changed', listener)
       return () => ipcRenderer.removeListener('update:state-changed', listener)
     }

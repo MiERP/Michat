@@ -1,6 +1,33 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
+import type { Database } from '../../src/main/db'
+import type {
+  DocumentStructureLike,
+  KnowledgeService
+} from '../../src/main/services/KnowledgeService'
+import type { FetchResult } from '../../src/main/services/WebFetchService'
 import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+
+type DbModule = typeof import('../../src/main/db')
+type SchemaModule = typeof import('../../src/main/db/schema')
+
+type KnowledgeContext = {
+  dbModule: DbModule
+  schema: SchemaModule
+  db: Database
+  notebookId: string
+  service: KnowledgeService
+}
+
+type KnowledgeServiceInternals = {
+  webFetchService: {
+    fetchUrl: (url: string) => Promise<FetchResult>
+  }
+}
+
+type DocumentMetadataWithStructure = {
+  structure: DocumentStructureLike
+}
 
 let userDataDir = ''
 
@@ -74,7 +101,7 @@ const PRICING = [
 ].join('\n')
 
 describe('Metadata-aware hierarchical retrieval', () => {
-  let context: any
+  let context: KnowledgeContext | undefined
 
   beforeEach(async () => {
     userDataDir = await createTempUserData('michat-hier')
@@ -110,7 +137,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
   })
 
   async function seedCorpus(): Promise<{ contractId: string; pricingId: string }> {
-    const { service, notebookId } = context
+    const { service, notebookId } = context!
     const chunkOptions = { chunkSize: 120, chunkOverlap: 0, minChunkSize: 20 }
 
     const contractId = await service.addDocument(notebookId, {
@@ -130,7 +157,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
   }
 
   it('writes a document-level vector for every indexed document', async () => {
-    const { service, notebookId, dbModule } = await context
+    const { service, notebookId, dbModule } = context!
     const { contractId, pricingId } = await seedCorpus()
 
     const rows = dbModule
@@ -144,14 +171,17 @@ describe('Metadata-aware hierarchical retrieval', () => {
   })
 
   it('imports web content through canonical Markdown and structured indexes', async () => {
-    const { service, notebookId, db, schema } = await context
-    ;(service as any).webFetchService.fetchUrl = vi.fn().mockResolvedValue({
-      title: 'Hướng dẫn thanh toán',
-      description: 'Quy trình thanh toán trực tuyến',
-      url: 'https://example.com/guide',
-      mimeType: 'text/html',
-      content: '# Hướng dẫn thanh toán\n\n## Điều kiện\nKhách hàng thanh toán trong vòng mười ngày.'
-    })
+    const { service, notebookId, db, schema } = context!
+    ;(service as unknown as KnowledgeServiceInternals).webFetchService.fetchUrl = vi
+      .fn()
+      .mockResolvedValue({
+        title: 'Hướng dẫn thanh toán',
+        description: 'Quy trình thanh toán trực tuyến',
+        url: 'https://example.com/guide',
+        mimeType: 'text/html',
+        content:
+          '# Hướng dẫn thanh toán\n\n## Điều kiện\nKhách hàng thanh toán trong vòng mười ngày.'
+      })
 
     const documentId = await service.addDocumentFromUrl(notebookId, 'https://example.com/guide')
     const document = service.getDocument(documentId)
@@ -160,7 +190,8 @@ describe('Metadata-aware hierarchical retrieval', () => {
       sourceUri: 'https://example.com/guide',
       status: 'indexed'
     })
-    expect((document.metadata as any).structure.sections).toHaveLength(2)
+    const metadata = document!.metadata as unknown as DocumentMetadataWithStructure
+    expect(metadata.structure.sections).toHaveLength(2)
 
     const { eq } = await import('drizzle-orm')
     const sectionRows = db
@@ -168,12 +199,12 @@ describe('Metadata-aware hierarchical retrieval', () => {
       .from(schema.sections)
       .where(eq(schema.sections.documentId, documentId))
       .all()
-    expect(sectionRows.map((row: any) => row.title)).toContain('Điều kiện')
+    expect(sectionRows.map((row) => row.title)).toContain('Điều kiện')
     expect(service.getDocumentChunks(documentId).length).toBeGreaterThan(0)
   })
 
   it('restricts retrieval to the documents selected by the doc-level stage', async () => {
-    const { service, notebookId } = await context
+    const { service, notebookId } = context!
     const { contractId, pricingId } = await seedCorpus()
     // Truy vấn chỉ có "hợp đồng": không tài liệu nào khác khớp từ khoá,
     // nên tập tài liệu chọn ra chỉ còn "Hợp đồng ABC".
@@ -181,7 +212,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
 
     // Không bật tầng chọn tài liệu: nhánh vector vẫn trả về cả tài liệu khác
     const flatResults = await service.search(notebookId, query, { topK: 10, threshold: 0 })
-    expect(flatResults.some((result: any) => result.documentId === pricingId)).toBe(true)
+    expect(flatResults.some((result) => result.documentId === pricingId)).toBe(true)
 
     // Bật tầng chọn tài liệu: chỉ "Hợp đồng ABC" vượt ngưỡng tương đồng tài liệu
     const hierarchicalResults = await service.search(notebookId, query, {
@@ -191,11 +222,11 @@ describe('Metadata-aware hierarchical retrieval', () => {
     })
 
     expect(hierarchicalResults.length).toBeGreaterThan(0)
-    expect(hierarchicalResults.every((result: any) => result.documentId === contractId)).toBe(true)
+    expect(hierarchicalResults.every((result) => result.documentId === contractId)).toBe(true)
   })
 
   it('runs document retrieval inside an explicit hard document scope', async () => {
-    const { service, notebookId, dbModule } = await context
+    const { service, notebookId, dbModule } = context!
     const { contractId, pricingId } = await seedCorpus()
 
     // Cô lập tầng document: khi section vectors chưa phủ đủ, hệ thống phải
@@ -210,11 +241,11 @@ describe('Metadata-aware hierarchical retrieval', () => {
     })
 
     expect(results.length).toBeGreaterThan(0)
-    expect(results.every((result: any) => result.documentId === contractId)).toBe(true)
+    expect(results.every((result) => result.documentId === contractId)).toBe(true)
   })
 
   it('filters chunks by section path', async () => {
-    const { service, notebookId } = await context
+    const { service, notebookId } = context!
     await seedCorpus()
 
     const results = await service.search(notebookId, 'chấm dứt bồi thường quy định', {
@@ -230,7 +261,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
   })
 
   it('filters chunks by page range using indexed page metadata', async () => {
-    const { service, notebookId, db, schema, dbModule } = await context
+    const { service, notebookId, db, schema, dbModule } = context!
     const { contractId } = await seedCorpus()
     const { eq } = await import('drizzle-orm')
 
@@ -262,17 +293,15 @@ describe('Metadata-aware hierarchical retrieval', () => {
     })
 
     expect(results.length).toBeGreaterThan(0)
-    expect(results.map((result: any) => result.chunkId)).toEqual([
-      docChunks[docChunks.length - 1].id
-    ])
+    expect(results.map((result) => result.chunkId)).toEqual([docChunks[docChunks.length - 1].id])
   })
 
   it('expands a matched chunk to its whole section (small-to-big)', async () => {
-    const { service, notebookId } = await context
+    const { service, notebookId } = context!
     await seedCorpus()
 
     const results = await service.search(notebookId, 'chấm dứt hợp đồng', { topK: 1, threshold: 0 })
-    const result = results.find((item: any) => item.matchedContent?.includes('chấm dứt'))
+    const result = results.find((item) => item.matchedContent?.includes('chấm dứt'))
 
     expect(result).toBeTruthy()
     expect(result!.sectionPath).toContain('2. Termination')
@@ -282,7 +311,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
   })
 
   it('does not hide documents that have no document-level vector yet', async () => {
-    const { service, notebookId, dbModule } = await context
+    const { service, notebookId, dbModule } = context!
     const { contractId, pricingId } = await seedCorpus()
 
     // Mô phỏng tài liệu cũ: chunk đã có nhưng chưa có vector cấp tài liệu
@@ -295,7 +324,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
     })
 
     // Nếu vẫn giới hạn theo doc index thì tài liệu này biến mất khỏi kết quả
-    expect(results.some((result: any) => result.documentId === pricingId)).toBe(true)
+    expect(results.some((result) => result.documentId === pricingId)).toBe(true)
     expect(
       dbModule.getSqlite().prepare('SELECT count(*) as c FROM vec_documents').get()
     ).toMatchObject({ c: 1 })
@@ -303,7 +332,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
   })
 
   it('unions keyword-matched documents into the document-level selection', async () => {
-    const { service, notebookId } = await context
+    const { service, notebookId } = context!
 
     await seedCorpus()
     // Khớp TỪ KHOÁ nhưng dưới ngưỡng tương đồng tài liệu
@@ -328,7 +357,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
       threshold: 0,
       hierarchical: { enabled: true, docTopK: 4, threshold: 0.9 }
     })
-    const hierarchicalTitles = hierarchicalResults.map((result: any) => result.documentTitle)
+    const hierarchicalTitles = hierarchicalResults.map((result) => result.documentTitle)
 
     // Tầng vector chỉ chọn "Hợp đồng ABC"; BM25 cấp tài liệu kéo thêm các tài liệu
     // có chứa "quy định" (Bảng giá, Báo cáo nội bộ) vào tập đã chọn.
@@ -342,11 +371,11 @@ describe('Metadata-aware hierarchical retrieval', () => {
       topK: 10,
       threshold: 0
     })
-    expect(flatResults.map((result: any) => result.documentTitle)).toContain('Dự báo thời tiết')
+    expect(flatResults.map((result) => result.documentTitle)).toContain('Dự báo thời tiết')
   })
 
   it('keeps working when the chunk-id filter is larger than the SQL parameter limit', async () => {
-    const { service, notebookId } = await context
+    const { service, notebookId } = context!
 
     const paragraphs = Array.from(
       { length: 700 },
@@ -369,18 +398,18 @@ describe('Metadata-aware hierarchical retrieval', () => {
     })
 
     expect(results.length).toBeGreaterThan(0)
-    expect(results.every((result: any) => result.documentId === documentId)).toBe(true)
+    expect(results.every((result) => result.documentId === documentId)).toBe(true)
     // Tài liệu lớn: index + embed nhiều lô (EmbeddingService chờ giữa các lô)
   }, 60000)
 
   it('does not leak knowledge-linked chunks outside the requested document/section scope', async () => {
-    const { service, notebookId, db, schema } = await context
+    const { service, notebookId, db, schema } = context!
     const { contractId, pricingId } = await seedCorpus()
 
     const contractChunks = service.getDocumentChunks(contractId)
     const pricingChunks = service.getDocumentChunks(pricingId)
     // Chunk nằm trong mục Termination (chứa từ khoá truy vấn) và một chunk của Bảng giá.
-    const terminationChunk = contractChunks.find((chunk: any) => chunk.content.includes('chấm dứt'))
+    const terminationChunk = contractChunks.find((chunk) => chunk.content.includes('chấm dứt'))
     expect(terminationChunk).toBeTruthy()
     expect(pricingChunks.length).toBeGreaterThan(0)
 
@@ -407,7 +436,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
       topK: 10,
       threshold: 0
     })
-    expect(unscoped.some((result: any) => result.documentId === pricingId)).toBe(true)
+    expect(unscoped.some((result) => result.documentId === pricingId)).toBe(true)
 
     // Scope theo tài liệu: Bảng giá không được lọt vào dù có link tri thức.
     const docScoped = await service.search(notebookId, 'chấm dứt hợp đồng', {
@@ -416,7 +445,7 @@ describe('Metadata-aware hierarchical retrieval', () => {
       metadataFilter: { documentIds: [contractId] }
     })
     expect(docScoped.length).toBeGreaterThan(0)
-    expect(docScoped.every((result: any) => result.documentId === contractId)).toBe(true)
+    expect(docScoped.every((result) => result.documentId === contractId)).toBe(true)
 
     // Scope theo mục (sectionPath): chunk Bảng giá cũng không được lọt vào.
     const sectionScoped = await service.search(notebookId, 'chấm dứt bồi thường', {
@@ -425,13 +454,13 @@ describe('Metadata-aware hierarchical retrieval', () => {
       metadataFilter: { sectionPath: ['Termination'] }
     })
     expect(sectionScoped.length).toBeGreaterThan(0)
-    expect(
-      sectionScoped.every((result: any) => result.sectionPath.includes('2. Termination'))
-    ).toBe(true)
+    expect(sectionScoped.every((result) => result.sectionPath.includes('2. Termination'))).toBe(
+      true
+    )
   })
 
   it('writes section records, section vectors and chunk sectionId on index', async () => {
-    const { service, notebookId, db, schema, dbModule } = await context
+    const { service, notebookId, db, schema, dbModule } = context!
     const { contractId } = await seedCorpus()
 
     const sectionRows = db
@@ -441,12 +470,12 @@ describe('Metadata-aware hierarchical retrieval', () => {
       .all()
 
     // Hợp đồng ABC: 1. Phạm vi, 2. Termination, 3. Bảo mật — H1 không có body nên bỏ qua.
-    expect(sectionRows.map((row: any) => row.title).sort()).toEqual([
+    expect(sectionRows.map((row) => row.title).sort()).toEqual([
       '1. Phạm vi',
       '2. Termination',
       '3. Bảo mật'
     ])
-    for (const row of sectionRows as any[]) {
+    for (const row of sectionRows) {
       expect(row.headingPath[0]).toBe('Hợp đồng ABC')
       expect(row.content).toContain(row.title)
     }
@@ -460,16 +489,16 @@ describe('Metadata-aware hierarchical retrieval', () => {
 
     // Chunk trong mục có body được gán sectionId trỏ về section record đã tạo.
     const docChunks = service.getDocumentChunks(contractId)
-    const sectionIds = new Set(sectionRows.map((row: any) => row.id))
-    const linkedChunks = docChunks.filter((chunk: any) => chunk.sectionId)
+    const sectionIds = new Set(sectionRows.map((row) => row.id))
+    const linkedChunks = docChunks.filter((chunk) => chunk.sectionId)
     expect(linkedChunks.length).toBeGreaterThan(0)
-    for (const chunk of linkedChunks as any[]) {
+    for (const chunk of linkedChunks) {
       expect(sectionIds.has(chunk.sectionId)).toBe(true)
     }
   })
 
   it('section tier restricts chunk retrieval to sections matched at section level', async () => {
-    const { service, notebookId } = await context
+    const { service, notebookId } = context!
     const { contractId } = await seedCorpus()
 
     // Query "chấm dứt hợp đồng" chỉ khớp vector với mục Termination của Hợp đồng.
@@ -484,14 +513,14 @@ describe('Metadata-aware hierarchical retrieval', () => {
     expect(results.length).toBeGreaterThan(0)
     // Mọi kết quả phải nằm trong mục Termination của Hợp đồng — không lọt mục
     // khác hay tài liệu khác (tầng section đã thu hẹp candidate set).
-    for (const result of results as any[]) {
+    for (const result of results) {
       expect(result.documentId).toBe(contractId)
       expect(result.sectionPath).toContain('2. Termination')
     }
   })
 
   it('keeps section retrieval available when another document has stale section vectors', async () => {
-    const { service, notebookId, dbModule } = await context
+    const { service, notebookId, dbModule } = context!
     const { contractId, pricingId } = await seedCorpus()
     dbModule.getSqlite().prepare('DELETE FROM vec_sections WHERE document_id = ?').run(pricingId)
 
@@ -503,6 +532,6 @@ describe('Metadata-aware hierarchical retrieval', () => {
     })
 
     expect(results.length).toBeGreaterThan(0)
-    expect(results.every((result: any) => result.sectionPath.includes('2. Termination'))).toBe(true)
+    expect(results.every((result) => result.sectionPath.includes('2. Termination'))).toBe(true)
   })
 })

@@ -70,7 +70,7 @@
   Dependency direction: called by preload/renderer via IPC; calls services, query helpers, and Electron window APIs.
 - `Application/service orchestration layer`
   Main files/directories: `src/main/services/**`, `src/main/providers/**`
-  Responsibility: own the actual business flows: chat orchestration, retrieval, indexing, quiz/mind map generation, session rollover, updates, shortcuts, license checks, and template generation.
+  Responsibility: own the actual business flows: chat orchestration, retrieval, indexing, quiz/mind map generation, session rollover, updates, shortcuts, and template generation.
   Dependency direction: called by IPC handlers and startup bootstrap; calls persistence/config/vector store/providers/external binaries.
 - `Persistence and infrastructure layer`
   Main files/directories: `src/main/db/**`, `src/main/vectorstore/**`, `src/main/config/**`
@@ -85,7 +85,7 @@
 - `Bootstrap and window orchestration`
   - purpose: starts the Electron app, orders service initialization, registers IPC, creates the main window, and manages shutdown cleanup
   - key paths: `src/main/index.ts`, `src/main/windows/mainWindow.ts`, `src/main/windows/quizWindow.ts`, `src/main/windows/mindMapWindow.ts`
-  - depends on: DB init, provider manager, knowledge/update/shortcut/license/llama services, IPC registry
+  - depends on: DB init, provider manager, knowledge/update/shortcut/llama services, IPC registry
   - used by: process startup only; all runtime features depend on its initialization order
   - major external dependencies: `electron`, `@electron-toolkit/utils`, `electron-updater`
   - why it matters: startup order is not abstracted; DB, local AI runtime, settings-backed services, and IPC all come up here, so regressions in this file can make the whole app boot partially or inconsistently
@@ -169,13 +169,13 @@
   - major external dependencies: `ai` `streamObject`, `zod`
   - why it matters: these features reuse indexed knowledge but have separate versioning, separate window routes, and separate progress channels, so wiring gaps can leave the service correct while the UI path is dead
 
-- `Settings, secrets, license, updates, shortcuts`
-  - purpose: stores user settings, encrypts provider secrets when possible, validates the hardcoded license state, registers shortcut handling, and manages app updates
-  - key paths: `src/main/config/store.ts`, `src/main/config/settingsManager.ts`, `src/main/config/secureStorage.ts`, `src/main/services/LicenseService.ts`, `src/main/services/ShortcutManager.ts`, `src/main/services/UpdateService.ts`, `src/main/ipc/settingsHandlers.ts`
+- `Settings, secrets, updates, shortcuts`
+  - purpose: stores user settings, encrypts provider secrets when possible, registers shortcut handling, and manages app updates
+  - key paths: `src/main/config/store.ts`, `src/main/config/settingsManager.ts`, `src/main/config/secureStorage.ts`, `src/main/services/ShortcutManager.ts`, `src/main/services/UpdateService.ts`, `src/main/ipc/settingsHandlers.ts`
   - depends on: electron-store, Electron `safeStorage`, filesystem, BrowserWindow broadcasting, updater APIs
   - used by: startup, settings dialog, process panel gating, shortcut-triggered UI flows
   - major external dependencies: `electron-store`, Electron `safeStorage`, `electron-updater`
-  - why it matters: several contracts here are platform- or environment-dependent, including safe-storage fallback, hardcoded license expiry updates, and update publishing metadata
+  - why it matters: several contracts here are platform- or environment-dependent, including safe-storage fallback and update publishing metadata
 
 - `Renderer shell and workspace composition`
   - purpose: composes the visible product from routes, panels, dialogs, and feature-specific Zustand stores
@@ -187,7 +187,7 @@
 
 ## Entry Points
 - `src/main/index.ts`
-  Initializes the Electron app, license state, local llama runtime, database, services, IPC, and the main window. This is the primary runtime bootstrap.
+  Initializes the Electron app, local llama runtime, database, services, IPC, and the main window. This is the primary runtime bootstrap.
 - `src/preload/index.ts`
   Defines the preload bridge and the entire `window.api` contract. This is the renderer's only intended path into main-process functionality.
 - `src/renderer/src/main.tsx`
@@ -215,8 +215,8 @@
 - `app.whenReady() callback in src/main/index.ts`
   - kind: method
   - file path: `src/main/index.ts`
-  - responsibility: owns the true startup sequence: license check, llama startup, DB init, provider/service creation, IPC registration, and window creation
-  - directly depends on: `LicenseService.ensureLicenseOnStartup`, `LlamaService.ensureStarted`, DB init helpers, `ProviderManager`, `KnowledgeService`, `UpdateService`, `ShortcutManager`, `registerAllHandlers`, `createMainWindow`
+  - responsibility: owns the true startup sequence: llama startup, DB init, provider/service creation, IPC registration, and window creation
+  - directly depends on: `LlamaService.ensureStarted`, DB init helpers, `ProviderManager`, `KnowledgeService`, `UpdateService`, `ShortcutManager`, `registerAllHandlers`, `createMainWindow`
   - used by / called by: Electron app lifecycle
   - why it matters: this is the highest-blast-radius orchestration point; reordering steps here can break boot in non-obvious ways, especially when later services assume DB or local runtimes already exist
 
@@ -351,7 +351,7 @@
 - `ProcessPanel`
   - kind: component
   - file path: `src/renderer/src/components/notebook/ProcessPanel.tsx`
-  - responsibility: main chat workspace panel, provider/license gating, title editing, input handling, and send/stop controls
+  - responsibility: main chat workspace panel, provider gating, title editing, input handling, and send/stop controls
   - directly depends on: chat store, notebook store, settings/provider config events
   - used by / called by: `NotebookLayout`
   - why it matters: this is the main user action surface; it combines business gating and UI input handling, so stale listeners or missing shortcut events directly affect the core workflow
@@ -367,7 +367,7 @@
 ## Main Flows
 - `App startup sequence`
   1. `src/main/index.ts` waits for `app.whenReady()`.
-  2. `LicenseService.ensureLicenseOnStartup()` validates the hardcoded license name/key and caches the resulting status.
+  2. Settings are loaded by the settings manager before the main window renders.
   3. `LlamaService.ensureStarted()` attempts to auto-start local chat and embedding servers.
   4. `initDatabase()` opens SQLite and loads `sqlite-vec`.
   5. `runMigrations()` applies SQL migrations from the compiled output folder.
@@ -622,7 +622,7 @@
   - most important hotspot for ingestion, retrieval, reranking, and multi-store consistency
 
 - `src/main/db/schema.ts`
-  - durable data model for notebooks, sessions, documents, chunks, embeddings, quizzes, mind maps, settings, and license state
+  - durable data model for notebooks, sessions, documents, chunks, embeddings, quizzes, mind maps, and settings
 
 - `src/main/db/queries.ts`
   - practical CRUD and cascade behavior that many IPC paths ultimately rely on

@@ -17,15 +17,8 @@ import {
   SidebarMenuButton,
   SidebarProvider
 } from '../ui/sidebar'
-import type { AppSettings } from '../../../../shared/types'
+import type { AppSettings, PublicProviderConfig } from '../../../../shared/types'
 import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../../../shared/types/knowledge'
-
-interface ProviderConfig {
-  providerName: string
-  config: Record<string, any>
-  enabled: boolean
-  updatedAt: number
-}
 
 export default function SettingsDialog(): ReactElement {
   const { t } = useTranslation('settings')
@@ -33,8 +26,8 @@ export default function SettingsDialog(): ReactElement {
   const [activeSection, setActiveSection] = useState<string>('general')
   const [originalSettings, setOriginalSettings] = useState<AppSettings | null>(null)
   const [pendingSettings, setPendingSettings] = useState<AppSettings | null>(null)
-  const [originalProviders, setOriginalProviders] = useState<ProviderConfig[]>([])
-  const [pendingProviders, setPendingProviders] = useState<ProviderConfig[]>([])
+  const [originalProviders, setOriginalProviders] = useState<PublicProviderConfig[]>([])
+  const [pendingProviders, setPendingProviders] = useState<PublicProviderConfig[]>([])
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -42,7 +35,7 @@ export default function SettingsDialog(): ReactElement {
     }
   }
 
-  // 加载初始设置
+  // Load initial settings
   useEffect(() => {
     const loadSettings = async () => {
       const settings = await window.api.settings.getAll()
@@ -56,7 +49,7 @@ export default function SettingsDialog(): ReactElement {
     loadSettings()
   }, [])
 
-  // 使用 useMemo 计算是否有变化
+  // Use useMemo to compute whether anything changed
   const hasChanges = useMemo(() => {
     if (originalSettings && pendingSettings && originalProviders && pendingProviders) {
       const settingsChanged = JSON.stringify(originalSettings) !== JSON.stringify(pendingSettings)
@@ -105,28 +98,28 @@ export default function SettingsDialog(): ReactElement {
     }
   ]
 
-  // 更新临时设置
+  // Update pending settings
   const updatePendingSettings = (updates: Partial<AppSettings>) => {
     if (pendingSettings) {
       setPendingSettings({ ...pendingSettings, ...updates })
     }
   }
 
-  // 更新临时提供商配置
-  const updatePendingProviders = (updatedProviders: ProviderConfig[]) => {
+  // Update pending provider configs
+  const updatePendingProviders = (updatedProviders: PublicProviderConfig[]) => {
     setPendingProviders(updatedProviders)
   }
 
-  // 刷新提供商配置（用于新增/删除后同步状态）
+  // Refresh provider configs (sync state after add/delete)
   const refreshProviders = async () => {
     const providers = await window.api.getAllProviderConfigs()
     setOriginalProviders(providers)
     setPendingProviders(providers)
   }
 
-  // 确认保存
+  // Confirm and save
   const handleConfirm = async () => {
-    // 保存通用设置
+    // Save general settings
     if (pendingSettings) {
       await window.api.settings.update(pendingSettings)
       let resolvedSettings = pendingSettings
@@ -155,7 +148,7 @@ export default function SettingsDialog(): ReactElement {
       setOriginalSettings(resolvedSettings)
     }
 
-    // 保存提供商配置（新增/删除已经立即保存，这里只保存修改）
+    // Save provider configs (adds/deletes are saved immediately; only edits are saved here)
     let anyUnencrypted = false
     for (const provider of pendingProviders) {
       const result = await window.api.saveProviderConfig(provider)
@@ -172,7 +165,7 @@ export default function SettingsDialog(): ReactElement {
     }
   }
 
-  // Hủy变更
+  // Cancel changes
   const handleCancel = () => {
     if (originalSettings) {
       setPendingSettings(originalSettings)
@@ -190,7 +183,7 @@ export default function SettingsDialog(): ReactElement {
       >
         <SidebarProvider className="flex flex-1 min-h-0">
           <div className="flex flex-1 min-h-0 gap-3 p-3 w-full">
-            {/* 使用 Shadcn Sidebar */}
+            {/* Use the Shadcn Sidebar */}
             <Sidebar className="w-40" collapsible="none">
               <SidebarContent>
                 <SidebarMenu>
@@ -218,7 +211,7 @@ export default function SettingsDialog(): ReactElement {
               </SidebarContent>
             </Sidebar>
 
-            {/* 获取当前活跃项的配置 */}
+            {/* Render the config for the active section */}
             {(() => {
               const currentItem = menuItems.find((item) => item.id === activeSection)
               if (!currentItem) return null

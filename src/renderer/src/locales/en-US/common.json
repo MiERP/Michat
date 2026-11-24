@@ -34,5 +34,16 @@
   "error": "Error",
   "warning": "Warning",
   "info": "Info",
-  "success": "Success"
+  "success": "Success",
+  "language": "Language",
+  "onboarding": {
+    "tagline": "More convenient, more lightweight, and understands you better!",
+    "selectLanguage": "Select Language",
+    "getStarted": "Get Started",
+    "starting": "Starting...",
+    "languageVi": "Vietnamese",
+    "languageEn": "English",
+    "noModelsTitle": "No model installed yet",
+    "noModelsHint": "You can import a chat model and an embedding model in Settings → AI Provider after setup."
+  }
 }

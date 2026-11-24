@@ -19,7 +19,6 @@ import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { Card } from '../ui/card'
 import { PanelHeader } from '../ui/panel-header'
-import type { LicenseStatus } from '../../../../shared/types/license'
 
 interface ProcessPanelProps {
   onToggleLeft?: () => void
@@ -39,11 +38,6 @@ export default function ProcessPanel({
   const [isComposing, setIsComposing] = useState(false)
   const [hasProvider, setHasProvider] = useState(true)
   const [defaultChatModel, setDefaultChatModel] = useState<string | null>(null)
-  const [licenseChecked, setLicenseChecked] = useState(false)
-  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus>({
-    valid: false,
-    message: 'License not checked yet'
-  })
   const {
     currentSession,
     messages,
@@ -81,21 +75,8 @@ export default function ProcessPanel({
     ? isNotebookStreaming(currentNotebookId)
     : false
   const canSend =
-    currentSession &&
-    !isCurrentNotebookStreaming &&
-    input.trim() &&
-    hasProvider &&
-    defaultChatModel &&
-    licenseChecked &&
-    licenseStatus.valid
+    currentSession && !isCurrentNotebookStreaming && input.trim() && hasProvider && defaultChatModel
   const canStop = currentSession && isCurrentNotebookStreaming
-  const licenseHint = licenseStatus.valid
-    ? !licenseChecked
-      ? 'Đang kiểm tra bản quyền...'
-      : ''
-    : licenseStatus.expiresAt
-      ? `Bản quyền đã hết hạn vào ngày ${licenseStatus.expiresAt}.`
-      : 'Bản quyền không hợp lệ hoặc chưa được kích hoạt.'
 
   // Check if there are available providers and get default model
   const checkProvider = async (): Promise<void> => {
@@ -114,42 +95,11 @@ export default function ProcessPanel({
     }
   }
 
-  const checkLicense = async (): Promise<void> => {
-    try {
-      if (!window.api.license?.getStatus) {
-        setLicenseStatus({
-          valid: false,
-          reason: 'missing_file',
-          message: 'License API unavailable'
-        })
-        return
-      }
-
-      const status = await Promise.race<LicenseStatus>([
-        window.api.license.getStatus(),
-        new Promise<LicenseStatus>((_, reject) =>
-          setTimeout(() => reject(new Error('License check timeout')), 5000)
-        )
-      ])
-      setLicenseStatus(status)
-    } catch (error) {
-      console.error('Failed to check license:', error)
-      setLicenseStatus({
-        valid: false,
-        reason: 'invalid_format',
-        message: 'Failed to read license'
-      })
-    } finally {
-      setLicenseChecked(true)
-    }
-  }
-
   // Add useEffect listeners
   useEffect(() => {
     // 1. Check on page load
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void checkProvider()
-    void checkLicense()
 
     // 2. Listen for Provider configuration change events
     const cleanup = window.api.onProviderConfigChanged(() => {
@@ -179,15 +129,15 @@ export default function ProcessPanel({
     await abortMessage(currentNotebookId)
   }
 
-  // 使用 ref 存储 handleSend 函数的引用，避免事件监听器频繁重注册
+  // Use a ref to store the handleSend function reference and avoid re-registering listeners often
   const handleSendRef = useRef<() => void>(() => {})
 
-  // 保持 ref 指向最新的 handleSend 函数
+  // Keep the ref pointing at the latest handleSend function
   useEffect(() => {
     handleSendRef.current = handleSend
   })
 
-  // 监听发送消息快捷键（只注册一次）
+  // Listen for the send-message shortcut (registered only once)
   useEffect(() => {
     const handleSendShortcut = () => {
       handleSendRef.current()
@@ -302,7 +252,7 @@ export default function ProcessPanel({
               size="icon"
               className="w-8 h-8 shrink-0"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              title={isLeftCollapsed ? '展开知识库' : '折叠知识库'}
+              title={isLeftCollapsed ? 'Expand knowledge base' : 'Collapse knowledge base'}
             >
               {isLeftCollapsed ? (
                 <PanelLeftOpen className="w-4 h-4" />
@@ -348,7 +298,7 @@ export default function ProcessPanel({
               size="icon"
               className="w-8 h-8 shrink-0"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              title={isRightCollapsed ? '展开笔记' : '折叠笔记'}
+              title={isRightCollapsed ? 'Expand notes' : 'Collapse notes'}
             >
               {isRightCollapsed ? (
                 <PanelRightOpen className="w-4 h-4" />
@@ -360,8 +310,8 @@ export default function ProcessPanel({
         }
       />
 
-      {/* 对话消息区域 - 使用 absolute 定位占满剩余空间；顶部 nhúng thẻ tóm tắt
-          notebook để đọc trước khi chat */}
+      {/* Chat message area - absolutely positioned to fill the remaining space; the
+          notebook summary card is embedded at the top for reading before chatting */}
       <div className="absolute top-14 bottom-0 left-0 right-0 overflow-hidden flex flex-col">
         <NotebookSummaryCard />
         <div className="flex-1 min-h-0">
@@ -369,7 +319,7 @@ export default function ProcessPanel({
         </div>
       </div>
 
-      {/* 底部渐变遮罩 - 独立于消息区域，避免堆叠上下文问题 */}
+      {/* Bottom gradient mask - independent of the message area to avoid stacking context issues */}
       <div
         className="absolute bottom-0 left-0 right-0 h-48 pointer-events-none rounded-b-xl z-10"
         style={{
@@ -378,7 +328,7 @@ export default function ProcessPanel({
         }}
       />
 
-      {/* 底部输入区域 - 绝对定位浮动在底部 */}
+      {/* Bottom input area - absolutely positioned and floating at the bottom */}
       <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none shrink-0 z-20">
         <div className="relative bg-muted/95 backdrop-blur-md rounded-lg border border-border focus-within:ring-2 focus-within:ring-ring shadow-lg pointer-events-auto">
           {/* Phạm vi tri thức đang áp dụng cho lượt hỏi kế tiếp */}
@@ -400,7 +350,7 @@ export default function ProcessPanel({
             </div>
           )}
 
-          {/* 多行输入框 */}
+          {/* Multi-line input */}
           <Textarea
             ref={textareaRef}
             value={input}
@@ -414,35 +364,26 @@ export default function ProcessPanel({
             placeholder={
               !currentSession
                 ? t('selectSession')
-                : !licenseChecked
-                  ? 'Đang kiểm tra bản quyền...'
-                  : !licenseStatus.valid
-                    ? licenseHint
-                    : !hasProvider
-                      ? t('noProviderConfigured')
-                      : !defaultChatModel
-                        ? t('noDefaultModel')
-                        : t('inputMessage')
+                : !hasProvider
+                  ? t('noProviderConfigured')
+                  : !defaultChatModel
+                    ? t('noDefaultModel')
+                    : t('inputMessage')
             }
             disabled={
-              !currentSession ||
-              isCurrentNotebookStreaming ||
-              !hasProvider ||
-              !defaultChatModel ||
-              !licenseChecked ||
-              !licenseStatus.valid
+              !currentSession || isCurrentNotebookStreaming || !hasProvider || !defaultChatModel
             }
             rows={1}
             className="w-full bg-transparent border-0 pl-4 pr-14 py-3 text-sm text-foreground placeholder-muted-foreground resize-none focus-visible:ring-0 focus-visible:ring-offset-0 overflow-y-auto min-h-[84px] max-h-[280px]"
           />
 
-          {/* 发送/停止按钮 - 动态切换 */}
+          {/* Send/stop button - switches dynamically */}
           {isCurrentNotebookStreaming ? (
-            // 停止按钮
+            // Stop button
             <Button
               onClick={handleStop}
               disabled={!canStop}
-              title="停止生成"
+              title="Stop generating"
               variant="destructive"
               size="icon"
               className="absolute right-2 bottom-3 w-8 h-8 rounded-full"
@@ -450,20 +391,12 @@ export default function ProcessPanel({
               <StopCircle className="w-4 h-4" />
             </Button>
           ) : (
-            // 发送按钮
+            // Send button
             <Button
               onClick={handleSend}
               disabled={!canSend}
               title={
-                !licenseChecked
-                  ? 'Đang kiểm tra bản quyền...'
-                  : !licenseStatus.valid
-                    ? licenseHint
-                    : !hasProvider
-                      ? t('noProviderConfigured')
-                      : !currentSession
-                        ? t('selectSession')
-                        : ''
+                !hasProvider ? t('noProviderConfigured') : !currentSession ? t('selectSession') : ''
               }
               size="icon"
               className="absolute right-2 bottom-3 w-8 h-8 rounded-full"

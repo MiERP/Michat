@@ -48,8 +48,6 @@ const ISSUERS: Array<[RegExp, string]> = [
 
 const HEADER_LENGTH = 5000
 
-
-
 function getHeaderLines(content: string): HeaderLine[] {
   const header = content.slice(0, HEADER_LENGTH)
   return [...header.matchAll(/[^\r\n]+/gu)].map((match) => ({

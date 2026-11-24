@@ -1,6 +1,6 @@
 /**
  * Quiz IPC Handlers
- * 答题功能的 IPC 通信处理
+ * IPC handlers for the quiz feature
  */
 
 import { BrowserWindow } from 'electron'
@@ -43,7 +43,7 @@ const QuizSchemas = {
 }
 
 /**
- * 注册quiz相关的IPC handlers
+ * Registers the quiz-related IPC handlers
  */
 export function registerQuizHandlers(quizService: QuizService): void {
   registerStreamingHandler('quiz:generate', QuizSchemas.generate, async (event, args) => {

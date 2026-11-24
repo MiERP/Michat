@@ -11,7 +11,7 @@ import { canUseProviderForLocalFirst } from './providerPolicy'
 
 /**
  * ProviderManager
- * 供应商管理器,协调注册表和配置管理
+ * Provider manager that coordinates the registry and configuration management
  */
 export class ProviderManager {
   private registry: ProviderRegistry
@@ -19,7 +19,7 @@ export class ProviderManager {
   constructor() {
     this.registry = new ProviderRegistry()
 
-    // 注册所有内置供应商
+    // Register all built-in providers
     this.registerBuiltinProviders()
 
     Logger.info('ProviderManager', 'Provider manager initialized')
@@ -30,7 +30,7 @@ export class ProviderManager {
   }
 
   /**
-   * 注册所有内置供应商
+   * Register all built-in providers
    */
   private registerBuiltinProviders(): void {
     this.registry.registerMany(BUILTIN_PROVIDERS)
@@ -41,9 +41,9 @@ export class ProviderManager {
   }
 
   /**
-   * 获取已配置的 provider(合并配置)
-   * @param name - 供应商名称
-   * @returns BaseProvider 或 null
+   * Get a configured provider (merged configuration)
+   * @param name - Provider name
+   * @returns BaseProvider or null
    */
   async getConfiguredProvider(name: string): Promise<BaseProvider | null> {
     const provider = this.registry.getProvider(name)
@@ -52,14 +52,14 @@ export class ProviderManager {
       return null
     }
 
-    // 获取用户配置
+    // Get the user configuration
     const config = await providerConfigManager.getProviderConfig(name)
     if (!config || !config.enabled) {
       Logger.warn('ProviderManager', `Provider ${name} is not enabled`)
       return null
     }
 
-    // 配置 provider
+    // Configure the provider
     const descriptor = this.registry.getDescriptor(name)
     if (!descriptor || !canUseProviderForLocalFirst(descriptor, config)) {
       Logger.error(
@@ -74,15 +74,15 @@ export class ProviderManager {
   }
 
   /**
-   * 获取活跃的对话 provider
-   * 如果用户设置了默认对话模型但不可用，会直接返回 null，不会自动 fallback
+   * Get the active chat provider
+   * If the user set a default chat model but it is unavailable, returns null directly without automatic fallback
    */
   async getActiveChatProvider(): Promise<ChatProvider | null> {
     try {
       const settings = await settingsManager.getAllSettings()
       const defaultChatModel = settings.defaultChatModel
 
-      // 如果用户设置了默认对话模型,解析并使用
+      // If the user set a default chat model, parse and use it
       if (defaultChatModel && defaultChatModel.includes(':')) {
         const [providerName, ...modelIdParts] = defaultChatModel.split(':')
         const modelId = modelIdParts.join(':')
@@ -108,7 +108,7 @@ export class ProviderManager {
           return null
         }
 
-        // 检查是否支持对话能力
+        // Check whether chat capability is supported
         const compatProvider = provider as AISDKProvider
         if (!compatProvider.hasChatCapability()) {
           Logger.error(
@@ -118,13 +118,13 @@ export class ProviderManager {
           return null
         }
 
-        // 使用指定的模型配置
+        // Use the specified model configuration
         compatProvider.configure({ model: modelId })
         Logger.info('ProviderManager', `Using default chat model: ${providerName} - ${modelId}`)
         return compatProvider as ChatProvider
       }
 
-      // 如果没有设置默认对话模型，返回 null
+      // If no default chat model is configured, return null
       Logger.warn('ProviderManager', 'No default chat model configured')
       return null
     } catch (error) {
@@ -134,15 +134,15 @@ export class ProviderManager {
   }
 
   /**
-   * 获取活跃的嵌入 provider
-   * 如果用户设置了默认嵌入模型但不可用，会直接返回 null，不会自动 fallback
+   * Get the active embedding provider
+   * If the user set a default embedding model but it is unavailable, returns null directly without automatic fallback
    */
   async getActiveEmbeddingProvider(): Promise<EmbeddingProvider | null> {
     try {
       const settings = await settingsManager.getAllSettings()
       const defaultEmbeddingModel = settings.defaultEmbeddingModel
 
-      // 如果用户设置了默认嵌入模型,解析并使用
+      // If the user set a default embedding model, parse and use it
       if (defaultEmbeddingModel && defaultEmbeddingModel.includes(':')) {
         const [providerName, ...modelIdParts] = defaultEmbeddingModel.split(':')
         const modelId = modelIdParts.join(':')
@@ -156,7 +156,7 @@ export class ProviderManager {
           return null
         }
 
-        // 检查是否支持嵌入能力
+        // Check whether embedding capability is supported
         const compatProvider = provider as AISDKProvider
         if (!compatProvider.hasEmbeddingCapability()) {
           Logger.error(
@@ -166,7 +166,7 @@ export class ProviderManager {
           return null
         }
 
-        // 使用指定的模型配置
+        // Use the specified model configuration
         compatProvider.configure({ model: modelId })
         Logger.info(
           'ProviderManager',
@@ -175,7 +175,7 @@ export class ProviderManager {
         return compatProvider as EmbeddingProvider
       }
 
-      // 如果没有设置默认嵌入模型，返回 null
+      // If no default embedding model is configured, return null
       Logger.warn('ProviderManager', 'No default embedding model configured')
       return null
     } catch (error) {
@@ -185,54 +185,52 @@ export class ProviderManager {
   }
 
   /**
-   * 列出所有已注册的供应商名称
+   * List all registered provider names
    */
   listProviders(): string[] {
     return this.registry.listProviderNames()
   }
 
   /**
-   * 获取供应商描述符
+   * Get a provider descriptor
    */
   getDescriptor(name: string): ProviderDescriptor | undefined {
     return this.registry.getDescriptor(name)
   }
 
   /**
-   * 列出所有供应商描述符
+   * List all provider descriptors
    */
   listDescriptors(): ProviderDescriptor[] {
     return this.registry.listDescriptors()
   }
 
   /**
-   * 根据能力获取供应商
+   * Get providers by capability
    */
-  getProvidersByCapability(
-    capability: 'chat' | 'embedding' | 'rerank' | 'imageGeneration'
-  ): ProviderDescriptor[] {
+  getProvidersByCapability(capability: 'chat' | 'embedding'): ProviderDescriptor[] {
     return this.registry.getProvidersByCapability(capability)
   }
 
   /**
-   * 获取 provider(不带配置,用于向后兼容)
-   * @deprecated 使用 getConfiguredProvider 替代
+   * Get a provider (without configuration, for backward compatibility)
+   * @deprecated Use getConfiguredProvider instead
    */
   getProvider(name: string): BaseProvider | undefined {
     return this.registry.getProvider(name)
   }
 
   /**
-   * 获取活跃 provider(向后兼容)
-   * @deprecated 使用 getActiveChatProvider 替代
+   * Get the active provider (backward compatible)
+   * @deprecated Use getActiveChatProvider instead
    */
   async getActiveProvider(): Promise<BaseProvider | null> {
     return this.getActiveChatProvider()
   }
 
   /**
-   * 获取 embedding provider(向后兼容)
-   * @deprecated 使用 getActiveEmbeddingProvider 替代
+   * Get the embedding provider (backward compatible)
+   * @deprecated Use getActiveEmbeddingProvider instead
    */
   async getEmbeddingProvider(): Promise<BaseProvider | null> {
     return this.getActiveEmbeddingProvider()

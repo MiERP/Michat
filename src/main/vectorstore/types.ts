@@ -1,10 +1,10 @@
 /**
- * VectorStore 抽象接口
- * 支持 SQLite / LanceDB / Qdrant 等后端
+ * VectorStore abstract interface
+ * Backends such as SQLite / LanceDB / Qdrant are supported
  */
 
 /**
- * 向量项
+ * A vector item
  */
 export interface VectorItem {
   id: string // embedding_id
@@ -14,96 +14,96 @@ export interface VectorItem {
 }
 
 /**
- * 查询结果
+ * Query result
  */
 export interface QueryResult {
   id: string // embedding_id
   chunkId: string
-  score: number // 相似度分数（0-1，越高越相似）
-  distance: number // 原始距离值
+  score: number // similarity score (0-1, higher means more similar)
+  distance: number // raw distance value
   metadata?: Record<string, unknown>
 }
 
 /**
- * 查询选项
+ * Query options
  */
 export interface QueryOptions {
-  topK?: number // 返回前 K 个结果，默认 5
-  threshold?: number // 相似度阈值（0-1），低于此值的结果不返回
+  topK?: number // return the top K results, defaults to 5
+  threshold?: number // similarity threshold (0-1); results below it are dropped
   filter?: {
-    chunkIds?: string[] // 限制在指定 chunk 中搜索
-    documentIds?: string[] // 限制在指定 document 中搜索（lọc ngay trong KNN）
+    chunkIds?: string[] // restrict the search to the given chunks
+    documentIds?: string[] // restrict the search to the given documents (filtered inside the KNN query)
   }
 }
 
 /**
- * VectorStore 配置
+ * VectorStore configuration
  */
 export interface VectorStoreConfig {
   notebookId: string
-  dimensions?: number // 向量维度，默认 1536
+  dimensions?: number // vector dimensions, defaults to 1536
 }
 
 /**
- * 向量存储抽象接口
- * 业务层通过此接口操作向量存储，不关心底层实现
+ * Vector storage abstract interface
+ * Business code uses this interface to access vector storage without caring about the backend
  */
 export interface VectorStore {
   /**
-   * 初始化向量存储
+   * Initializes the vector store
    */
   initialize(config: VectorStoreConfig): Promise<void>
 
   /**
-   * 批量插入或更新向量
+   * Inserts or updates vectors in batches
    */
   upsert(items: VectorItem[]): Promise<void>
 
   /**
-   * 批量删除向量
+   * Deletes vectors in batches
    */
   delete(ids: string[]): Promise<void>
 
   /**
-   * 按 chunk ID 批量删除向量
+   * Deletes vectors in batches by chunk ID
    */
   deleteByChunkIds(chunkIds: string[]): Promise<void>
 
   /**
-   * 向量相似度查询
-   * @param vector 查询向量
-   * @param options 查询选项
-   * @returns 相似度排序的结果列表
+   * Vector similarity query
+   * @param vector query vector
+   * @param options query options
+   * @returns list of results sorted by similarity
    */
   query(vector: Float32Array, options?: QueryOptions): Promise<QueryResult[]>
 
   /**
-   * 清空当前 notebook 的所有向量
+   * Clears all vectors for the current notebook
    */
   clear(): Promise<void>
 
   /**
-   * 获取向量数量
+   * Returns the vector count
    */
   count(): Promise<number>
 
   /**
-   * 关闭连接/释放资源
+   * Closes the connection / releases resources
    */
   close(): Promise<void>
 
   /**
-   * 获取当前 notebook ID
+   * Returns the current notebook ID
    */
   getNotebookId(): string
 
   /**
-   * 获取向量维度
+   * Returns the vector dimensions
    */
   getDimensions(): number
 }
 
 /**
- * 向量存储类型
+ * Vector storage type
  */
 export type VectorStoreType = 'sqlite' | 'lancedb' | 'qdrant'

@@ -2,7 +2,7 @@
   "version": "6",
   "dialect": "sqlite",
   "id": "643d1aa2-9784-43b3-ac8f-aed90a51088d",
-  "prevId": "9a2f2130-8b46-4ab8-b056-a5128b346725",
+  "prevId": "c7cd24c4-9eb6-4ac2-8cb0-56012ab04972",
   "tables": {
     "chat_messages": {
       "name": "chat_messages",
@@ -60,7 +60,10 @@
       "indexes": {
         "idx_messages_session": {
           "name": "idx_messages_session",
-          "columns": ["session_id", "created_at"],
+          "columns": [
+            "session_id",
+            "created_at"
+          ],
           "isUnique": false
         }
       },
@@ -69,8 +72,12 @@
           "name": "chat_messages_session_id_chat_sessions_id_fk",
           "tableFrom": "chat_messages",
           "tableTo": "chat_sessions",
-          "columnsFrom": ["session_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -151,7 +158,10 @@
       "indexes": {
         "idx_sessions_notebook": {
           "name": "idx_sessions_notebook",
-          "columns": ["notebook_id", "updated_at"],
+          "columns": [
+            "notebook_id",
+            "updated_at"
+          ],
           "isUnique": false
         }
       },
@@ -160,8 +170,12 @@
           "name": "chat_sessions_notebook_id_notebooks_id_fk",
           "tableFrom": "chat_sessions",
           "tableTo": "notebooks",
-          "columnsFrom": ["notebook_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "notebook_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -169,8 +183,12 @@
           "name": "chat_sessions_parent_session_id_chat_sessions_id_fk",
           "tableFrom": "chat_sessions",
           "tableTo": "chat_sessions",
-          "columnsFrom": ["parent_session_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "parent_session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -221,7 +239,9 @@
       "indexes": {
         "idx_notebooks_updated": {
           "name": "idx_notebooks_updated",
-          "columns": ["updated_at"],
+          "columns": [
+            "updated_at"
+          ],
           "isUnique": false
         }
       },

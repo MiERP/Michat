@@ -36,9 +36,9 @@ import {
 
 type AddSourceType = 'text' | 'note' | 'url'
 
-// 添加来源类型
+// Add source type
 
-// 添加来源弹窗组件
+// Add source modal component
 interface AddSourceModalProps {
   type: AddSourceType
   isOpen: boolean
@@ -57,7 +57,7 @@ function AddSourceModal({
   notes
 }: AddSourceModalProps) {
   const { t } = useTranslation('ui')
-  // 状态会在组件重新挂载时自动重置（通过父组件的 key 属性）
+  // State resets automatically when the component remounts (via the parent's key prop)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [url, setUrl] = useState('')
@@ -75,7 +75,7 @@ function AddSourceModal({
     }
   }
 
-  // 判断是否可以提交
+  // Determine whether the form can be submitted
   const canSubmit =
     !isLoading &&
     ((type === 'text' && title.trim() && content.trim()) ||
@@ -532,7 +532,7 @@ function MetadataModal({ document, onClose, onSaved }: MetadataModalProps): Reac
   )
 }
 
-// 索引进度组件
+// Indexing progress component
 function IndexingProgress() {
   const { t } = useTranslation('ui')
   const { indexProgress, isIndexing } = useKnowledgeStore()
@@ -549,7 +549,7 @@ function IndexingProgress() {
   )
 }
 
-// 文档预览面板组件
+// Document preview panel component
 interface DocumentViewerPanelProps {
   document: KnowledgeDocument
   onBack: () => void
@@ -560,13 +560,13 @@ function DocumentViewerPanel({ document, onBack }: DocumentViewerPanelProps) {
   const [content, setContent] = useState<string>('')
   const [isLoading, setIsLoading] = useState(false)
 
-  // 加载文档内容
+  // Load document content
   useEffect(() => {
     const loadContent = async () => {
       setIsLoading(true)
       try {
         const chunks = await window.api.knowledge.getDocumentChunks(document.id)
-        // 合并所有 chunk 的内容
+        // Merge the content of all chunks
         const fullContent = chunks.map((chunk) => chunk.content).join('\n\n')
         setContent(fullContent)
       } catch (error) {
@@ -598,7 +598,7 @@ function DocumentViewerPanel({ document, onBack }: DocumentViewerPanelProps) {
         center={<span className="text-sm font-medium truncate">{document.title}</span>}
       />
 
-      {/* 文档内容 */}
+      {/* Document content */}
       <ScrollArea className="flex-1">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
@@ -650,7 +650,7 @@ export default function SourcePanel(): ReactElement {
   const inspectedDocument =
     documents.find((document) => document.id === inspectedDocumentId) || null
 
-  // 加载默认嵌入模型设置
+  // Load the default embedding model setting
   useEffect(() => {
     const loadEmbeddingModel = async () => {
       const model = await window.api.settings.get('defaultEmbeddingModel')
@@ -658,7 +658,7 @@ export default function SourcePanel(): ReactElement {
     }
     loadEmbeddingModel()
 
-    // 监听设置变化
+    // Listen for settings changes
     const unsubscribe = window.api.settings.onSettingsChange((newSettings) => {
       setDefaultEmbeddingModel(newSettings.defaultEmbeddingModel)
     })
@@ -666,13 +666,13 @@ export default function SourcePanel(): ReactElement {
     return unsubscribe
   }, [])
 
-  // 设置监听器
+  // Set up listeners
   useEffect(() => {
     const cleanup = setupKnowledgeListeners()
     return cleanup
   }, [])
 
-  // 加载文档和笔记
+  // Load documents and notes
   useEffect(() => {
     if (notebookId) {
       loadDocuments(notebookId)
@@ -702,25 +702,25 @@ export default function SourcePanel(): ReactElement {
     }
   }, [notebookId, loadDocuments, loadStats])
 
-  // 当 notebook 切换时清空选中的文档
+  // Clear the selected document when the notebook changes
   useEffect(() => {
     setOpenedDocument(null)
     setInspectedDocumentId(null)
     setMetadataDocument(null)
     setIsLegalMetadataOpen(false)
-  }, [notebookId])
+  }, [notebookId, setInspectedDocumentId])
 
   useEffect(() => {
     if (inspectedDocumentId && !documents.some((document) => document.id === inspectedDocumentId)) {
       setInspectedDocumentId(null)
     }
-  }, [documents, inspectedDocumentId])
+  }, [documents, inspectedDocumentId, setInspectedDocumentId])
 
-  // 处理文件上传
+  // Handle file upload
   const handleFileUpload = useCallback(async () => {
     if (!notebookId) return
 
-    // 检查是否配置了默认嵌入模型
+    // Check whether a default embedding model is configured
     if (!defaultEmbeddingModel) {
       alert(t('noEmbeddingModelConfigured'))
       return
@@ -733,7 +733,7 @@ export default function SourcePanel(): ReactElement {
     setShowAddMenu(false)
   }, [notebookId, defaultEmbeddingModel, selectFiles, addDocumentFromFile, t])
 
-  // 处理文件夹上传
+  // Handle folder upload
   const handleFolderUpload = useCallback(async () => {
     if (!notebookId) return
 
@@ -762,12 +762,12 @@ export default function SourcePanel(): ReactElement {
     setShowAddMenu(false)
   }, [notebookId, defaultEmbeddingModel, selectFolder, addDocumentsFromFolder, t, setShowAddMenu])
 
-  // 处理文本粘贴
+  // Handle text paste
   const handleTextPaste = useCallback(
     async (data: { title?: string; content?: string }) => {
       if (!notebookId || !data.title || !data.content) return
 
-      // 检查是否配置了默认嵌入模型
+      // Check whether a default embedding model is configured
       if (!defaultEmbeddingModel) {
         alert(t('noEmbeddingModelConfigured'))
         setModalType(null)
@@ -794,12 +794,12 @@ export default function SourcePanel(): ReactElement {
     [notebookId, addDocumentFromUrl, t]
   )
 
-  // 处理笔记导入
+  // Handle note import
   const handleNoteImport = useCallback(
     async (data: { noteId?: string }) => {
       if (!notebookId || !data.noteId) return
 
-      // 检查是否配置了默认嵌入模型
+      // Check whether a default embedding model is configured
       if (!defaultEmbeddingModel) {
         alert(t('noEmbeddingModelConfigured'))
         setModalType(null)
@@ -810,7 +810,7 @@ export default function SourcePanel(): ReactElement {
         await addNoteToKnowledge(notebookId, data.noteId)
         setModalType(null)
       } catch (error) {
-        // 检查是否是空笔记错误
+        // Check whether this is an empty-note error
         const errorMessage = (error as Error).message || ''
         if (errorMessage.toLowerCase().includes('empty')) {
           alert(t('emptyNoteCannotImport'))
@@ -823,7 +823,7 @@ export default function SourcePanel(): ReactElement {
     [notebookId, defaultEmbeddingModel, addNoteToKnowledge, t]
   )
 
-  // 处理删除文档
+  // Handle document deletion
   const handleDelete = useCallback(
     async (documentId: string) => {
       if (!notebookId) return
@@ -834,15 +834,15 @@ export default function SourcePanel(): ReactElement {
         setInspectedDocumentId(nextDocument?.id || null)
       }
     },
-    [notebookId, documents, inspectedDocumentId, deleteDocument]
+    [notebookId, documents, inspectedDocumentId, deleteDocument, setInspectedDocumentId]
   )
 
-  // 处理打开设置
+  // Handle open settings
   const handleOpenSettings = useCallback(() => {
     openSettings()
   }, [openSettings])
 
-  // 处理打开源文件
+  // Handle opening the source file
   const handleOpenSource = useCallback(
     async (documentId: string) => {
       try {
@@ -857,26 +857,29 @@ export default function SourcePanel(): ReactElement {
     [t]
   )
 
-  const handleInspectDocument = useCallback((document: KnowledgeDocument) => {
-    setInspectedDocumentId(document.id)
-    setIsLegalMetadataOpen(true)
-  }, [])
+  const handleInspectDocument = useCallback(
+    (document: KnowledgeDocument) => {
+      setInspectedDocumentId(document.id)
+      setIsLegalMetadataOpen(true)
+    },
+    [setInspectedDocumentId]
+  )
 
-  // 双击或按 Enter 时打开文档
+  // Open the document on double-click or Enter
   const handleOpenDocument = useCallback(
     (document: KnowledgeDocument) => {
-      // 文本和笔记类型可以预览，直接显示预览页面
+      // Text and note types can be previewed; show the preview page directly
       if (document.type === 'text' || document.type === 'note') {
         setOpenedDocument(document)
       } else {
-        // 其他类型（文件、URL）直接打开
+        // Other types (file, URL) open directly
         handleOpenSource(document.id)
       }
     },
     [handleOpenSource]
   )
 
-  // 返回列表
+  // Return to the list
   const handleBack = useCallback(() => {
     setOpenedDocument(null)
   }, [])
@@ -903,7 +906,7 @@ export default function SourcePanel(): ReactElement {
     [notebookId, loadDocuments]
   )
 
-  // 处理弹窗提交
+  // Handle modal submit
   const handleModalSubmit = useCallback(
     (data: { title?: string; content?: string; noteId?: string; url?: string }) => {
       if (modalType === 'text') {
@@ -920,14 +923,14 @@ export default function SourcePanel(): ReactElement {
   return (
     <Card className="flex flex-col rounded-xl border-0 overflow-hidden h-full shadow-md">
       {openedDocument ? (
-        // 文档预览页面
+        // Document preview page
         <DocumentViewerPanel
           key={openedDocument.id}
           document={openedDocument}
           onBack={handleBack}
         />
       ) : (
-        // 文档列表页面
+        // Document list page
         <>
           <PanelHeader
             draggable
@@ -948,7 +951,7 @@ export default function SourcePanel(): ReactElement {
                   <Plus className="w-4 h-4" />
                 </Button>
 
-                {/* 添加菜单 */}
+                {/* Add menu */}
                 {showAddMenu && (
                   <div className="absolute right-0 top-full mt-1 w-40 bg-popover border border-border rounded-lg shadow-lg overflow-hidden z-10">
                     <Button
@@ -1006,10 +1009,10 @@ export default function SourcePanel(): ReactElement {
             }
           />
 
-          {/* 索引进度 */}
+          {/* Indexing progress */}
           <IndexingProgress />
 
-          {/* 文档列表 */}
+          {/* Document list */}
           {isLoading ? (
             <div className="flex-1 flex items-center justify-center">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -1041,7 +1044,7 @@ export default function SourcePanel(): ReactElement {
         </>
       )}
 
-      {/* 添加来源弹窗 - 使用 key 强制在 type 变化时重新挂载组件 */}
+      {/* Add source modal - use key to force remount when type changes */}
       {modalType && (
         <AddSourceModal
           key={modalType}
@@ -1067,7 +1070,7 @@ export default function SourcePanel(): ReactElement {
         />
       )}
 
-      {/* 点击外部关闭菜单 */}
+      {/* Click outside to close the menu */}
       {showAddMenu && <div className="fixed inset-0 z-0" onClick={() => setShowAddMenu(false)} />}
     </Card>
   )

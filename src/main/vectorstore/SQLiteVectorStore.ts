@@ -1,6 +1,6 @@
 /**
  * SQLiteVectorStore
- * 基于 sqlite-vec 扩展的向量存储实现
+ * Vector storage implementation backed by the sqlite-vec extension
  */
 
 import { getSqlite } from '../db'
@@ -8,8 +8,8 @@ import type { VectorStore, VectorItem, QueryResult, QueryOptions, VectorStoreCon
 import Logger from '../../shared/utils/logger'
 
 /**
- * SQLite 向量存储实现
- * 使用 sqlite-vec 的 vec0 虚拟表进行高性能向量检索
+ * SQLite vector store implementation
+ * Uses the sqlite-vec vec0 virtual table for high-performance vector search
  */
 export class SQLiteVectorStore implements VectorStore {
   private notebookId: string = ''
@@ -40,7 +40,7 @@ export class SQLiteVectorStore implements VectorStore {
 
     const insertMany = sqlite.transaction((items: VectorItem[]) => {
       for (const item of items) {
-        // 验证向量维度
+        // Validate the vector dimensions
         if (item.vector.length !== this.dimensions) {
           Logger.warn(
             'SQLiteVectorStore',
@@ -51,7 +51,7 @@ export class SQLiteVectorStore implements VectorStore {
         const documentId =
           typeof item.metadata?.documentId === 'string' ? item.metadata.documentId : null
 
-        // sqlite-vec 可以直接接受 Float32Array
+        // sqlite-vec accepts Float32Array directly
         insertStmt.run(item.id, item.chunkId, documentId, this.notebookId, item.vector)
       }
     })
@@ -136,9 +136,9 @@ export class SQLiteVectorStore implements VectorStore {
     }
 
     try {
-      // 使用 sqlite-vec 的 KNN 查询
-      // cosine 距离：0 表示完全相同，2 表示完全相反
-      // 转换为相似度分数：1 - (distance / 2)
+      // Use a sqlite-vec KNN query
+      // Cosine distance: 0 means identical, 2 means opposite
+      // Convert to a similarity score: 1 - (distance / 2)
       const requestedChunkIds = filter?.chunkIds?.filter(Boolean) || []
       if (requestedChunkIds.length === 0 && filter?.chunkIds) {
         return []
@@ -160,9 +160,9 @@ export class SQLiteVectorStore implements VectorStore {
           AND notebook_id = ?
       `
 
-      const params: any[] = [queryVector, topK, this.notebookId]
+      const params: Array<string | number | Float32Array> = [queryVector, topK, this.notebookId]
 
-      // Lọc theo tài liệu ngay trong KNN (không dựng danh sách chunk_id khổng lồ)
+      // Filter by document directly inside the KNN query (avoids building a huge chunk_id list)
       if (requestedDocumentIds.length > 0) {
         const placeholders = requestedDocumentIds.map(() => '?').join(',')
         querySql += ` AND document_id IN (${placeholders})`
@@ -178,16 +178,16 @@ export class SQLiteVectorStore implements VectorStore {
       querySql += ' ORDER BY distance ASC'
       const queryStmt = sqlite.prepare(querySql)
 
-      // sqlite-vec 可以直接接受 Float32Array
+      // sqlite-vec accepts Float32Array directly
       const results = queryStmt.all(...params) as Array<{
         embedding_id: string
         chunk_id: string
         distance: number
       }>
 
-      // 转换结果
+      // Transform the results
       const queryResults: QueryResult[] = results.map((row) => {
-        // cosine 距离转相似度（0-1）
+        // Convert cosine distance to a similarity score (0-1)
         const score = 1 - row.distance / 2
 
         return {
@@ -198,7 +198,7 @@ export class SQLiteVectorStore implements VectorStore {
         }
       })
 
-      // 应用阈值过滤
+      // Apply threshold filtering
       const filteredResults = threshold
         ? queryResults.filter((r) => r.score >= threshold)
         : queryResults

@@ -8,7 +8,32 @@ import {
   flattenSectionsWithPath
 } from '../../src/main/services/loaders/sections'
 import { MarkdownNormalizer } from '../../src/main/services/MarkdownNormalizer'
+import type { Database } from '../../src/main/db'
+import type { KnowledgeService } from '../../src/main/services/KnowledgeService'
 import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+
+type DbModule = typeof import('../../src/main/db')
+type SchemaModule = typeof import('../../src/main/db/schema')
+
+type StructuralContext = {
+  dbModule: DbModule
+  schema: SchemaModule
+  db: Database
+  notebookId: string
+  service: KnowledgeService
+}
+
+type CompactSectionMetadata = {
+  title: string
+  headingPath: string[]
+}
+
+type StructuralDocumentMetadata = {
+  structure: {
+    type: string
+    sections: CompactSectionMetadata[]
+  }
+}
 
 function sectionsOf(content: string) {
   return flattenSectionsWithPath(extractSectionsFromMarkdown(content))
@@ -230,7 +255,7 @@ const CONTRACT = [
 ].join('\n')
 
 describe('KnowledgeService structural retrieval', () => {
-  let context: any
+  let context: StructuralContext | undefined
 
   beforeEach(async () => {
     userDataDir = join(
@@ -274,7 +299,7 @@ describe('KnowledgeService structural retrieval', () => {
   })
 
   it('attaches heading paths to chunks and indexes them for keyword search', async () => {
-    const { service, notebookId, dbModule } = context
+    const { service, notebookId, dbModule } = context!
 
     const documentId = await service.addDocument(notebookId, {
       title: 'Hợp đồng ABC',
@@ -286,13 +311,11 @@ describe('KnowledgeService structural retrieval', () => {
     const docChunks = service.getDocumentChunks(documentId)
     expect(docChunks.length).toBeGreaterThan(2)
 
-    const terminationChunk = docChunks.find((chunk: any) =>
-      chunk.content.includes('chấm dứt hợp đồng')
-    )
+    const terminationChunk = docChunks.find((chunk) => chunk.content.includes('chấm dứt hợp đồng'))
     expect(terminationChunk?.metadata?.headingPath).toEqual(['Hợp đồng ABC', '2. Termination'])
     expect(terminationChunk?.metadata?.sectionTitle).toBe('2. Termination')
 
-    const scopeTitled = docChunks.filter((chunk: any) =>
+    const scopeTitled = docChunks.filter((chunk) =>
       chunk.metadata?.headingPath?.includes('1. Phạm vi')
     )
     expect(scopeTitled.length).toBeGreaterThan(0)
@@ -306,16 +329,16 @@ describe('KnowledgeService structural retrieval', () => {
     expect(ftsRow.content).toContain('chấm dứt hợp đồng')
 
     const results = await service.search(notebookId, 'Termination', { topK: 3, threshold: 0 })
-    expect(results.some((result: any) => result.sectionPath?.includes('2. Termination'))).toBe(true)
+    expect(results.some((result) => result.sectionPath?.includes('2. Termination'))).toBe(true)
 
-    const terminationResult = results.find((result: any) =>
+    const terminationResult = results.find((result) =>
       result.sectionPath?.includes('2. Termination')
     )
     expect(terminationResult?.pageNumber).toBeUndefined()
   })
 
   it('persists compact sections into documents.metadata', async () => {
-    const { service, notebookId } = context
+    const { service, notebookId } = context!
 
     const documentId = await service.addDocument(notebookId, {
       title: 'Hợp đồng ABC',
@@ -323,9 +346,10 @@ describe('KnowledgeService structural retrieval', () => {
       content: CONTRACT
     })
 
-    const metadata = service.getDocument(documentId)?.metadata as Record<string, any>
+    const metadata = service.getDocument(documentId)!
+      .metadata as unknown as StructuralDocumentMetadata
     expect(metadata.structure.type).toBe('sections')
-    expect(metadata.structure.sections.map((section: any) => section.title)).toEqual([
+    expect(metadata.structure.sections.map((section) => section.title)).toEqual([
       'Hợp đồng ABC',
       '1. Phạm vi',
       '2. Termination',
@@ -335,7 +359,7 @@ describe('KnowledgeService structural retrieval', () => {
   })
 
   it('backfills heading paths when reindexing chunks whose content is unchanged', async () => {
-    const { service, notebookId, db, schema, dbModule } = context
+    const { service, notebookId, db, schema, dbModule } = context!
     const { eq } = await import('drizzle-orm')
 
     const documentId = await service.addDocument(notebookId, {
@@ -377,7 +401,7 @@ describe('KnowledgeService structural retrieval', () => {
 
     const backfilled = service
       .getDocumentChunks(documentId)
-      .find((chunk: any) => chunk.content.includes('chấm dứt hợp đồng'))
+      .find((chunk) => chunk.content.includes('chấm dứt hợp đồng'))
     expect(backfilled?.metadata?.headingPath).toEqual(['Hợp đồng ABC', '2. Termination'])
 
     const ftsRow = sqlite

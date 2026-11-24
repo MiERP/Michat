@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { validate } from './validation'
 
 /**
- * Item 相关验证 Schema
+ * Item-related validation schemas
  */
 const ItemSchemas = {
   getItems: z.object({
@@ -26,10 +26,10 @@ const ItemSchemas = {
 }
 
 /**
- * 注册 item 相关 IPC handlers
+ * Registers the item IPC handlers
  */
 export function registerItemHandlers(knowledgeService: KnowledgeService) {
-  // 获取笔记本下的所有 items
+  // Get all items in a notebook
   ipcMain.handle(
     'items:get',
     validate(ItemSchemas.getItems, async (args) => {
@@ -45,7 +45,7 @@ export function registerItemHandlers(knowledgeService: KnowledgeService) {
     })
   )
 
-  // 更新 item 顺序
+  // Update the item order
   ipcMain.handle(
     'items:update-order',
     validate(ItemSchemas.updateOrder, async (args) => {
@@ -60,7 +60,7 @@ export function registerItemHandlers(knowledgeService: KnowledgeService) {
     })
   )
 
-  // 批量更新 items 顺序
+  // Update the order of multiple items in bulk
   ipcMain.handle(
     'items:batch-update-order',
     validate(ItemSchemas.batchUpdateOrder, async (args) => {
@@ -77,7 +77,7 @@ export function registerItemHandlers(knowledgeService: KnowledgeService) {
     })
   )
 
-  // 删除 item（可选删除关联资源）
+  // Delete an item (optionally deleting the associated resource)
   ipcMain.handle(
     'items:delete',
     validate(ItemSchemas.deleteItem, async (args) => {

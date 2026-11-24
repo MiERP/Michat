@@ -1,4 +1,4 @@
-import { useTranslation } from '../lib/i18n'
+import { useTranslation } from 'react-i18next'
 import { useI18nStore } from '../store/i18nStore'
 import { Language } from '../store/i18nStore'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'

@@ -50,3 +50,19 @@ release without the assets therefore fails before electron-builder runs.
 `electron-builder.yml` copies the whole `resources/` tree into the packaged
 app's resources directory, so the packaged layout must match the structure
 above.
+
+## Model-less builds
+
+When models are distributed separately, use the slim packaging config:
+
+```bash
+pnpm build:win:slim   # Windows installer without GGUF models
+pnpm package:ci       # unpacked build + asar check (used by CI)
+```
+
+`electron-builder.slim.yml` keeps `llama-bin` but excludes `models/`. After
+installation, copy the chat and embedding `.gguf` files into
+`<install dir>/resources/models/` (per-user installs default to
+`%LOCALAPPDATA%\Programs\MiChat\resources\models`). The strict `prebuild`
+check is intentionally skipped by the slim script; normal `pnpm build:win`
+still requires models in `resources/models/`.

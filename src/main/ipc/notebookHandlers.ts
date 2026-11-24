@@ -10,10 +10,10 @@ import { NotebookSchemas, validate } from './validation'
 import { registerNoArgHandler } from './handlerRegistry'
 
 /**
- * 注册笔记本相关的 IPC handlers
+ * Registers the notebook IPC handlers
  */
 export function registerNotebookHandlers() {
-  // 创建笔记本（带参数验证）
+  // Create a notebook (with argument validation)
   ipcMain.handle(
     'create-notebook',
     validate(NotebookSchemas.createNotebook, async (args) => {
@@ -29,7 +29,7 @@ export function registerNotebookHandlers() {
     })
   )
 
-  // 获取所有笔记本
+  // Get all notebooks
   registerNoArgHandler('get-all-notebooks', async () => {
     console.log('[IPC] get-all-notebooks')
     try {
@@ -42,7 +42,7 @@ export function registerNotebookHandlers() {
     }
   })
 
-  // 获取单个笔记本（带参数验证）
+  // Get a single notebook (with argument validation)
   ipcMain.handle(
     'get-notebook',
     validate(NotebookSchemas.getNotebook, async (args) => {
@@ -60,7 +60,7 @@ export function registerNotebookHandlers() {
     })
   )
 
-  // 更新笔记本（带参数验证）
+  // Update a notebook (with argument validation)
   ipcMain.handle(
     'update-notebook',
     validate(NotebookSchemas.updateNotebook, async (args) => {
@@ -76,7 +76,7 @@ export function registerNotebookHandlers() {
     })
   )
 
-  // 删除笔记本（带参数验证）
+  // Delete a notebook (with argument validation)
   ipcMain.handle(
     'delete-notebook',
     validate(NotebookSchemas.deleteNotebook, async (args) => {

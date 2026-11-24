@@ -48,9 +48,7 @@ describe('validateImportableFile', () => {
 
   it('rejects files above the configured size limit', async () => {
     const filePath = await write('large.txt', 'x'.repeat(2048))
-    await expect(validateImportableFile(filePath, { maxBytes: 1024 })).rejects.toThrow(
-      /too large/i
-    )
+    await expect(validateImportableFile(filePath, { maxBytes: 1024 })).rejects.toThrow(/too large/i)
   })
 
   it('rejects a disguised PDF imported as DOCX when magic bytes are absent', async () => {

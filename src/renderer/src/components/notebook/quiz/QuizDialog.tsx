@@ -2,14 +2,7 @@ import { useEffect, useState } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '../../ui/dialog'
 import { Button } from '../../ui/button'
 import { useDraggableDialog } from '../../ui/useDraggableDialog'
-import {
-  RefreshCw,
-  Loader2,
-  ArrowLeft,
-  ChevronDown,
-  ChevronUp,
-  Files
-} from 'lucide-react'
+import { RefreshCw, Loader2, ArrowLeft, ChevronDown, ChevronUp, Files } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useQuizStore } from '../../../store/quizStore'
 import { useKnowledgeStore } from '../../../store/knowledgeStore'
@@ -73,7 +66,7 @@ export default function QuizDialog({ notebookId }: { notebookId: string }) {
           ...dragStyle
         }}
       >
-        {/* 头部 - 固定高度 */}
+        {/* Header - fixed height */}
         <div
           className="p-6 pb-4 border-b border-border cursor-move select-none"
           style={{
@@ -150,7 +143,7 @@ export default function QuizDialog({ notebookId }: { notebookId: string }) {
           </div>
         )}
 
-        {/* 内容区域 - 自动填充剩余空间 */}
+        {/* Content area - fills the remaining space automatically */}
         <ScrollArea className="flex-1 p-6">
           {isGenerating ? (
             <QuizGenerating />

@@ -17,6 +17,7 @@ files:
   - '!$null'
   - '!resources/**'
   - '!resources.zip'
+  - '!**/*.tsbuildinfo'
 asarUnpack:
   - node_modules/better-sqlite3/**
   - node_modules/sqlite-vec/**
@@ -28,8 +29,9 @@ extraResources:
 win:
   executableName: michat
   # Signing is supplied by CSC_LINK/CSC_KEY_PASSWORD in release CI.
-  signingHashAlgorithms:
-    - sha256
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
   signAndEditExecutable: true
 nsis:
   artifactName: ${name}-${version}-setup.${ext}

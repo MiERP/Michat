@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
+import type { MarkdownStorage } from 'tiptap-markdown'
 import { Placeholder } from '@tiptap/extensions'
 import { ScrollArea } from '../../ui/scroll-area'
 import { sanitizePastedHtml } from '../../../lib/sanitizePastedHtml'
@@ -21,7 +22,7 @@ export default function NoteEditor({ content, onChange }: NoteEditorProps): Reac
       StarterKit,
       Markdown,
       Placeholder.configure({
-        placeholder: t('startEditing', '输入笔记内容...')
+        placeholder: t('startEditing', 'Enter note content...')
       })
     ],
     content,
@@ -32,12 +33,13 @@ export default function NoteEditor({ content, onChange }: NoteEditorProps): Reac
       transformPastedHTML: sanitizePastedHtml
     },
     onUpdate: ({ editor }) => {
-      const markdown = (editor.storage as any).markdown.getMarkdown()
+      const storage = editor.storage as unknown as { markdown: MarkdownStorage }
+      const markdown = storage.markdown.getMarkdown()
       onChange(markdown)
     }
   })
 
-  // 清理编辑器实例
+  // Clean up the editor instance
   useEffect(() => {
     return () => {
       if (editor) {
@@ -46,22 +48,25 @@ export default function NoteEditor({ content, onChange }: NoteEditorProps): Reac
     }
   }, [editor])
 
-  // 当外部 content 变化时同步到编辑器
+  // Sync external content changes into the editor
   useEffect(() => {
-    if (editor && content !== (editor.storage as any).markdown.getMarkdown()) {
+    const storage = editor?.storage as unknown as { markdown: MarkdownStorage } | undefined
+    if (editor && content !== storage?.markdown.getMarkdown()) {
       editor.commands.setContent(content)
     }
   }, [content, editor])
 
   if (!editor) {
     return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">加载中...</div>
+      <div className="h-full flex items-center justify-center text-muted-foreground">
+        Loading...
+      </div>
     )
   }
 
   return (
     <div className="h-full flex flex-col">
-      {/* 编辑器内容 */}
+      {/* Editor content */}
       <ScrollArea className="flex-1">
         <div className="p-4">
           <EditorContent editor={editor} />

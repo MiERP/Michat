@@ -1,14 +1,14 @@
-/* Markdown 内容样式 */
+/* Markdown content styles */
 .markdown-content {
   color: var(--foreground);
   font-size: 0.875rem;
   line-height: 1.75;
-  /* 文本换行控制 - 防止长单词和URL溢出 */
+  /* Text wrapping control - prevents long words and URLs from overflowing */
   word-break: break-word;
   overflow-wrap: break-word;
 }
 
-/* 标题样式 */
+/* Heading styles */
 .markdown-content h1 {
   font-size: 1.25rem;
   font-weight: 700;
@@ -41,7 +41,7 @@
   line-height: 1.4;
 }
 
-/* 段落样式 */
+/* Paragraph styles */
 .markdown-content p {
   margin-bottom: 0.75rem;
   line-height: 1.75;
@@ -51,7 +51,7 @@
   margin-bottom: 0;
 }
 
-/* 列表样式 */
+/* List styles */
 .markdown-content ul,
 .markdown-content ol {
   margin-bottom: 1rem;
@@ -75,7 +75,7 @@
   margin-bottom: 0.25rem;
 }
 
-/* 嵌套列表 */
+/* Nested lists */
 .markdown-content ul ul,
 .markdown-content ol ul,
 .markdown-content ul ol,
@@ -84,7 +84,7 @@
   margin-bottom: 0.25rem;
 }
 
-/* 引用块 */
+/* Blockquote */
 .markdown-content blockquote {
   border-left: 4px solid var(--border);
   padding-left: 1rem;
@@ -97,7 +97,7 @@
   margin-bottom: 0.5rem;
 }
 
-/* 代码样式 */
+/* Code styles */
 .markdown-content code {
   background-color: var(--muted);
   color: var(--primary);
@@ -122,7 +122,7 @@
   font-size: 0.875rem;
 }
 
-/* 链接样式 */
+/* Link styles */
 .markdown-content a {
   color: var(--primary);
   text-decoration: underline;
@@ -132,14 +132,14 @@
   color: var(--primary) / 80;
 }
 
-/* 分割线 */
+/* Horizontal rule */
 .markdown-content hr {
   border: 0;
   border-top: 1px solid var(--border);
   margin: 1.5rem 0;
 }
 
-/* 表格样式 */
+/* Table styles */
 .markdown-content table {
   width: max-content;
   min-width: 100%;
@@ -163,7 +163,7 @@
   padding: 0.5rem 1rem;
 }
 
-/* 图片样式 */
+/* Image styles */
 .markdown-content img {
   max-width: 100%;
   height: auto;
@@ -171,7 +171,7 @@
   margin: 1rem 0;
 }
 
-/* 强调样式 */
+/* Emphasis styles */
 .markdown-content strong {
   font-weight: 700;
 }
@@ -180,23 +180,23 @@
   font-style: italic;
 }
 
-/* 删除线 */
+/* Strikethrough */
 .markdown-content del {
   text-decoration: line-through;
   opacity: 0.7;
 }
 
-/* 任务列表 */
+/* Task list */
 .markdown-content input[type='checkbox'] {
   margin-right: 0.5rem;
 }
 
-/* 确保第一个元素没有上边距 */
+/* Ensure the first element has no top margin */
 .markdown-content > *:first-child {
   margin-top: 0;
 }
 
-/* 确保最后一个元素没有下边距 */
+/* Ensure the last element has no bottom margin */
 .markdown-content > *:last-child {
   margin-bottom: 0;
 }

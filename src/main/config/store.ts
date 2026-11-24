@@ -3,7 +3,7 @@ import type { StoreSchema } from './types'
 import { defaultSettings, defaultShortcuts } from './defaults'
 
 /**
- * 创建 electron-store 实例（使用动态导入）
+ * Creates the electron-store instance (using a dynamic import)
  */
 let store: Store<StoreSchema> | null = null
 
@@ -28,8 +28,8 @@ export async function getStore(): Promise<Store<StoreSchema>> {
         shortcuts: defaultShortcuts
       },
       name: 'michat-config',
-      // 文件会保存在: ~/Library/Application Support/michat/michat-config.json (macOS)
-      encryptionKey: undefined // 如果需要加密可以设置密钥
+      // The file is stored at: ~/Library/Application Support/michat/michat-config.json (macOS)
+      encryptionKey: undefined // set a key here if encryption is needed
     })
   }
   return store

@@ -1,6 +1,6 @@
 /**
  * MarkdownLoader
- * 使用 remark/unified 解析 Markdown，保留 AST 结构
+ * Parses Markdown with remark/unified while preserving the AST structure
  */
 
 import { readFile } from 'fs/promises'
@@ -10,14 +10,22 @@ import remarkGfm from 'remark-gfm'
 import { visit } from 'unist-util-visit'
 import Logger from '../../../shared/utils/logger'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions, SectionInfo } from './types'
+
+/** Minimal position shape from a unist AST (line/column are always present). */
+type MarkdownPoint = {
+  line: number
+  column: number
+  offset?: number
+}
+
 type MarkdownNode = {
   type: string
   depth?: number
   value?: string
   children?: MarkdownNode[]
   position?: {
-    start: { offset?: number }
-    end: { offset?: number }
+    start: MarkdownPoint
+    end: MarkdownPoint
   }
 }
 
@@ -26,8 +34,8 @@ type Heading = MarkdownNode & { depth: number }
 type Content = MarkdownNode
 
 /**
- * Markdown 文档加载器
- * 基于 unified/remark 解析，支持 GFM
+ * Markdown document loader
+ * Parses with unified/remark and supports GFM
  */
 export class MarkdownLoader implements IDocumentLoader {
   readonly supportedMimeTypes = ['text/markdown']
@@ -51,18 +59,23 @@ export class MarkdownLoader implements IDocumentLoader {
     const content = buffer.toString('utf-8')
 
     try {
-      // 解析 Markdown AST
-      // 处理 ESM/CommonJS 兼容性：在运行时获取正确的函数
-      const remarkFn = typeof remark === 'function' ? remark : (remark as any).remark
+      // Parse the Markdown AST
+      // Handle ESM/CommonJS compatibility: resolve the correct function at runtime
+      const remarkFn =
+        typeof remark === 'function'
+          ? remark
+          : ((remark as unknown as { remark?: typeof remark }).remark ?? remark)
       const remarkGfmPlugin =
-        typeof remarkGfm === 'function' ? remarkGfm : (remarkGfm as any).default
+        typeof remarkGfm === 'function'
+          ? remarkGfm
+          : ((remarkGfm as unknown as { default?: typeof remarkGfm }).default ?? remarkGfm)
       const processor = remarkFn().use(remarkGfmPlugin)
-      const ast = processor.parse(content) as unknown as Root
+      const ast = processor.parse(content) as Root
 
-      // 提取标题
+      // Extract the title
       const title = this.extractTitle(ast)
 
-      // 提取章节结构
+      // Extract the section structure
       const sections = opts.preserveStructure ? this.extractSections(content, ast) : undefined
 
       return {
@@ -88,30 +101,30 @@ export class MarkdownLoader implements IDocumentLoader {
   }
 
   /**
-   * 提取文档标题（第一个 h1）
+   * Extract the document title (first h1)
    */
   private extractTitle(ast: Root): string | undefined {
     let title: string | undefined
 
-    visit(ast as any, 'heading', (node: Heading) => {
+    visit(ast, 'heading', (node: MarkdownNode) => {
       if (!title && node.depth === 1) {
         title = this.nodeToText(node)
-        return false // 停止遍历
+        return false // Stop traversal
       }
-      return undefined // 继续遍历
+      return undefined // Continue traversal
     })
 
     return title
   }
 
   /**
-   * 提取章节结构
+   * Extract the section structure
    */
   private extractSections(content: string, ast: Root): SectionInfo[] {
     const sections: SectionInfo[] = []
     const stack: { section: SectionInfo; level: number }[] = []
 
-    visit(ast as any, (node: MarkdownNode) => {
+    visit(ast, (node) => {
       if (node.type === 'heading') {
         const heading = node as Heading
         const title = this.nodeToText(heading)
@@ -127,7 +140,7 @@ export class MarkdownLoader implements IDocumentLoader {
           children: []
         }
 
-        // 维护章节层级
+        // Maintain the section hierarchy
         while (stack.length > 0 && stack[stack.length - 1].level >= heading.depth) {
           stack.pop()
         }
@@ -142,14 +155,14 @@ export class MarkdownLoader implements IDocumentLoader {
       }
     })
 
-    // 提取每个章节的内容
+    // Extract the content of each section
     this.fillSectionContent(sections, content)
 
     return sections
   }
 
   /**
-   * 填充章节内容
+   * Fill in section content
    */
   private fillSectionContent(sections: SectionInfo[], fullContent: string): void {
     for (let i = 0; i < sections.length; i++) {
@@ -157,11 +170,11 @@ export class MarkdownLoader implements IDocumentLoader {
       const nextSectionStart =
         i + 1 < sections.length ? sections[i + 1].startOffset : fullContent.length
 
-      // 提取从当前标题到下一个同级标题之间的内容
+      // Capture the content from the current heading to the next same-level heading
       section.content = fullContent.substring(section.startOffset, nextSectionStart).trim()
       section.endOffset = nextSectionStart
 
-      // 递归处理子章节
+      // Recursively process subsections
       if (section.children && section.children.length > 0) {
         this.fillSectionContent(section.children, section.content)
       }
@@ -169,7 +182,7 @@ export class MarkdownLoader implements IDocumentLoader {
   }
 
   /**
-   * 将 AST 节点转换为纯文本
+   * Convert an AST node to plain text
    */
   private nodeToText(node: Content | Heading): string {
     if ('value' in node && typeof node.value === 'string') {
@@ -182,11 +195,11 @@ export class MarkdownLoader implements IDocumentLoader {
   }
 
   /**
-   * 检查是否有代码块
+   * Check whether there are code blocks
    */
   private hasCodeBlocks(ast: Root): boolean {
     let hasCode = false
-    visit(ast as any, 'code', () => {
+    visit(ast, 'code', () => {
       hasCode = true
       return false
     })
@@ -194,11 +207,11 @@ export class MarkdownLoader implements IDocumentLoader {
   }
 
   /**
-   * 检查是否有表格
+   * Check whether there are tables
    */
   private hasTables(ast: Root): boolean {
     let hasTable = false
-    visit(ast as any, 'table', () => {
+    visit(ast, 'table', () => {
       hasTable = true
       return false
     })

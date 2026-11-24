@@ -2,7 +2,7 @@ import { ReactElement, useEffect, useMemo, useState } from 'react'
 import { Sun, Moon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useI18nStore } from '../../store/i18nStore'
-import type { AppSettings } from '../../../../shared/types'
+import type { AppSettings, PublicProviderConfig } from '../../../../shared/types'
 import {
   Field,
   FieldContent,
@@ -14,13 +14,6 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Button } from '../ui/button'
 
-interface ProviderConfig {
-  providerName: string
-  config: Record<string, any>
-  enabled: boolean
-  updatedAt: number
-}
-
 interface GgufModel {
   filename: string
   type: 'chat' | 'embedding' | 'unknown'
@@ -28,10 +21,24 @@ interface GgufModel {
   addedAt: string | null
 }
 
+/** Cached model detail entry stored in the provider config. */
+interface ModelDetail {
+  id: string
+  type?: string
+}
+
+function isModelDetail(value: unknown): value is ModelDetail {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === 'string'
+  )
+}
+
 interface GeneralSettingsProps {
   settings: AppSettings
   onSettingsChange: (updates: Partial<AppSettings>) => void
-  providers: ProviderConfig[]
+  providers: PublicProviderConfig[]
 }
 
 const languages = [
@@ -57,7 +64,9 @@ function resolveModelType(
   if (/rerank|cross-encoder/i.test(id)) return 'reranker'
   if (/embed|embedding|bge|e5-|gte-|m3e/i.test(id)) return 'embedding'
   if (
-    /qwen|llama|mistral|deepseek|gpt-|claude|chat|instruct|glm|kimi|yi-|baichuan|internlm|gemma|phi|vicuna|orca/i.test(id)
+    /qwen|llama|mistral|deepseek|gpt-|claude|chat|instruct|glm|kimi|yi-|baichuan|internlm|gemma|phi|vicuna|orca/i.test(
+      id
+    )
   ) {
     return 'chat'
   }
@@ -91,11 +100,17 @@ export default function GeneralSettings({
     const embeddingModels: Array<{ id: string; provider: string; label: string }> = []
 
     providers.forEach((provider) => {
-      if (provider.enabled && provider.config.models && Array.isArray(provider.config.models)) {
-        const modelDetails = provider.config.modelDetails || []
+      const modelIds: unknown[] = Array.isArray(provider.config.models)
+        ? provider.config.models
+        : []
+      if (provider.enabled && modelIds.length > 0) {
+        const modelDetails: ModelDetail[] = Array.isArray(provider.config.modelDetails)
+          ? provider.config.modelDetails.filter(isModelDetail)
+          : []
 
-        provider.config.models.forEach((modelId: string) => {
-          const modelDetail = modelDetails.find((m: any) => m.id === modelId)
+        modelIds.forEach((modelId) => {
+          if (typeof modelId !== 'string') return
+          const modelDetail = modelDetails.find((m) => m.id === modelId)
           const modelObj = {
             id: `${provider.providerName}:${modelId}`,
             provider: provider.providerName,

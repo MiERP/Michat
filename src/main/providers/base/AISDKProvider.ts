@@ -1,16 +1,11 @@
-/* eslint-disable no-irregular-whitespace */
 /**
  * AI SDK Provider
- * 基于 Vercel AI SDK 的统一 Provider 实现
- * 支持所有 OpenAI 兼容的 API(OpenAI, DeepSeek, Qwen, Kimi, SiliconFlow 等)
+ * Local llama.cpp servers exposed through the OpenAI-compatible provider.
  */
 
-import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { createDeepSeek } from '@ai-sdk/deepseek'
-import { createQwen } from 'qwen-ai-provider'
-import { createOllama } from 'ollama-ai-provider-v2'
 import { streamText, embed, embedMany } from 'ai'
+import type { LanguageModel } from 'ai'
 import type { BaseProvider, LLMProviderConfig } from '../capabilities/BaseProvider'
 import type { ChatCapability } from '../capabilities/ChatCapability'
 import type { EmbeddingCapability } from '../capabilities/EmbeddingCapability'
@@ -51,7 +46,7 @@ function sanitizeMessageContent(content: string): string {
 
 /**
  * AISDKProvider
- * 基于 Vercel AI SDK 的统一 Provider 实现
+ * Unified Provider implementation backed by the Vercel AI SDK
  * Provider backed by the Vercel AI SDK; model selection comes from ProviderDescriptor.
  */
 export class AISDKProvider implements BaseProvider {
@@ -59,29 +54,17 @@ export class AISDKProvider implements BaseProvider {
   private descriptor: ProviderDescriptor
   protected config: LLMProviderConfig
 
-  // AI SDK provider å®žä¾‹
-  private aiProvider:
-    | ReturnType<typeof createOpenAI>
-    | ReturnType<typeof createOpenAICompatible>
-    | ReturnType<typeof createDeepSeek>
-    | ReturnType<typeof createQwen>
-    | ReturnType<typeof createOllama>
-    | null = null
+  // AI SDK provider instance (OpenAI-compatible llama.cpp server).
+  private aiProvider: ReturnType<typeof createOpenAICompatible> | null = null
 
   // Optional separate provider instance for embeddings (useful when embedding server runs on different baseUrl)
-  private aiProviderEmbed:
-    | ReturnType<typeof createOpenAI>
-    | ReturnType<typeof createOpenAICompatible>
-    | ReturnType<typeof createDeepSeek>
-    | ReturnType<typeof createQwen>
-    | ReturnType<typeof createOllama>
-    | null = null
+  private aiProviderEmbed: ReturnType<typeof createOpenAICompatible> | null = null
 
   constructor(descriptor: ProviderDescriptor) {
     this.name = descriptor.name
     this.descriptor = descriptor
 
-    // 初始化默认配置
+    // Initialize the default configuration
     this.config = {
       baseUrl: descriptor.defaultBaseUrl,
       model: descriptor.defaultChatModel || descriptor.defaultEmbeddingModel,
@@ -93,7 +76,7 @@ export class AISDKProvider implements BaseProvider {
   }
 
   /**
-   * 配置 Provider
+   * Configure the Provider
    */
   configure(config: LLMProviderConfig): void {
     this.config = { ...this.config, ...config }
@@ -101,65 +84,30 @@ export class AISDKProvider implements BaseProvider {
     // Reset embed client each time we reconfigure
     this.aiProviderEmbed = null
 
-    // 重新创建 AI SDK provider 实例
+    // Recreate the AI SDK provider instance
     // NOTE:
     // - Some local OpenAI-compatible servers (e.g. llama.cpp server) do not require an API key.
     // - Previously we only created the underlying AI SDK provider when apiKey exists (or Ollama).
     //   That makes keyless local servers unusable.
-    const isLocalKeylessProvider =
-      this.name === 'ollama' ||
-      this.name === 'llama' ||
-      this.name === 'llama-embed' ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/i.test(this.config.baseUrl || '')
+    // Only local llama.cpp providers are registered; both expose an
+    // OpenAI-compatible API and do not require an API key.
+    this.aiProvider = createOpenAICompatible({
+      name: this.name,
+      baseURL: this.config.baseUrl || '',
+      apiKey: config.apiKey || ''
+    })
 
-    if (config.apiKey || isLocalKeylessProvider) {
-      if (this.name === 'openai') {
-        // OpenAI 使用官方 provider
-        this.aiProvider = createOpenAI({
-          baseURL: this.config.baseUrl,
-          apiKey: config.apiKey
-        })
-      } else if (this.name === 'deepseek') {
-        // DeepSeek 使用官方 provider
-        this.aiProvider = createDeepSeek({
-          baseURL: this.config.baseUrl,
-          apiKey: config.apiKey
-        })
-      } else if (this.name === 'qwen') {
-        // Qwen 使用社区 provider
-        this.aiProvider = createQwen({
-          baseURL: this.config.baseUrl,
-          apiKey: config.apiKey
-        })
-      } else if (this.name === 'ollama') {
-        // Ollama 使用社区 provider
-        this.aiProvider = createOllama({
-          baseURL: this.config.baseUrl || 'http://localhost:11434/api'
-        })
-        this.aiProviderEmbed = null
-      } else {
-        // 其他所有 provider 都使用 OpenAI Compatible (Kimi, SiliconFlow, llama.cpp, etc.)
-        this.aiProvider = createOpenAICompatible({
-          name: this.name,
-          baseURL: this.config.baseUrl || '',
-          // For keyless local servers, empty apiKey is fine.
-          apiKey: config.apiKey || ''
-        })
-
-        // If embedding server uses a different base URL (e.g., llama.cpp on :8001),
-        // create a dedicated embedding client.
-        const embedBaseUrl = ((this.config as any).baseUrlembed ||
-          (this.config as any).embeddingBaseUrl) as string | undefined
-        if (embedBaseUrl && embedBaseUrl !== this.config.baseUrl) {
-          this.aiProviderEmbed = createOpenAICompatible({
-            name: `${this.name}-embed`,
-            baseURL: embedBaseUrl,
-            apiKey: config.apiKey || ''
-          })
-        } else {
-          this.aiProviderEmbed = null
-        }
-      }
+    // If embedding server uses a different base URL (e.g., llama.cpp on :8001),
+    // create a dedicated embedding client.
+    const embedBaseUrl = this.config.baseUrlembed || this.config.embeddingBaseUrl
+    if (embedBaseUrl && embedBaseUrl !== this.config.baseUrl) {
+      this.aiProviderEmbed = createOpenAICompatible({
+        name: `${this.name}-embed`,
+        baseURL: embedBaseUrl,
+        apiKey: config.apiKey || ''
+      })
+    } else {
+      this.aiProviderEmbed = null
     }
 
     Logger.debug('AISDKProvider', `Provider ${this.name} configured`)
@@ -187,7 +135,7 @@ export class AISDKProvider implements BaseProvider {
 
   /**
    * Stream a chat completion and report chunks through callbacks.
-   * TypeScript 类型守卫
+   * TypeScript type guard
    */
   hasChatCapability(): this is BaseProvider & ChatCapability {
     return this.descriptor.capabilities.chat && this.aiProvider !== null
@@ -195,7 +143,7 @@ export class AISDKProvider implements BaseProvider {
 
   /**
    * Type guard for the embedding capability.
-   * TypeScript 类型守卫
+   * TypeScript type guard
    */
   hasEmbeddingCapability(): this is BaseProvider & EmbeddingCapability {
     // Some local OpenAI-compatible servers (e.g. llama.cpp) may be able to serve embeddings even if
@@ -209,7 +157,7 @@ export class AISDKProvider implements BaseProvider {
   // ==================== Embedding capability ====================
 
   /**
-   * 流式发送消息
+   * Stream messages
    * Create embeddings for a single text.
    */
   async sendMessageStream(
@@ -236,10 +184,10 @@ export class AISDKProvider implements BaseProvider {
       return abortController
     }
 
-    // 创建 AbortController
+    // Create the AbortController
     const abortController = new AbortController()
 
-    // 异步执行流式生成
+    // Run streaming generation asynchronously
     ;(async () => {
       const modelId = this.config.model || this.descriptor.defaultChatModel!
       const emitReasoningChunks = this.name !== 'llama' && this.name !== 'llama-embed'
@@ -249,10 +197,10 @@ export class AISDKProvider implements BaseProvider {
         // Convert messages to the AI SDK core format.
         const coreMessages = convertToCoreMessages(messages)
 
-        // 获取语言模型
-        const model = this.aiProvider!(modelId) as any
+        // Get the language model
+        const model = this.aiProvider!(modelId)
 
-        // 调用 AI SDK streamText
+        // Call AI SDK streamText
         const result = streamText({
           model,
           messages: coreMessages,
@@ -269,13 +217,12 @@ export class AISDKProvider implements BaseProvider {
             break
           }
 
-          if ((part as any)?.type === 'error') {
+          if (part.type === 'error') {
             const streamError =
-              (part as any)?.error instanceof Error
-                ? (part as any).error
+              part.error instanceof Error
+                ? part.error
                 : new Error(
-                    this.extractErrorMessages((part as any)?.error).join(' | ') ||
-                      'Unknown stream error'
+                    this.extractErrorMessages(part.error).join(' | ') || 'Unknown stream error'
                   )
             throw streamError
           }
@@ -343,7 +290,7 @@ export class AISDKProvider implements BaseProvider {
           }
         }
 
-        // 等待结果完成，获取 metadata
+        // Wait for the result to complete and retrieve metadata
         const finalResult = await result
         const usage = await finalResult.usage
         const finishReason = await finalResult.finishReason
@@ -380,7 +327,7 @@ export class AISDKProvider implements BaseProvider {
   }
 
   /**
-   * 获取默认对话模型
+   * Get the default chat model
    */
   getDefaultChatModel(): string {
     if (!this.descriptor.capabilities.chat) {
@@ -390,10 +337,10 @@ export class AISDKProvider implements BaseProvider {
   }
 
   /**
-   * 获取 AI SDK 模型实例 (用于 streamObject 等高级 API)
-   * @param modelId - 模型ID,如果不提供则使用配置的默认模型
+   * Get an AI SDK model instance (for advanced APIs such as streamObject)
+   * @param modelId - Model ID; uses the configured default model when omitted
    */
-  getAIModel(modelId?: string): any {
+  getAIModel(modelId?: string): LanguageModel {
     if (!this.aiProvider) {
       throw new Error(`Provider ${this.name} is not configured. Please configure API key first.`)
     }
@@ -407,7 +354,7 @@ export class AISDKProvider implements BaseProvider {
   // ==================== Embedding helpers ====================
 
   /**
-   * 生成单个文本的 Embedding
+   * Generate an embedding for a single text
    * Uses the configured embedding model.
    */
   async createEmbedding(text: string, config?: EmbeddingConfig): Promise<EmbeddingResult> {
@@ -428,16 +375,13 @@ export class AISDKProvider implements BaseProvider {
 
     Logger.debug('AISDKProvider', `Creating embedding with model: ${modelId}`)
 
-    // 使用 AI SDK 的 embed 函数
-    // 不同 provider 使用不同的方法名
+    // Use the AI SDK embed function
+    // Different providers use different method names
     const providerForEmbed = this.aiProviderEmbed ?? this.aiProvider
 
-    const embeddingModel =
-      this.name === 'ollama'
-        ? (providerForEmbed as any).embedding(modelId) // Ollama: embedding
-        : (providerForEmbed as any).textEmbeddingModel(modelId) // OpenAI, DeepSeek, Qwen, OpenAI-Compatible: textEmbeddingModel
+    const embeddingModel = providerForEmbed.textEmbeddingModel(modelId)
 
-    // 构建 providerOptions
+    // Build providerOptions
     const providerOptions = this.buildProviderOptions(config)
 
     const result = await embed({
@@ -458,7 +402,7 @@ export class AISDKProvider implements BaseProvider {
   }
 
   /**
-   * 批量生成 Embedding
+   * Batch generate embeddings
    * Create embeddings for a batch of texts.
    */
   async createEmbeddings(texts: string[], config?: EmbeddingConfig): Promise<EmbeddingResult[]> {
@@ -482,23 +426,20 @@ export class AISDKProvider implements BaseProvider {
       `Creating embeddings for ${texts.length} texts with model: ${modelId}`
     )
 
-    // 使用 AI SDK 的 embedMany 函数
-    // 不同 provider 使用不同的方法名
+    // Use the AI SDK embedMany function
+    // Different providers use different method names
     const providerForEmbed = this.aiProviderEmbed ?? this.aiProvider
 
-    const embeddingModel =
-      this.name === 'ollama'
-        ? (providerForEmbed as any).embedding(modelId) // Ollama: embedding
-        : (providerForEmbed as any).textEmbeddingModel(modelId) // OpenAI, DeepSeek, Qwen, OpenAI-Compatible: textEmbeddingModel
+    const embeddingModel = providerForEmbed.textEmbeddingModel(modelId)
 
-    // 构建 providerOptions
+    // Build providerOptions
     const providerOptions = this.buildProviderOptions(config)
 
     const result = await embedMany({
       model: embeddingModel,
       values: texts,
       maxRetries: 0,
-      ...(providerOptions && { providerOptions }) // 构建 providerOptions
+      ...(providerOptions && { providerOptions }) // Build providerOptions
     })
 
     const totalTokens = result.usage?.tokens || 0
@@ -513,7 +454,7 @@ export class AISDKProvider implements BaseProvider {
   }
 
   /**
-   * 获取默认 Embedding 模型
+   * Get the default embedding model
    */
   getDefaultEmbeddingModel(): string {
     if (!this.descriptor.capabilities.embedding) {
@@ -523,15 +464,17 @@ export class AISDKProvider implements BaseProvider {
   }
 
   /**
-   * 构建 provider-specific 选项
+   * Build provider-specific options
    * Build provider-specific options for embedding requests.
    */
-  private buildProviderOptions(config?: EmbeddingConfig): Record<string, any> | undefined {
+  private buildProviderOptions(
+    config?: EmbeddingConfig
+  ): Record<string, Record<string, number>> | undefined {
     if (!config?.dimensions) {
       return undefined
     }
 
-    // 支持 dimensions 参数的 providers（白名单机制）
+    // Providers that support the dimensions parameter (allowlist)
     const supportedProviders = ['openai', 'deepseek', 'zhipu', 'siliconflow', 'openai-compatible']
 
     if (!supportedProviders.includes(this.name)) {
@@ -543,7 +486,7 @@ export class AISDKProvider implements BaseProvider {
     }
 
     // OpenAI-compatible providers use the 'openai' provider key; SiliconFlow is mapped below.
-    // SiliconFlow 使用 'openai' 作为 providerKey
+    // SiliconFlow uses 'openai' as the providerKey
     const providerKey = this.name === 'siliconflow' ? 'openai' : this.name
 
     return {
@@ -654,11 +597,11 @@ export class AISDKProvider implements BaseProvider {
     return [String(error)]
   }
 
-  // ==================== 向后兼容方法(已废弃) ====================
+  // ==================== Backward-compatible methods (deprecated) ====================
 
   /**
-   * @deprecated 使用 hasChatCapability() 或 hasEmbeddingCapability() 替代
-   * 检查是否支持 Embedding
+   * @deprecated Use hasChatCapability() or hasEmbeddingCapability() instead
+   * Check whether embeddings are supported
    */
   supportsEmbedding(): boolean {
     return this.hasEmbeddingCapability()

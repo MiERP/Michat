@@ -1,6 +1,27 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
+import type { Database } from '../../src/main/db'
+import type { KnowledgeService } from '../../src/main/services/KnowledgeService'
+import type { BackgroundJobService } from '../../src/main/services/BackgroundJobService'
 import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+
+type DbModule = typeof import('../../src/main/db')
+type SchemaModule = typeof import('../../src/main/db/schema')
+
+type BackfillContext = {
+  dbModule: DbModule
+  schema: SchemaModule
+  db: Database
+  notebookId: string
+  knowledgeService: KnowledgeService
+  jobService: BackgroundJobService
+}
+
+type DocumentStructureMetadata = {
+  structure?: {
+    sections?: unknown[]
+  }
+}
 
 let userDataDir = ''
 
@@ -56,7 +77,7 @@ const LEGACY_VEC_DDL = `
 `
 
 describe('vec_embeddings migration', () => {
-  let dbModule: any
+  let dbModule: DbModule | undefined
 
   beforeEach(async () => {
     userDataDir = await createTempUserData('michat-vecmig')
@@ -73,7 +94,7 @@ describe('vec_embeddings migration', () => {
   })
 
   it('rebuilds a legacy vector table that has no document_id column', () => {
-    const sqlite = dbModule.getSqlite()
+    const sqlite = dbModule!.getSqlite()
 
     // Bảng kiểu cũ + một vector giả để chứng minh dữ liệu cũ bị bỏ đi
     sqlite.exec(LEGACY_VEC_DDL)
@@ -85,26 +106,26 @@ describe('vec_embeddings migration', () => {
 
     expect(() => sqlite.prepare('SELECT document_id FROM vec_embeddings LIMIT 1').get()).toThrow()
 
-    dbModule.initExtensions()
+    dbModule!.initExtensions()
 
     // Cột mới có mặt, cờ rebuild được bật, dữ liệu cũ đã bị xoá (sẽ embed lại)
-    expect(dbModule.wasVectorIndexRebuilt()).toBe(true)
+    expect(dbModule!.wasVectorIndexRebuilt()).toBe(true)
     expect(sqlite.prepare('SELECT document_id FROM vec_embeddings LIMIT 1').get()).toBeUndefined()
     expect(sqlite.prepare('SELECT count(*) as c FROM vec_embeddings').get()).toMatchObject({ c: 0 })
   })
 
   it('keeps a modern vector table as-is (no rebuild)', () => {
-    dbModule.initExtensions()
+    dbModule!.initExtensions()
 
     expect(() =>
-      dbModule.getSqlite().prepare('SELECT document_id FROM vec_embeddings LIMIT 1').get()
+      dbModule!.getSqlite().prepare('SELECT document_id FROM vec_embeddings LIMIT 1').get()
     ).not.toThrow()
-    expect(dbModule.wasVectorIndexRebuilt()).toBe(false)
+    expect(dbModule!.wasVectorIndexRebuilt()).toBe(false)
   })
 })
 
 describe('vector rebuild and knowledge backfill', () => {
-  let context: any
+  let context: BackfillContext | undefined
 
   beforeEach(async () => {
     userDataDir = await createTempUserData('michat-backfill')
@@ -150,7 +171,7 @@ describe('vector rebuild and knowledge backfill', () => {
   })
 
   async function seedDocument(): Promise<string> {
-    const { knowledgeService, notebookId } = context
+    const { knowledgeService, notebookId } = context!
     return knowledgeService.addDocument(notebookId, {
       title: 'Hợp đồng ABC',
       type: 'text',
@@ -160,7 +181,7 @@ describe('vector rebuild and knowledge backfill', () => {
   }
 
   it('filters vectors by document id inside the KNN query', async () => {
-    const { knowledgeService, notebookId } = context
+    const { knowledgeService, notebookId } = context!
     const first = await seedDocument()
     const second = await knowledgeService.addDocument(notebookId, {
       title: 'Bảng giá 2026',
@@ -179,7 +200,7 @@ describe('vector rebuild and knowledge backfill', () => {
     expect(matches.length).toBeGreaterThan(0)
 
     const chunkIds = new Set(matches.map((match) => match.chunkId))
-    const allowed = new Set(knowledgeService.getDocumentChunks(first).map((chunk: any) => chunk.id))
+    const allowed = new Set(knowledgeService.getDocumentChunks(first).map((chunk) => chunk.id))
     for (const chunkId of chunkIds) expect(allowed.has(chunkId)).toBe(true)
 
     const secondMatches = await store.query(embedding('bảng giá').embedding, {
@@ -187,13 +208,13 @@ describe('vector rebuild and knowledge backfill', () => {
       filter: { documentIds: [second] }
     })
     const secondAllowed = new Set(
-      knowledgeService.getDocumentChunks(second).map((chunk: any) => chunk.id)
+      knowledgeService.getDocumentChunks(second).map((chunk) => chunk.id)
     )
     for (const match of secondMatches) expect(secondAllowed.has(match.chunkId)).toBe(true)
   })
 
   it('re-embeds chunks whose vectors are missing', async () => {
-    const { knowledgeService, notebookId, dbModule } = context
+    const { knowledgeService, notebookId, dbModule } = context!
     const documentId = await seedDocument()
     const chunkCount = knowledgeService.getDocumentChunks(documentId).length
 
@@ -227,7 +248,7 @@ describe('vector rebuild and knowledge backfill', () => {
   })
 
   it('backfills FTS rows that are missing while vectors are intact', async () => {
-    const { knowledgeService, notebookId, dbModule } = context
+    const { knowledgeService, notebookId, dbModule } = context!
     const documentId = await seedDocument()
     const chunkCount = knowledgeService.getDocumentChunks(documentId).length
 
@@ -246,7 +267,7 @@ describe('vector rebuild and knowledge backfill', () => {
   })
 
   it('queues a backfill job for documents missing structure or document vector', async () => {
-    const { knowledgeService, notebookId, jobService, dbModule, schema, db } = context
+    const { knowledgeService, notebookId, jobService, dbModule, schema, db } = context!
     const { eq } = await import('drizzle-orm')
     const documentId = await seedDocument()
 
@@ -263,7 +284,7 @@ describe('vector rebuild and knowledge backfill', () => {
     await jobService.tick()
 
     const queued = db.select().from(schema.backgroundJobs).all()
-    const queuedTypes = queued.map((job: any) => job.jobType)
+    const queuedTypes = queued.map((job) => job.jobType)
     expect(queuedTypes).toContain('reindex-document')
     expect(queuedTypes).toContain('enrich-document')
 
@@ -271,7 +292,10 @@ describe('vector rebuild and knowledge backfill', () => {
     await jobService.tick()
 
     const refreshed = knowledgeService.getDocument(documentId)
-    expect((refreshed?.metadata as any)?.structure?.sections?.length).toBeGreaterThan(0)
+    expect(
+      (refreshed?.metadata as unknown as DocumentStructureMetadata | null)?.structure?.sections
+        ?.length
+    ).toBeGreaterThan(0)
     expect(
       dbModule
         .getSqlite()

@@ -21,12 +21,9 @@ describe('Electron hardening', () => {
   })
 
   it('does not contain a preload fallback that assigns Node APIs to window', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/preload/index.ts'),
-      'utf8'
-    )
+    const source = readFileSync(join(process.cwd(), 'src/preload/index.ts'), 'utf8')
 
     expect(source).not.toContain('window.electron =')
-    expect(source).not.toContain('exposeInMainWorld(\'electron\'')
+    expect(source).not.toContain("exposeInMainWorld('electron'")
   })
 })

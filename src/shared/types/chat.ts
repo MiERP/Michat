@@ -1,8 +1,8 @@
 /**
- * 统一的聊天相关类型定义
- * 此文件被 main、renderer、preload 三个进程共享
+ * Unified chat-related type definitions
+ * Shared by the main, renderer, and preload processes
  *
- * 类型定义基于 Drizzle 推导的数据库 schema,确保类型定义的单一数据源
+ * Types are derived from the Drizzle database schema to keep a single source of truth
  */
 
 import type {
@@ -11,8 +11,8 @@ import type {
 } from '../../main/db/schema'
 
 /**
- * 聊天会话接口（完整版）
- * 直接使用 Drizzle 推导的数据库类型
+ * Chat session interface (full version)
+ * Uses the database types inferred by Drizzle directly
  */
 export type ChatSession = DBChatSession
 
@@ -52,29 +52,29 @@ export interface ChatMessageMetadata {
 }
 
 /**
- * 聊天消息接口（完整版）
- * 基于 Drizzle 推导的数据库类型,并添加前端扩展字段
+ * Chat message interface (full version)
+ * Based on the Drizzle-inferred database type, plus frontend extension fields
  */
 export interface ChatMessage extends Omit<DBChatMessage, 'metadata' | 'reasoningContent'> {
-  notebookId?: string // 前端扩展字段，用于并发消息管理
-  reasoningContent?: string | null // 可选的推理内容字段
+  notebookId?: string // Frontend extension field for managing concurrent messages
+  reasoningContent?: string | null // Optional reasoning content field
   metadata?: ChatMessageMetadata
-  isStreaming?: boolean // 前端扩展字段，标识流式消息
-  isReasoningStreaming?: boolean // 前端扩展字段，推理过程是否在流式传输
+  isStreaming?: boolean // Frontend extension field marking a streaming message
+  isReasoningStreaming?: boolean // Frontend extension field indicating whether reasoning is streaming
 }
 
 /**
- * API 消息格式（用于与 LLM Provider 通信）
- * 这是简化版本，只包含 API 需要的字段
+ * API message format (used to communicate with LLM providers)
+ * Simplified version containing only the fields the API needs
  */
 export interface APIMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
-  reasoning_content?: string // DeepSeek Reasoner 特有字段
+  reasoning_content?: string // DeepSeek Reasoner-specific field
 }
 
 /**
- * 流式响应片段
+ * Streaming response chunk
  */
 /** Result of the send-message IPC call. */
 export interface SendMessageResult {
@@ -98,9 +98,9 @@ export interface ChatMessageErrorEvent {
 
 export interface StreamChunk {
   content: string
-  reasoningContent?: string // DeepSeek Reasoner 推理过程内容
+  reasoningContent?: string // DeepSeek Reasoner reasoning content
   done: boolean
-  reasoningDone?: boolean // 推理过程是否完成
+  reasoningDone?: boolean // Whether reasoning has finished
   metadata?: {
     model?: string
     finishReason?: string
@@ -110,10 +110,10 @@ export interface StreamChunk {
       totalTokens?: number
     }
     citations?: ChatCitation[]
-    // 推理相关元数据（AI SDK v5 推理流式传输）
-    isReasoning?: boolean // 当前内容是否为推理过程
-    reasoningStart?: boolean // 推理块开始标记
-    reasoningEnd?: boolean // 推理块结束标记
-    reasoningId?: string // 推理块 ID
+    // Reasoning metadata (AI SDK v5 reasoning streaming)
+    isReasoning?: boolean // Whether the current content is reasoning
+    reasoningStart?: boolean // Reasoning block start marker
+    reasoningEnd?: boolean // Reasoning block end marker
+    reasoningId?: string // Reasoning block ID
   }
 }

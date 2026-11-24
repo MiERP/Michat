@@ -18,7 +18,7 @@ export default function PromptsSettings({
   const { t } = useTranslation('settings')
 
   const currentLanguage = settings.language
-  // 后端的 mergeSettings 已经确保所有字段都有默认值，前端直接使用
+  // The backend's mergeSettings already guarantees defaults for every field, so use them directly
   const currentQuizPrompt = settings.prompts?.quiz?.[currentLanguage] || ''
 
   const handleQuizPromptChange = (value: string) => {
@@ -34,7 +34,7 @@ export default function PromptsSettings({
   }
 
   const handleResetToDefault = async () => {
-    // 从 defaults.ts 获取默认提示词
+    // Get the default prompts from defaults.ts
     const defaultPrompts = await window.api.settings.getDefaultPrompts()
     onSettingsChange({
       prompts: defaultPrompts

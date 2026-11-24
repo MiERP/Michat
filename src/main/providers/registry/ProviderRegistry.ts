@@ -1,6 +1,6 @@
 /**
  * Provider Registry
- * 供应商注册表,管理所有已注册的供应商描述符和实例
+ * Provider registry that manages all registered provider descriptors and instances
  */
 
 import type { BaseProvider } from '../capabilities/BaseProvider'
@@ -9,13 +9,13 @@ import Logger from '../../../shared/utils/logger'
 
 /**
  * ProviderRegistry
- * 管理供应商描述符和实例的注册表
+ * Registry that manages provider descriptors and instances
  */
 export class ProviderRegistry {
-  // 供应商描述符映射 (name -> descriptor)
+  // Provider descriptor map (name -> descriptor)
   private descriptors: Map<string, ProviderDescriptor> = new Map()
 
-  // 供应商实例缓存 (name -> instance)
+  // Provider instance cache (name -> instance)
   private instances: Map<string, BaseProvider> = new Map()
 
   constructor() {
@@ -23,8 +23,8 @@ export class ProviderRegistry {
   }
 
   /**
-   * 注册供应商描述符
-   * @param descriptor - 供应商描述符
+   * Register a provider descriptor
+   * @param descriptor - Provider descriptor
    */
   register(descriptor: ProviderDescriptor): void {
     if (this.descriptors.has(descriptor.name)) {
@@ -35,32 +35,32 @@ export class ProviderRegistry {
     }
 
     this.descriptors.set(descriptor.name, descriptor)
-    // 清除旧的实例缓存(如果有)
+    // Clear the old instance cache (if any)
     this.instances.delete(descriptor.name)
 
     Logger.info('ProviderRegistry', `Registered provider: ${descriptor.name}`)
   }
 
   /**
-   * 批量注册供应商描述符
-   * @param descriptors - 供应商描述符数组
+   * Register multiple provider descriptors
+   * @param descriptors - Array of provider descriptors
    */
   registerMany(descriptors: ProviderDescriptor[]): void {
     descriptors.forEach((descriptor) => this.register(descriptor))
   }
 
   /**
-   * 获取供应商实例(懒加载创建)
-   * @param name - 供应商名称
-   * @returns Provider 实例或 undefined
+   * Get a provider instance (created lazily)
+   * @param name - Provider name
+   * @returns Provider instance or undefined
    */
   getProvider(name: string): BaseProvider | undefined {
-    // 先检查缓存
+    // Check the cache first
     if (this.instances.has(name)) {
       return this.instances.get(name)
     }
 
-    // 没有缓存,从描述符创建
+    // No cached instance, create one from the descriptor
     const descriptor = this.descriptors.get(name)
     if (!descriptor) {
       Logger.warn('ProviderRegistry', `Provider ${name} not registered`)
@@ -79,71 +79,69 @@ export class ProviderRegistry {
   }
 
   /**
-   * 获取供应商描述符
-   * @param name - 供应商名称
-   * @returns ProviderDescriptor 或 undefined
+   * Get a provider descriptor
+   * @param name - Provider name
+   * @returns ProviderDescriptor or undefined
    */
   getDescriptor(name: string): ProviderDescriptor | undefined {
     return this.descriptors.get(name)
   }
 
   /**
-   * 列出所有已注册的供应商描述符
-   * @returns ProviderDescriptor 数组
+   * List all registered provider descriptors
+   * @returns ProviderDescriptor array
    */
   listDescriptors(): ProviderDescriptor[] {
     return Array.from(this.descriptors.values())
   }
 
   /**
-   * 列出所有已注册的供应商名称
-   * @returns 供应商名称数组
+   * List all registered provider names
+   * @returns Provider name array
    */
   listProviderNames(): string[] {
     return Array.from(this.descriptors.keys())
   }
 
   /**
-   * 根据能力查询供应商
-   * @param capability - 能力名称 ('chat' | 'embedding' | 'rerank' | 'imageGeneration')
-   * @returns 支持该能力的供应商描述符数组
+   * Query providers by capability
+   * @param capability - Capability name ('chat' | 'embedding')
+   * @returns Provider descriptors that support the capability
    */
-  getProvidersByCapability(
-    capability: 'chat' | 'embedding' | 'rerank' | 'imageGeneration'
-  ): ProviderDescriptor[] {
+  getProvidersByCapability(capability: 'chat' | 'embedding'): ProviderDescriptor[] {
     return Array.from(this.descriptors.values()).filter((descriptor) => {
       return descriptor.capabilities[capability] === true
     })
   }
 
   /**
-   * 获取内置供应商列表
-   * @returns 内置供应商描述符数组
+   * Get the list of built-in providers
+   * @returns Built-in provider descriptor array
    */
   getBuiltinProviders(): ProviderDescriptor[] {
     return Array.from(this.descriptors.values()).filter((descriptor) => descriptor.isBuiltin)
   }
 
   /**
-   * 获取自定义供应商列表
-   * @returns 自定义供应商描述符数组
+   * Get the list of custom providers
+   * @returns Custom provider descriptor array
    */
   getCustomProviders(): ProviderDescriptor[] {
     return Array.from(this.descriptors.values()).filter((descriptor) => !descriptor.isBuiltin)
   }
 
   /**
-   * 检查供应商是否已注册
-   * @param name - 供应商名称
-   * @returns 是否已注册
+   * Check whether a provider is registered
+   * @param name - Provider name
+   * @returns Whether it is registered
    */
   has(name: string): boolean {
     return this.descriptors.has(name)
   }
 
   /**
-   * 移除供应商
-   * @param name - 供应商名称
+   * Remove a provider
+   * @param name - Provider name
    */
   unregister(name: string): void {
     this.descriptors.delete(name)
@@ -152,8 +150,8 @@ export class ProviderRegistry {
   }
 
   /**
-   * 清除所有实例缓存
-   * 用于强制重新创建所有实例
+   * Clear all instance caches
+   * Used to force recreation of all instances
    */
   clearInstanceCache(): void {
     this.instances.clear()

@@ -86,8 +86,8 @@ export function cleanDeepSeekMessages(messages: APIMessage[]): APIMessage[] {
   const withoutReasoning = messages.map((msg) => {
     if (msg.role === 'assistant' && 'reasoning_content' in msg) {
       removedReasoningCount++
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { reasoning_content, ...rest } = msg as any
+      const rest = { ...msg }
+      delete rest.reasoning_content
       return rest
     }
     return msg

@@ -3,7 +3,8 @@ import type {
   ChatMessage,
   ChatScope,
   ChatMessageCreatedEvent,
-  SendMessageResult
+  SendMessageResult,
+  StreamChunk
 } from '../shared/types/chat'
 import type {
   Notebook,
@@ -24,12 +25,12 @@ import type {
   IndexProgress
 } from '../shared/types/knowledge'
 import type { UpdateState, UpdateCheckResult, UpdateOperationResult } from '../shared/types/update'
-import type { LicenseStatus } from '../shared/types/license'
 import type { Quiz, QuizSession } from '../main/db/schema'
+import type { ItemDetail } from '../main/services/ItemService'
 import type { DocumentMetadata } from '../shared/legalMetadata'
 import type { DocumentEnrichment } from '../main/services/DocumentEnrichmentService'
 
-// 重新导出共享类型
+// Re-export shared types
 export type {
   ChatSession,
   ChatMessage,
@@ -50,26 +51,20 @@ export type {
   IndexProgress
 }
 export type { UpdateState, UpdateCheckResult, UpdateOperationResult }
-export type { LicenseStatus }
 
 declare global {
   interface Window {
     api: {
-      // 获取平台信息
+      // Get platform information
       getPlatform: () => Promise<string>
 
-      // 获取应用版本号
+      // Get the app version
       getAppVersion: () => Promise<string>
 
-      // 许可证
-      license: {
-        getStatus: () => Promise<LicenseStatus>
-      }
-
-      // 在默认浏览器中打开外部链接
+      // Open an external link in the default browser
       openExternalUrl: (url: string) => Promise<{ success: boolean; error?: string }>
 
-      // 应用设置相关
+      // App settings
       settings: {
         getAll: () => Promise<AppSettings>
         get: <K extends keyof AppSettings>(key: K) => Promise<AppSettings[K]>
@@ -82,7 +77,7 @@ declare global {
         ) => () => void
       }
 
-      // Notebook 相关
+      // Notebooks
       createNotebook: (title: string, description?: string) => Promise<Notebook>
       getAllNotebooks: () => Promise<Notebook[]>
       getNotebook: (id: string) => Promise<Notebook | null>
@@ -92,22 +87,22 @@ declare global {
       ) => Promise<void>
       deleteNotebook: (id: string) => Promise<void>
 
-      // Note 相关
+      // Notes
       createNote: (notebookId: string, content: string, customTitle?: string) => Promise<Note>
       getNotes: (notebookId: string) => Promise<Note[]>
       getNote: (id: string) => Promise<Note | null>
       updateNote: (id: string, updates: Partial<Pick<Note, 'title' | 'content'>>) => Promise<void>
       deleteNote: (id: string) => Promise<void>
 
-      // Items 相关（统一管理笔记、题库等）
+      // Items (unified management of notes, quizzes, etc.)
       items: {
-        getAll: (notebookId: string) => Promise<any[]>
+        getAll: (notebookId: string) => Promise<ItemDetail[]>
         updateOrder: (itemId: string, order: number) => Promise<{ success: boolean }>
         batchUpdateOrder: (updates: Record<string, number>) => Promise<{ success: boolean }>
         delete: (itemId: string, deleteResource?: boolean) => Promise<{ success: boolean }>
       }
 
-      // Quiz 相关
+      // Quiz
       quiz: {
         getLatest: (notebookId: string) => Promise<Quiz | null>
         get: (quizId: string) => Promise<Quiz | null>
@@ -140,14 +135,14 @@ declare global {
         ) => () => void
       }
 
-      // Chat Session 相关
+      // Chat sessions
       createChatSession: (notebookId: string, title: string) => Promise<ChatSession>
       getChatSessions: (notebookId: string) => Promise<ChatSession[]>
       getActiveSession: (notebookId: string) => Promise<ChatSession | null>
       updateSessionTitle: (sessionId: string, title: string) => Promise<void>
       deleteSession: (sessionId: string) => Promise<void>
 
-      // Chat Message 相关
+      // Chat messages
       getMessages: (sessionId: string) => Promise<ChatMessage[]>
       sendMessage: (
         sessionId: string,
@@ -157,33 +152,36 @@ declare global {
       onMessageCreated: (callback: (data: ChatMessageCreatedEvent) => void) => () => void
       abortMessage: (messageId: string) => Promise<{ success: boolean; reason?: string }>
 
-      // 流式消息监听（AI SDK 流式协议格式）
+      // Streaming message listeners (AI SDK streaming protocol format)
       onMessageChunk: (
         callback: (data: {
           messageId: string
           type: 'reasoning-start' | 'reasoning-delta' | 'reasoning-end' | 'text-delta' | 'finish'
           content?: string
           reasoningId?: string
-          metadata?: any
+          metadata?: StreamChunk['metadata']
         }) => void
       ) => () => void
       onMessageError: (
         callback: (data: { messageId: string; notebookId: string; error: string }) => void
       ) => () => void
 
-      // Session 自动切换监听
+      // Session auto-switch listener
       onSessionAutoSwitched: (
         callback: (data: { oldSessionId: string; newSessionId: string }) => void
       ) => () => void
 
-      // Provider 配置相关
+      // Provider configuration
       saveProviderConfig: (
         config: ProviderConfig & { clearApiKey?: boolean }
       ) => Promise<{ encrypted: boolean }>
       getProviderConfig: (providerName: string) => Promise<PublicProviderConfig | null>
       getAllProviderConfigs: () => Promise<PublicProviderConfig[]>
       deleteProviderConfig: (providerName: string) => Promise<void>
-      validateProviderConfig: (providerName: string, config: any) => Promise<boolean>
+      validateProviderConfig: (
+        providerName: string,
+        config: ProviderConfig['config']
+      ) => Promise<boolean>
       fetchModels: (
         providerName: string,
         apiKey: string
@@ -211,9 +209,9 @@ declare global {
       // Check if secure encryption is available for API keys
       checkEncryption: () => Promise<{ encrypted: boolean }>
 
-      // 知识库相关
+      // Knowledge base
       knowledge: {
-        // 添加文档
+        // Add a document
         addDocument: (
           notebookId: string,
           options: AddDocumentOptions
@@ -242,14 +240,14 @@ declare global {
           notebookId: string,
           noteId: string
         ) => Promise<{ success: boolean; documentId?: string; error?: string }>
-        // 搜索
+        // Search
         search: (
           notebookId: string,
           query: string,
           options?: SearchOptions
         ) => Promise<{ success: boolean; results: KnowledgeSearchResult[]; error?: string }>
 
-        // 文档管理
+        // Document management
         getDocuments: (notebookId: string) => Promise<KnowledgeDocument[]>
         getDocument: (documentId: string) => Promise<KnowledgeDocument | null>
         updateDocumentMetadata: (
@@ -330,7 +328,7 @@ declare global {
           documentId: string
         ) => Promise<{ success: boolean; linkCount?: number; error?: string }>
 
-        // 统计
+        // Statistics
         getStats: (notebookId: string) => Promise<KnowledgeStats>
         probeEmbeddingDimensions: () => Promise<{
           success: boolean
@@ -338,18 +336,26 @@ declare global {
           error?: string
         }>
 
-        // 文件选择对话框
+        // File selection dialogs
         selectFiles: () => Promise<string[]>
         selectFolder: () => Promise<string | null>
 
-        // 打开源文件
+        // Open the source file
         openSource: (documentId: string) => Promise<{ success: boolean; error?: string }>
 
-        // 索引进度监听
+        // Index progress listener
         onIndexProgress: (callback: (progress: IndexProgress) => void) => () => void
-        // 自动同步监听（watcher 触发的增量 reindex）
-        onAutoSynced: (callback: (data: any) => void) => () => void
-        // 监听 tài liệu mới được nạp lại vào KB
+        // Auto-sync listener (incremental reindex triggered by the watcher)
+        onAutoSynced: (
+          callback: (data: {
+            documentId: string
+            documentTitle: string
+            reason: 'file-changed' | 'note-updated'
+            result?: { created: number; reused: number; removed: number }
+            error?: string
+          }) => void
+        ) => () => void
+        // Listen for documents newly reloaded into the KB
         onDocumentsChanged: (callback: (data: { notebookId: string }) => void) => () => void
       }
 
@@ -392,17 +398,17 @@ declare global {
         onTriggered: (callback: (action: ShortcutAction) => void) => () => void
       }
 
-      // 应用更新相关
+      // App updates
       update: {
-        // 检查更新
+        // Check for updates
         check: () => Promise<UpdateCheckResult>
-        // 下载更新
+        // Download an update
         download: () => Promise<UpdateOperationResult>
-        // 安装更新（退出并安装）
+        // Install the update (quit and install)
         install: () => Promise<UpdateOperationResult>
-        // 获取当前更新状态
+        // Get the current update state
         getState: () => Promise<UpdateCheckResult>
-        // 监听更新状态变化
+        // Listen for update state changes
         onStateChanged: (callback: (state: UpdateState) => void) => () => void
       }
     }

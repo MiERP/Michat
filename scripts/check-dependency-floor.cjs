@@ -22,7 +22,9 @@ const FLOORS = {
   // GHSA-866g-f22w-33x8: uncontrolled resource consumption in provider responses.
   '@ai-sdk/provider-utils': '3.0.28',
   // GHSA-238p-pmpm-9mq7: prototype pollution bypassing KaTeX trust restrictions.
-  katex: '0.18.2'
+  katex: '0.18.2',
+  // GHSA-6jcc-5g8w-32mx: deepExtend recurses into inherited built-ins.
+  i18next: '26.3.4'
 }
 
 function parseVersion(value) {

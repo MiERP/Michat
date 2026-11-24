@@ -2,22 +2,26 @@ import { describe, expect, it, vi } from 'vitest'
 import { ProviderConfigManager } from '../src/main/config/ProviderConfigManager'
 
 vi.mock('../src/main/config/secureStorage', () => ({
-  encryptProviderConfig: (config: Record<string, any>) =>
-    config.apiKey
-      ? { ...config, apiKey: `enc:${config.apiKey}`, __encrypted_apiKey: true }
-      : { ...config },
-  decryptProviderConfig: (config: Record<string, any>) =>
-    typeof config.apiKey === 'string' && config.apiKey.startsWith('enc:')
-      ? { ...config, apiKey: config.apiKey.slice(4) }
-      : { ...config },
+  encryptProviderConfig: (config: Record<string, unknown>) => {
+    const apiKey = config.apiKey
+    return apiKey
+      ? { ...config, apiKey: `enc:${String(apiKey)}`, __encrypted_apiKey: true }
+      : { ...config }
+  },
+  decryptProviderConfig: (config: Record<string, unknown>) => {
+    const apiKey = config.apiKey
+    return typeof apiKey === 'string' && apiKey.startsWith('enc:')
+      ? { ...config, apiKey: apiKey.slice(4) }
+      : { ...config }
+  },
   isEncryptionAvailable: () => true
 }))
 
 function createManager(): {
   manager: ProviderConfigManager
-  data: { providers: Record<string, any> }
+  data: { providers: Record<string, unknown> }
 } {
-  const data: { providers: Record<string, any> } = { providers: {} }
+  const data: { providers: Record<string, unknown> } = { providers: {} }
   const store = {
     get: (key: string, fallback: unknown) => data[key as keyof typeof data] ?? fallback,
     set: (key: string, value: unknown) => {
@@ -69,12 +73,9 @@ describe('ProviderConfigManager secret handling', () => {
       true
     )
 
-    await manager.saveProviderConfig(
-      'llama',
-      { baseUrl: 'http://127.0.0.1:8000/v1' },
-      true,
-      { clearApiKey: true }
-    )
+    await manager.saveProviderConfig('llama', { baseUrl: 'http://127.0.0.1:8000/v1' }, true, {
+      clearApiKey: true
+    })
 
     const internal = await manager.getProviderConfig('llama')
     expect(internal?.config.apiKey).toBeUndefined()

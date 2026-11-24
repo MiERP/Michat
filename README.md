@@ -105,7 +105,26 @@ Feedback and suggestions are very welcome.
 - Only local llama.cpp models are supported; cloud providers are intentionally disabled.
 - Scanned/image-only PDFs need an OCR engine, which is not bundled yet.
 - Office document generation was removed; the note editor and quiz generation remain.
-- The existing Drizzle migration history has snapshots only from `0020` onward; see `docs/security/dependency-exceptions.md` for dependency exceptions.
+- Drizzle snapshots are complete for every journal entry; `pnpm check:migrations` enforces this.
+- See `docs/security/dependency-exceptions.md` for accepted dependency advisories.
+
+---
+
+## Building
+
+Requirements: Node.js 22 and pnpm 11.
+
+```bash
+pnpm install
+pnpm dev              # development app
+pnpm build            # typecheck + main/preload/renderer bundles
+pnpm build:win        # Windows installer; requires models in resources/models
+pnpm build:win:slim   # Windows installer without GGUF models
+```
+
+`pnpm build:win` enforces the runtime-asset check (`resources:check`). The slim
+build skips that check; see `resources/README.md` for where to copy models after
+installation.
 
 ---
 

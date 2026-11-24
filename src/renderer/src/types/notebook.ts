@@ -1,10 +1,10 @@
 /**
- * Notebook 相关类型定义
- * 从 shared 模块统一导出所有类型
+ * Notebook-related type definitions
+ * Re-export all types from the shared module
  */
 
-// 从 shared 导入统一的聊天类型
+// Import the shared chat types from shared
 export type { ChatSession, ChatMessage, ChatScope } from '../../../shared/types/chat'
 
-// 从 shared 导入笔记本和笔记类型
+// Import notebook and note types from shared
 export type { Notebook, Note } from '../../../shared/types'

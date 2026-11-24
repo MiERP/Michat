@@ -6,7 +6,7 @@ import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { buildContentSecurityPolicy } from './src/main/security/csp'
 
-// 复制迁移文件的插件
+// Plugin that copies migration files
 function copyMigrationsPlugin() {
   return {
     name: 'copy-migrations',
@@ -14,7 +14,7 @@ function copyMigrationsPlugin() {
       const srcDir = resolve('src/main/db/migrations')
       const destDir = resolve('out/main/db/migrations')
 
-      // 递归复制目录
+      // Recursively copy the directory
       function copyDir(src: string, dest: string) {
         if (!existsSync(dest)) {
           mkdirSync(dest, { recursive: true })
@@ -30,10 +30,11 @@ function copyMigrationsPlugin() {
           } else {
             try {
               copyFileSync(srcPath, destPath)
-            } catch (err: any) {
+            } catch (err) {
               // On Windows, the file may be locked by a running Electron instance.
               // Warn but don't crash the build — the existing file is still usable.
-              console.warn(`[Migrations] Could not copy ${entry}: ${err.message}`)
+              const message = err instanceof Error ? err.message : String(err)
+              console.warn(`[Migrations] Could not copy ${entry}: ${message}`)
             }
           }
         }

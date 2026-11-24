@@ -17,10 +17,10 @@ export default defineConfig({
       exclude: ['src/main/db/migrations/**', 'src/main/index.ts'],
       reporter: ['text', 'json', 'html'],
       thresholds: {
-        branches: 10,
-        functions: 15,
-        lines: 15,
-        statements: 15
+        branches: 35,
+        functions: 40,
+        lines: 42,
+        statements: 42
       }
     }
   },

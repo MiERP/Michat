@@ -13,6 +13,7 @@ import { getDatabase } from '../db'
 import { notebooks, documents } from '../db/schema'
 import { and, eq } from 'drizzle-orm'
 import type { ProviderManager } from '../providers/ProviderManager'
+import type { ChatProvider } from '../providers/types'
 import Logger from '../../shared/utils/logger'
 
 /** Trần cứng số từ của tóm tắt notebook. */
@@ -32,7 +33,11 @@ export class NotebookSummaryService {
   private buildSignature(notebookId: string): string {
     const db = getDatabase()
     const rows = db
-      .select({ id: documents.id, contentHash: documents.contentHash, metadata: documents.metadata })
+      .select({
+        id: documents.id,
+        contentHash: documents.contentHash,
+        metadata: documents.metadata
+      })
       .from(documents)
       .where(and(eq(documents.notebookId, notebookId), eq(documents.status, 'indexed')))
       .all()
@@ -154,7 +159,10 @@ export class NotebookSummaryService {
       model
     }
     this.store(notebookId, stored)
-    Logger.info('NotebookSummary', `Notebook ${notebookId} summarized (${trimmed.split(' ').length} words)`)
+    Logger.info(
+      'NotebookSummary',
+      `Notebook ${notebookId} summarized (${trimmed.split(' ').length} words)`
+    )
     return trimmed
   }
 
@@ -171,15 +179,12 @@ export class NotebookSummaryService {
     if (summary) metadata.notebookSummary = summary
     else delete metadata.notebookSummary
 
-    db.update(notebooks)
-      .set({ metadata })
-      .where(eq(notebooks.id, notebookId))
-      .run()
+    db.update(notebooks).set({ metadata }).where(eq(notebooks.id, notebookId)).run()
   }
 
   private async extractWithLlm(
     prompt: string,
-    provider: { sendMessageStream: (...args: any[]) => Promise<AbortController> },
+    provider: Pick<ChatProvider, 'sendMessageStream'>,
     signal?: AbortSignal
   ): Promise<string> {
     let raw = ''
@@ -209,9 +214,13 @@ export class NotebookSummaryService {
           )
           .then((activeController: AbortController) => {
             controller = activeController
-            activeController.signal.addEventListener('abort', () => finish(() => reject(new Error('aborted'))), {
-              once: true
-            })
+            activeController.signal.addEventListener(
+              'abort',
+              () => finish(() => reject(new Error('aborted'))),
+              {
+                once: true
+              }
+            )
             if (signal?.aborted) activeController.abort()
           })
           .catch((error: unknown) =>

@@ -13,7 +13,7 @@ CREATE TABLE `items` (
 CREATE INDEX `idx_items_notebook_order` ON `items` (`notebook_id`,`is_pinned`,`order`);--> statement-breakpoint
 CREATE INDEX `idx_items_type` ON `items` (`type`);--> statement-breakpoint
 CREATE INDEX `idx_items_resource` ON `items` (`type`,`resource_id`);--> statement-breakpoint
--- 数据迁移：将现有的 notes 迁移到 items 表
+-- Data migration: move existing notes into items
 INSERT INTO `items` (`id`, `notebook_id`, `type`, `resource_id`, `order`, `is_pinned`, `created_at`, `updated_at`)
 SELECT
   'item-note-' || `id` as id,
@@ -26,7 +26,7 @@ SELECT
   `updated_at`
 FROM `notes`;
 --> statement-breakpoint
--- 数据迁移：将现有的 mindMaps 迁移到 items 表
+-- Data migration: move existing mind maps into items
 INSERT INTO `items` (`id`, `notebook_id`, `type`, `resource_id`, `order`, `is_pinned`, `created_at`, `updated_at`)
 SELECT
   'item-mindmap-' || `id` as id,

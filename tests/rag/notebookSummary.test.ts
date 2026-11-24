@@ -2,6 +2,22 @@ import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import type { Database } from '../../src/main/db'
+
+type DbModule = typeof import('../../src/main/db')
+type SchemaModule = typeof import('../../src/main/db/schema')
+
+type NotebookSummaryServiceClass =
+  (typeof import('../../src/main/services/NotebookSummaryService'))['NotebookSummaryService']
+
+type SummaryContext = {
+  dbModule: DbModule
+  schema: SchemaModule
+  db: Database
+  notebookId: string
+  insertDoc: (title: string, content: string, enrichmentSummary?: string) => string
+  NotebookSummaryService: NotebookSummaryServiceClass
+}
 
 let userDataDir = ''
 
@@ -13,7 +29,7 @@ vi.mock('electron', () => ({
 }))
 
 describe('NotebookSummaryService', () => {
-  let context: any
+  let context: SummaryContext | undefined
 
   beforeEach(async () => {
     userDataDir = join(
@@ -24,9 +40,8 @@ describe('NotebookSummaryService', () => {
 
     const dbModule = await import('../../src/main/db')
     const schema = await import('../../src/main/db/schema')
-    const { NotebookSummaryService } = await import(
-      '../../src/main/services/NotebookSummaryService'
-    )
+    const { NotebookSummaryService } =
+      await import('../../src/main/services/NotebookSummaryService')
 
     dbModule.initDatabase()
     dbModule.runMigrations()
@@ -55,7 +70,9 @@ describe('NotebookSummaryService', () => {
           contentHash: `hash_${documentId}`,
           status: 'indexed',
           metadata: enrichmentSummary
-            ? { enrichment: { summary: enrichmentSummary, generatedAt: '2026-10-16T00:00:00.000Z' } }
+            ? {
+                enrichment: { summary: enrichmentSummary, generatedAt: '2026-10-16T00:00:00.000Z' }
+              }
             : null,
           createdAt: new Date(),
           updatedAt: new Date()
@@ -74,7 +91,7 @@ describe('NotebookSummaryService', () => {
   })
 
   it('uses the single document summary directly and caps at 120 words', async () => {
-    const { insertDoc, notebookId, NotebookSummaryService } = context
+    const { insertDoc, notebookId, NotebookSummaryService } = context!
 
     const longSummary = Array.from({ length: 200 }, (_, i) => `word${i}`).join(' ')
     insertDoc('Tài liệu duy nhất', 'nội dung', longSummary)
@@ -91,7 +108,7 @@ describe('NotebookSummaryService', () => {
   })
 
   it('aggregates multiple document summaries through the LLM with a 100-120 word instruction', async () => {
-    const { insertDoc, notebookId, NotebookSummaryService } = context
+    const { insertDoc, notebookId, NotebookSummaryService } = context!
 
     insertDoc('Hợp đồng ABC', 'nội dung 1', 'Tóm tắt hợp đồng ABC')
     insertDoc('Bảng giá 2026', 'nội dung 2', 'Tóm tắt bảng giá')
@@ -125,7 +142,7 @@ describe('NotebookSummaryService', () => {
   })
 
   it('marks the summary stale when a document changes', async () => {
-    const { db, schema, insertDoc, notebookId, NotebookSummaryService } = context
+    const { db, schema, insertDoc, notebookId, NotebookSummaryService } = context!
 
     const documentId = insertDoc('Tài liệu', 'nội dung', 'Tóm tắt ban đầu')
     const service = new NotebookSummaryService({} as never)
@@ -144,7 +161,7 @@ describe('NotebookSummaryService', () => {
   })
 
   it('clears the summary when the notebook has no documents', async () => {
-    const { db, schema, insertDoc, notebookId, NotebookSummaryService } = context
+    const { db, schema, insertDoc, notebookId, NotebookSummaryService } = context!
 
     const documentId = insertDoc('Tài liệu', 'nội dung', 'Tóm tắt')
     const service = new NotebookSummaryService({} as never)

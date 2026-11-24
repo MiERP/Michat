@@ -3,10 +3,33 @@ import { join } from 'path'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
 import ExcelJS from 'exceljs'
+import type { DocumentMetadata, DocumentMetadataInspector } from '../../src/shared/legalMetadata'
+import type { DocumentStructureLike } from '../../src/main/services/KnowledgeService'
 import type {
   EmbeddingConfig,
   EmbeddingResult
 } from '../../src/main/providers/capabilities/EmbeddingCapability'
+
+type KnowledgeServiceInternals = {
+  embeddingService: {
+    embedBatch: (
+      texts: string[],
+      config?: EmbeddingConfig,
+      onProgress?: (completed: number, total: number) => void
+    ) => Promise<EmbeddingResult[]>
+  }
+}
+
+type StoredDocumentMetadata = {
+  documentMetadata: DocumentMetadata
+  documentMetadataInspector: DocumentMetadataInspector
+  structure?: DocumentStructureLike
+}
+
+type ChunkTableMetadata = {
+  sheetName?: string
+  rowRange?: [number, number]
+}
 
 let userDataDir = ''
 
@@ -24,11 +47,7 @@ function vectorFor(text: string): Float32Array {
   const vector = new Float32Array(1024)
   const lower = text.toLowerCase()
   if (lower.includes('local-first') || lower.includes('local first')) vector[0] = 1
-  if (
-    lower.includes('privacy') ||
-    lower.includes('riêng tư') ||
-    lower.includes('quyền riêng tư')
-  )
+  if (lower.includes('privacy') || lower.includes('riêng tư') || lower.includes('quyền riêng tư'))
     vector[1] = 1
   if (lower.includes('embedding') || lower.includes('embeddings')) vector[2] = 1
   if (lower.includes('chunk')) vector[3] = 1
@@ -172,7 +191,7 @@ describe('KnowledgeService RAG regression', () => {
 
   it('removes section records when indexing fails after structural parsing', async () => {
     const { service, notebookId, db, schema } = context!
-    ;(service as any).embeddingService.embedBatch = vi
+    ;(service as unknown as KnowledgeServiceInternals).embeddingService.embedBatch = vi
       .fn()
       .mockRejectedValue(new Error('simulated batch failure'))
 
@@ -208,15 +227,11 @@ describe('KnowledgeService RAG regression', () => {
     )
 
     const documentId = await service.addDocumentFromFile(notebookId, filePath)
-    const results = await service.search(
-      notebookId,
-      'local-first embeddings truy vấn trên máy',
-      {
-        topK: 3,
-        threshold: 0,
-        rerank: { enabled: true, heuristicFallback: true }
-      }
-    )
+    const results = await service.search(notebookId, 'local-first embeddings truy vấn trên máy', {
+      topK: 3,
+      threshold: 0,
+      rerank: { enabled: true, heuristicFallback: true }
+    })
 
     expect(service.getDocument(documentId)?.status).toBe('indexed')
     expect(results.length).toBeGreaterThan(0)
@@ -355,15 +370,20 @@ describe('KnowledgeService RAG regression', () => {
     )
 
     expect(service.getDocument(documentId)?.status).toBe('indexed')
-    expect((service.getDocument(documentId)?.metadata as any).structure.sections).toEqual(
+    const storedMetadata = service.getDocument(documentId)!
+      .metadata as unknown as StoredDocumentMetadata
+    expect(storedMetadata.structure?.sections).toEqual(
       expect.arrayContaining([expect.objectContaining({ title: 'Evidence' })])
     )
     const tableChunks = service.getDocumentChunks(documentId)
-    expect(tableChunks.map((chunk) => (chunk.metadata as any)?.sheetName)).toEqual([
-      'Evidence',
-      'Evidence'
-    ])
-    expect(tableChunks.map((chunk) => (chunk.metadata as any)?.rowRange)).toEqual([
+    expect(
+      tableChunks.map(
+        (chunk) => (chunk.metadata as unknown as ChunkTableMetadata | null)?.sheetName
+      )
+    ).toEqual(['Evidence', 'Evidence'])
+    expect(
+      tableChunks.map((chunk) => (chunk.metadata as unknown as ChunkTableMetadata | null)?.rowRange)
+    ).toEqual([
       [2, 2],
       [3, 3]
     ])
@@ -380,18 +400,18 @@ describe('KnowledgeService RAG regression', () => {
       type: 'text',
       content: 'CHÍNH PHỦ\nSố: 15/NQ-CP\nCỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nNGHỊ QUYẾT'
     })
-    const original = service.getDocument(documentId)!.metadata as any
+    const original = service.getDocument(documentId)!.metadata as unknown as StoredDocumentMetadata
     service.updateDocumentMetadata(documentId, {
       ...original.documentMetadata,
       issuer: 'Cơ quan đã xác nhận',
       documentNumber: ''
     })
-    const saved = service.getDocument(documentId)!.metadata as any
+    const saved = service.getDocument(documentId)!.metadata as unknown as StoredDocumentMetadata
     expect(saved.documentMetadataInspector.fields.documentType).toEqual(
       original.documentMetadataInspector.fields.documentType
     )
     service.refreshDocumentMetadata(documentId)
-    const refreshed = service.getDocument(documentId)!.metadata as any
+    const refreshed = service.getDocument(documentId)!.metadata as unknown as StoredDocumentMetadata
     expect(refreshed.documentMetadata.documentNumber).toBeUndefined()
     expect(refreshed.documentMetadata.issuer).toBe('Cơ quan đã xác nhận')
     const matches = await service.search(notebookId, 'NGHỊ QUYẾT', {
@@ -407,7 +427,8 @@ describe('KnowledgeService RAG regression', () => {
     ).toEqual([])
     await service.reindexDocument(documentId)
     expect(
-      (service.getDocument(documentId)!.metadata as any).documentMetadata.documentNumber
+      (service.getDocument(documentId)!.metadata as unknown as StoredDocumentMetadata)
+        .documentMetadata.documentNumber
     ).toBeUndefined()
   })
 
@@ -583,8 +604,8 @@ describe('KnowledgeService RAG regression', () => {
       expect.arrayContaining([expect.objectContaining({ field: 'issuer', mode: 'preferred' })])
     )
     expect(outcome.trace.fallbackUsed).toBe(true)
-    expect(outcome.results.map((result: any) => result.documentId)).toContain(decreeId)
-    expect(outcome.results.map((result: any) => result.documentId)).toContain(reportId)
+    expect(outcome.results.map((result) => result.documentId)).toContain(decreeId)
+    expect(outcome.results.map((result) => result.documentId)).toContain(reportId)
   })
 
   it('honours a unique document number as an inferred hard scope with an auditable trace', async () => {
@@ -622,8 +643,8 @@ describe('KnowledgeService RAG regression', () => {
     )
     expect(outcome.trace.fallbackUsed).toBe(false)
     expect(outcome.results.length).toBeGreaterThan(0)
-    expect(outcome.results.every((result: any) => result.documentId === decreeId)).toBe(true)
-    expect(outcome.results.some((result: any) => result.documentId === otherId)).toBe(false)
+    expect(outcome.results.every((result) => result.documentId === decreeId)).toBe(true)
+    expect(outcome.results.some((result) => result.documentId === otherId)).toBe(false)
   })
 
   it('resolves metadata through the relational index instead of rescanning document JSON', async () => {

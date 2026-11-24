@@ -22,7 +22,6 @@ import { NotebookSummaryService } from './services/NotebookSummaryService'
 import { BackgroundJobService } from './services/BackgroundJobService'
 import { UpdateService } from './services/UpdateService'
 import { ShortcutManager } from './services/ShortcutManager'
-import { LicenseService } from './services/LicenseService'
 import { createMainWindow } from './windows'
 import { registerAllHandlers } from './ipc'
 import { getStore, settingsManager } from './config'
@@ -117,12 +116,6 @@ app.whenReady().then(async () => {
 
     installPermissionHandlers(session.defaultSession)
     installWebContentsGuards(app)
-
-    const licenseStatus = LicenseService.ensureLicenseOnStartup()
-    Logger.info(
-      'Main',
-      `License startup check: ${licenseStatus.valid ? 'valid' : 'invalid'}${licenseStatus.expiresAt ? `, expiresAt=${licenseStatus.expiresAt}` : ''}`
-    )
 
     // Auto-start llama.cpp servers (best effort)
     llamaService = new LlamaService()
@@ -314,9 +307,9 @@ app.whenReady().then(async () => {
 
         await shell.openExternal(url)
         return { success: true }
-      } catch (error: any) {
+      } catch (error) {
         Logger.error('Main', 'Failed to open external URL:', error)
-        return { success: false, error: error.message }
+        return { success: false, error: (error as Error).message }
       }
     })
 

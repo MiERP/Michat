@@ -1,10 +1,10 @@
 import type Store from 'electron-store'
-import type { AppSettings } from './types'
+import type { AppSettings, StoreSchema } from './types'
 import { defaultSettings } from './defaults'
 
 /**
- * 深度合并设置对象
- * 确保旧的存储数据能够获得新增的默认字段
+ * Deep-merges the settings object
+ * Ensures existing stored data picks up newly added default fields
  */
 function mergeSettings(stored: Partial<AppSettings>): AppSettings {
   return {
@@ -44,43 +44,43 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
 }
 
 /**
- * 设置管理器
+ * Settings manager
  */
 export class SettingsManager {
-  private getStore: () => Promise<Store<any>>
-  private storeCache: Store<any> | null = null
+  private getStore: () => Promise<Store<StoreSchema>>
+  private storeCache: Store<StoreSchema> | null = null
 
-  constructor(getStore: () => Promise<Store<any>>) {
+  constructor(getStore: () => Promise<Store<StoreSchema>>) {
     this.getStore = getStore
-    // 立即初始化 store 缓存
+    // Prime the store cache immediately
     getStore().then((store) => {
       this.storeCache = store
     })
   }
 
   /**
-   * 同步获取单个设置（仅当 store 已初始化时可用，否则返回默认值）
+   * Reads a single setting synchronously (only available once the store is initialized, otherwise returns the default)
    */
   getSettingSync<K extends keyof AppSettings>(key: K): AppSettings[K] {
     if (!this.storeCache) {
       return defaultSettings[key]
     }
-    const storedSettings = this.storeCache.get('settings', {})
+    const storedSettings: Partial<AppSettings> = this.storeCache.get('settings') ?? defaultSettings
     const mergedSettings = mergeSettings(storedSettings)
     return mergedSettings[key]
   }
 
   /**
-   * 获取所有设置
+   * Returns all settings
    */
   async getAllSettings(): Promise<AppSettings> {
     const store = await this.getStore()
-    const storedSettings = store.get('settings', {})
+    const storedSettings: Partial<AppSettings> = store.get('settings') ?? defaultSettings
     return mergeSettings(storedSettings)
   }
 
   /**
-   * 获取单个设置
+   * Returns a single setting
    */
   async getSetting<K extends keyof AppSettings>(key: K): Promise<AppSettings[K]> {
     const settings = await this.getAllSettings()
@@ -88,7 +88,7 @@ export class SettingsManager {
   }
 
   /**
-   * 更新设置
+   * Updates settings
    */
   async updateSettings(updates: Partial<AppSettings>): Promise<void> {
     const store = await this.getStore()
@@ -98,14 +98,14 @@ export class SettingsManager {
   }
 
   /**
-   * 设置单个值
+   * Sets a single value
    */
   async setSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]): Promise<void> {
     await this.updateSettings({ [key]: value } as Partial<AppSettings>)
   }
 
   /**
-   * 重置为默认设置
+   * Resets to the default settings
    */
   async resetSettings(): Promise<void> {
     const store = await this.getStore()
@@ -113,7 +113,7 @@ export class SettingsManager {
   }
 
   /**
-   * 监听设置变化（同步版本，仅当 store 已初始化时生效）
+   * Listens for settings changes (synchronous variant; only takes effect once the store is initialized)
    */
   onSettingsChangeSync(
     callback: (newSettings: AppSettings, oldSettings: AppSettings) => void
@@ -125,7 +125,7 @@ export class SettingsManager {
         }
       })
     } else {
-      // Store 未初始化时，延迟注册监听器
+      // Store not initialized yet; register the listener once it is
       this.getStore().then((store) => {
         store.onDidChange('settings', (newValue, oldValue) => {
           if (newValue && oldValue) {
@@ -137,7 +137,7 @@ export class SettingsManager {
   }
 
   /**
-   * 监听设置变化
+   * Listens for settings changes
    */
   async onSettingsChange(
     callback: (newSettings: AppSettings, oldSettings: AppSettings) => void

@@ -14,13 +14,21 @@ export interface ResizableLayoutProps {
   minCenterWidth?: number
 }
 
-// 黄金比例常量
+/** Props injected into the center panel by the layout. */
+interface CenterPanelInjectedProps {
+  onToggleLeft: () => void
+  onToggleRight: () => void
+  isLeftCollapsed: boolean
+  isRightCollapsed: boolean
+}
+
+// Golden ratio constant
 const GOLDEN_RATIO = 1.618
 
-// 计算黄金比例的默认大小（百分比）
-// - 左面板占比 = 1 / (2 + φ) ≈ 0.276 (27.6%)
-// - 中面板占比 = φ / (2 + φ) ≈ 0.447 (44.7%)
-// - 右面板占比 = 1 / (2 + φ) ≈ 0.276 (27.6%)
+// Compute default sizes from the golden ratio (percentages)
+// - Left panel share = 1 / (2 + φ) ≈ 0.276 (27.6%)
+// - Center panel share = φ / (2 + φ) ≈ 0.447 (44.7%)
+// - Right panel share = 1 / (2 + φ) ≈ 0.276 (27.6%)
 const totalRatio = 2 + GOLDEN_RATIO
 const sideRatio = 1 / totalRatio
 const centerRatio = GOLDEN_RATIO / totalRatio
@@ -43,7 +51,7 @@ export default function ResizableLayout({
   const [isLeftCollapsed, setIsLeftCollapsed] = React.useState(false)
   const [isRightCollapsed, setIsRightCollapsed] = React.useState(false)
 
-  // 折叠/展开左侧面板
+  // Collapse/expand the left panel
   const toggleLeftPanel = useCallback(() => {
     const panel = leftPanelRef.current
     if (panel) {
@@ -56,7 +64,7 @@ export default function ResizableLayout({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 折叠/展开右侧面板
+  // Collapse/expand the right panel
   const toggleRightPanel = useCallback(() => {
     const panel = rightPanelRef.current
     if (panel) {
@@ -69,7 +77,7 @@ export default function ResizableLayout({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 监听面板切换快捷键
+  // Listen for panel toggle shortcuts
   useEffect(() => {
     const handleToggleKnowledgeBase = () => {
       toggleLeftPanel()
@@ -91,7 +99,7 @@ export default function ResizableLayout({
   return (
     <div className="flex flex-1 overflow-hidden p-2">
       <ResizablePanelGroup orientation="horizontal" className="h-full gap-1">
-        {/* 左侧面板 */}
+        {/* Left panel */}
         <ResizablePanel
           panelRef={leftPanelRef}
           defaultSize={defaultLeftSize}
@@ -103,27 +111,24 @@ export default function ResizableLayout({
           {leftPanel}
         </ResizablePanel>
 
-        {/* 左侧拖拽条 */}
+        {/* Left drag handle */}
         <ResizableHandle />
 
-        {/* 中间面板 */}
+        {/* Center panel */}
         <ResizablePanel defaultSize={defaultCenterSize} minSize={minCenterWidth}>
           {}
-          {React.cloneElement(
-            centerPanel as ReactElement,
-            {
-              onToggleLeft: toggleLeftPanel,
-              onToggleRight: toggleRightPanel,
-              isLeftCollapsed,
-              isRightCollapsed
-            } as any
-          )}
+          {React.cloneElement(centerPanel as ReactElement<CenterPanelInjectedProps>, {
+            onToggleLeft: toggleLeftPanel,
+            onToggleRight: toggleRightPanel,
+            isLeftCollapsed,
+            isRightCollapsed
+          })}
         </ResizablePanel>
 
-        {/* 右侧拖拽条 */}
+        {/* Right drag handle */}
         <ResizableHandle />
 
-        {/* 右侧面板 */}
+        {/* Right panel */}
         <ResizablePanel
           panelRef={rightPanelRef}
           defaultSize={defaultRightSize}

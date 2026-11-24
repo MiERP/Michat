@@ -4,7 +4,7 @@ import Logger from '../../shared/utils/logger'
 import { UpdateStatus, UpdateState } from '../../shared/types/update'
 
 /**
- * 自动更新服务
+ * Auto-update service
  */
 export class UpdateService {
   private currentState: UpdateState = { status: UpdateStatus.IDLE }
@@ -15,17 +15,17 @@ export class UpdateService {
   }
 
   /**
-   * 设置主窗口引用（用于发送更新通知）
+   * Set the main window reference (used to send update notifications)
    */
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
   }
 
   /**
-   * 配置 electron-updater
+   * Configure electron-updater
    */
   private setupAutoUpdater(): void {
-    // 开发环境配置
+    // Development environment configuration
     if (process.env.NODE_ENV === 'development') {
       Logger.info('UpdateService', 'Running in development mode, auto-update disabled')
       autoUpdater.autoDownload = false
@@ -33,7 +33,7 @@ export class UpdateService {
       return
     }
 
-    // 生产环境配置
+    // Production environment configuration
     autoUpdater.autoDownload = false
     // Never install silently: the user must choose "Install" explicitly.
     autoUpdater.autoInstallOnAppQuit = false
@@ -94,7 +94,6 @@ export class UpdateService {
     })
   }
 
-
   private updateState(newState: Partial<UpdateState>): void {
     this.currentState = { ...this.currentState, ...newState }
 
@@ -102,7 +101,6 @@ export class UpdateService {
       this.mainWindow.webContents.send('update:state-changed', this.currentState)
     }
   }
-
 
   async checkForUpdates(): Promise<UpdateState> {
     if (process.env.NODE_ENV === 'development') {
@@ -117,11 +115,11 @@ export class UpdateService {
       Logger.info('UpdateService', 'Manually checking for updates...')
       await autoUpdater.checkForUpdates()
       return this.currentState
-    } catch (error: any) {
+    } catch (error) {
       Logger.error('UpdateService', 'Failed to check for updates:', error)
       this.updateState({
         status: UpdateStatus.ERROR,
-        error: error.message
+        error: (error as Error).message
       })
       return this.currentState
     }
@@ -135,11 +133,11 @@ export class UpdateService {
     try {
       Logger.info('UpdateService', 'Starting update download...')
       await autoUpdater.downloadUpdate()
-    } catch (error: any) {
+    } catch (error) {
       Logger.error('UpdateService', 'Failed to download update:', error)
       this.updateState({
         status: UpdateStatus.ERROR,
-        error: error.message
+        error: (error as Error).message
       })
       throw error
     }

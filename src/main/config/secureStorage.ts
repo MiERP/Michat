@@ -1,19 +1,19 @@
 /**
- * 安全存储工具
- * 使用 Electron safeStorage API 加密敏感数据
+ * Secure storage utilities
+ * Uses the Electron safeStorage API to encrypt sensitive data
  */
 
 import { safeStorage } from 'electron'
 import Logger from '../../shared/utils/logger'
 
 /**
- * 加密文本数据
- * @param plainText 明文
- * @returns Base64 编码的加密数据，如果加密失败返回 null
+ * Encrypts text data
+ * @param plainText plain text
+ * @returns Base64-encoded encrypted data, or null if encryption fails
  */
 export function encryptString(plainText: string): string | null {
   try {
-    // 检查加密是否可用
+    // Check whether encryption is available
     if (!safeStorage.isEncryptionAvailable()) {
       Logger.warn('SecureStorage', 'Encryption not available on this platform')
       return null
@@ -28,9 +28,9 @@ export function encryptString(plainText: string): string | null {
 }
 
 /**
- * 解密文本数据
- * @param encryptedBase64 Base64 编码的加密数据
- * @returns 解密后的明文，如果解密失败返回 null
+ * Decrypts text data
+ * @param encryptedBase64 Base64-encoded encrypted data
+ * @returns decrypted plain text, or null if decryption fails
  */
 export function decryptString(encryptedBase64: string): string | null {
   try {
@@ -48,30 +48,31 @@ export function decryptString(encryptedBase64: string): string | null {
 }
 
 /**
- * 检查加密是否可用
+ * Checks whether encryption is available
  */
 export function isEncryptionAvailable(): boolean {
   return safeStorage.isEncryptionAvailable()
 }
 
 /**
- * 加密对象中的敏感字段
- * @param obj 包含敏感数据的对象
- * @param sensitiveFields 需要加密的字段名数组
- * @returns 加密后的对象（原对象会被修改）
+ * Encrypts the sensitive fields of an object
+ * @param obj object containing sensitive data
+ * @param sensitiveFields array of field names to encrypt
+ * @returns the encrypted object (the original object is mutated)
  */
-export function encryptObjectFields<T extends Record<string, any>>(
+export function encryptObjectFields<T extends Record<string, unknown>>(
   obj: T,
   sensitiveFields: string[]
 ): T {
-  const result: Record<string, any> = { ...obj }
+  const result: Record<string, unknown> = { ...obj }
 
   for (const field of sensitiveFields) {
-    if (field in result && typeof result[field] === 'string') {
-      const encrypted = encryptString(result[field])
+    const value = result[field]
+    if (field in result && typeof value === 'string') {
+      const encrypted = encryptString(value)
       if (encrypted) {
         result[field] = encrypted
-        // 添加标记表示该字段已加密
+        // Add a marker indicating the field is encrypted
         result[`__encrypted_${field}`] = true
       }
     }
@@ -81,26 +82,27 @@ export function encryptObjectFields<T extends Record<string, any>>(
 }
 
 /**
- * 解密对象中的敏感字段
- * @param obj 包含加密数据的对象
- * @param sensitiveFields 需要解密的字段名数组
- * @returns 解密后的对象（原对象会被修改）
+ * Decrypts the sensitive fields of an object
+ * @param obj object containing encrypted data
+ * @param sensitiveFields array of field names to decrypt
+ * @returns the decrypted object (the original object is mutated)
  */
-export function decryptObjectFields<T extends Record<string, any>>(
+export function decryptObjectFields<T extends Record<string, unknown>>(
   obj: T,
   sensitiveFields: string[]
 ): T {
-  const result: Record<string, any> = { ...obj }
+  const result: Record<string, unknown> = { ...obj }
 
   for (const field of sensitiveFields) {
-    // 检查是否有加密标记
+    // Check whether the encryption marker is present
     const encryptedMarker = `__encrypted_${field}`
-    if (result[encryptedMarker] && field in result && typeof result[field] === 'string') {
-      const decrypted = decryptString(result[field])
+    const value = result[field]
+    if (result[encryptedMarker] && field in result && typeof value === 'string') {
+      const decrypted = decryptString(value)
       if (decrypted) {
         result[field] = decrypted
       }
-      // 移除加密标记
+      // Remove the encryption marker
       delete result[encryptedMarker]
     }
   }
@@ -109,24 +111,24 @@ export function decryptObjectFields<T extends Record<string, any>>(
 }
 
 /**
- * Provider 配置的敏感字段列表
+ * List of sensitive fields in a provider configuration
  */
 export const PROVIDER_SENSITIVE_FIELDS = ['apiKey', 'apiSecret', 'accessToken']
 
 /**
- * 加密 Provider 配置
- * @param config Provider 配置对象
- * @returns 加密后的配置
+ * Encrypts a provider configuration
+ * @param config provider configuration object
+ * @returns the encrypted configuration
  */
-export function encryptProviderConfig(config: Record<string, any>): Record<string, any> {
+export function encryptProviderConfig(config: Record<string, unknown>): Record<string, unknown> {
   return encryptObjectFields(config, PROVIDER_SENSITIVE_FIELDS)
 }
 
 /**
- * 解密 Provider 配置
- * @param config 加密的 Provider 配置对象
- * @returns 解密后的配置
+ * Decrypts a provider configuration
+ * @param config encrypted provider configuration object
+ * @returns the decrypted configuration
  */
-export function decryptProviderConfig(config: Record<string, any>): Record<string, any> {
+export function decryptProviderConfig(config: Record<string, unknown>): Record<string, unknown> {
   return decryptObjectFields(config, PROVIDER_SENSITIVE_FIELDS)
 }

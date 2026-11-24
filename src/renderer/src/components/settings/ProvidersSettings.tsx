@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../../../shared/types/knowledge'
+import type { PublicProviderConfig } from '../../../../shared/types'
 
 interface GgufModel {
   filename: string
@@ -12,16 +13,9 @@ interface GgufModel {
   addedAt: string | null
 }
 
-interface ProviderConfig {
-  providerName: string
-  config: Record<string, any>
-  enabled: boolean
-  updatedAt: number
-}
-
 interface ProvidersSettingsProps {
-  providers: ProviderConfig[]
-  onProvidersChange: (updatedProviders: ProviderConfig[]) => void
+  providers: PublicProviderConfig[]
+  onProvidersChange: (updatedProviders: PublicProviderConfig[]) => void
   onRefresh: () => Promise<void>
 }
 
@@ -205,7 +199,8 @@ export default function ProvidersSettings({ onRefresh }: ProvidersSettingsProps)
       <div className="space-y-6 pr-4">
         {!encryptionAvailable && (
           <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
-            <strong>Security Warning:</strong> API keys are stored in plain text because system encryption is not available on this platform.
+            <strong>Security Warning:</strong> API keys are stored in plain text because system
+            encryption is not available on this platform.
           </div>
         )}
         <div className="flex gap-3">

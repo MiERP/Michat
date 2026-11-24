@@ -348,8 +348,7 @@ export class EmbeddingService {
     for (const separator of separators) {
       const before = text.lastIndexOf(separator, middle)
       const after = text.indexOf(separator, middle)
-      const index =
-        before >= 0 && (after < 0 || middle - before <= after - middle) ? before : after
+      const index = before >= 0 && (after < 0 || middle - before <= after - middle) ? before : after
       if (index > 40 && index < text.length - 40) {
         const left = text.slice(0, index).trim()
         const right = text.slice(index + separator.length).trim()

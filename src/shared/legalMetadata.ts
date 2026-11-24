@@ -45,8 +45,6 @@ export function isOriginalLegalDocument(content: string): boolean {
   const hasOfficialHeader =
     /CỘNG\s+HÒA\s+XÃ\s+HỘI\s+CHỦ\s+NGHĨA\s+VIỆT\s+NAM/iu.test(opening) ||
     /ĐẢNG\s+CỘNG\s+SẢN\s+VIỆT\s+NAM/iu.test(opening)
-  const hasDocumentNumber = /(?:Số|Luật\s+số)\s*:?\s*\d{1,4}\s*[-/]\s*[\p{L}\d]+/iu.test(
-    opening
-  )
+  const hasDocumentNumber = /(?:Số|Luật\s+số)\s*:?\s*\d{1,4}\s*[-/]\s*[\p{L}\d]+/iu.test(opening)
   return hasOfficialHeader && hasDocumentNumber
 }

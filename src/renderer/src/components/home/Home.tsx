@@ -32,7 +32,7 @@ export default function Home({
 }: HomeProps): ReactElement {
   const { t } = useTranslation('ui')
 
-  // 空状态
+  // Empty state
   if (notebooks.length === 0) {
     return (
       <ScrollArea className="flex-1">
@@ -57,7 +57,7 @@ export default function Home({
     )
   }
 
-  // 正常状态
+  // Normal state
   return (
     <ScrollArea className="flex-1">
       <div className="min-h-full">

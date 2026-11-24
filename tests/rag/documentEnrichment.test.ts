@@ -2,7 +2,28 @@ import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import type { Database } from '../../src/main/db'
+import type { KnowledgeService } from '../../src/main/services/KnowledgeService'
+import type {
+  DocumentEnrichment,
+  DocumentEnrichmentService
+} from '../../src/main/services/DocumentEnrichmentService'
+import type { BackgroundJobService } from '../../src/main/services/BackgroundJobService'
 import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+
+type DbModule = typeof import('../../src/main/db')
+type SchemaModule = typeof import('../../src/main/db/schema')
+
+type EnrichmentContext = {
+  dbModule: DbModule
+  schema: SchemaModule
+  db: Database
+  notebookId: string
+  providerManager: FakeProviderManager
+  knowledgeService: KnowledgeService
+  enrichmentService: DocumentEnrichmentService
+  jobService: BackgroundJobService
+}
 
 let userDataDir = ''
 
@@ -101,7 +122,7 @@ const CONTRACT = [
 ].join('\n')
 
 describe('Document enrichment + background queue', () => {
-  let context: any
+  let context: EnrichmentContext | undefined
 
   beforeEach(async () => {
     userDataDir = join(
@@ -166,7 +187,7 @@ describe('Document enrichment + background queue', () => {
   })
 
   async function seedDocument(): Promise<string> {
-    const { knowledgeService, notebookId } = context
+    const { knowledgeService, notebookId } = context!
     return knowledgeService.addDocument(notebookId, {
       title: 'Hợp đồng ABC',
       type: 'text',
@@ -175,7 +196,7 @@ describe('Document enrichment + background queue', () => {
   }
 
   it('stores summary/keywords/entities and builds the table of contents from structure', async () => {
-    const { enrichmentService, knowledgeService, providerManager, dbModule } = context
+    const { enrichmentService, knowledgeService, providerManager, dbModule } = context!
     const documentId = await seedDocument()
 
     const enrichment = await enrichmentService.enrich(documentId)
@@ -185,7 +206,7 @@ describe('Document enrichment + background queue', () => {
     expect(enrichment.keywords).toEqual(['hợp đồng', 'thanh toán'])
     expect(enrichment.entities).toEqual(['Công ty ABC'])
     // TOC lấy từ cấu trúc đã index, không cần LLM
-    expect(enrichment.toc.map((entry: any) => entry.title)).toEqual([
+    expect(enrichment.toc.map((entry) => entry.title)).toEqual([
       'Hợp đồng ABC',
       '1. Phạm vi',
       '2. Termination'
@@ -213,7 +234,7 @@ describe('Document enrichment + background queue', () => {
     ).toEqual([expect.objectContaining({ value_display: 'Công ty ABC' })])
 
     const metadataOutcome = await knowledgeService.searchMetadataAware(
-      context.notebookId,
+      context!.notebookId,
       'Nghĩa vụ của Công ty ABC',
       { topK: 3, threshold: 0 }
     )
@@ -233,7 +254,7 @@ describe('Document enrichment + background queue', () => {
   })
 
   it('skips the LLM call when the enrichment is still fresh', async () => {
-    const { enrichmentService, providerManager } = context
+    const { enrichmentService, providerManager } = context!
     const documentId = await seedDocument()
 
     await enrichmentService.enrich(documentId)
@@ -245,7 +266,7 @@ describe('Document enrichment + background queue', () => {
   })
 
   it('samples the full document for enrichment instead of only its first excerpt', async () => {
-    const { enrichmentService, knowledgeService, notebookId, providerManager } = context
+    const { enrichmentService, knowledgeService, notebookId, providerManager } = context!
     const tailEvidence = 'ENTITY-ONLY-AT-THE-END-OF-THE-DOCUMENT'
     const documentId = await knowledgeService.addDocument(notebookId, {
       title: 'Dài',
@@ -259,7 +280,7 @@ describe('Document enrichment + background queue', () => {
   })
 
   it('can be cancelled mid-stream without writing an enrichment', async () => {
-    const { enrichmentService, providerManager } = context
+    const { enrichmentService, providerManager } = context!
     const documentId = await seedDocument()
     providerManager.chat.hold = true
 
@@ -273,7 +294,7 @@ describe('Document enrichment + background queue', () => {
   })
 
   it('runs queued enrichment jobs and throttles them by cooldown', async () => {
-    const { jobService, enrichmentService, schema, db, notebookId } = context
+    const { jobService, enrichmentService, schema, db, notebookId } = context!
     const { eq } = await import('drizzle-orm')
     const first = await seedDocument()
     const second = await seedDocument()
@@ -284,14 +305,14 @@ describe('Document enrichment + background queue', () => {
     await jobService.tick()
 
     const jobs = db.select().from(schema.backgroundJobs).all()
-    const statuses = jobs.map((job: any) => job.status)
+    const statuses = jobs.map((job) => job.status)
 
     expect(statuses.filter((status: string) => status === 'done')).toHaveLength(1)
     expect(statuses.filter((status: string) => status === 'pending')).toHaveLength(1)
     expect(enrichmentService.getEnrichment(first)).toBeTruthy()
 
     // Job thứ hai vẫn pending (cooldown) — chứng minh throttle hoạt động
-    const pendingJob = jobs.find((job: any) => job.status === 'pending')
+    const pendingJob = jobs.find((job) => job.status === 'pending')
     expect(pendingJob?.jobType).toBe('enrich-document')
     expect(
       db.select().from(schema.documents).where(eq(schema.documents.id, second)).get()
@@ -299,7 +320,7 @@ describe('Document enrichment + background queue', () => {
   })
 
   it('cancels a running manual enrichment when asked to stop', async () => {
-    const { jobService, providerManager } = context
+    const { jobService, providerManager } = context!
     const documentId = await seedDocument()
     providerManager.chat.hold = true
 
@@ -311,7 +332,7 @@ describe('Document enrichment + background queue', () => {
   })
 
   it('keeps queued jobs pending while manual enrichment is running', async () => {
-    const { jobService, providerManager, notebookId, db, schema } = context
+    const { jobService, providerManager, notebookId, db, schema } = context!
     const documentId = await seedDocument()
     providerManager.chat.hold = true
     const manual = jobService.runEnrichNow(documentId)
@@ -327,12 +348,12 @@ describe('Document enrichment + background queue', () => {
   })
 
   it('waits for manual enrichment to settle before shutdown completes', async () => {
-    const { jobService, enrichmentService } = context
+    const { jobService, enrichmentService } = context!
     let finish!: () => void
     vi.spyOn(enrichmentService, 'enrich').mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          finish = resolve
+        new Promise<DocumentEnrichment>((resolve) => {
+          finish = () => resolve({} as DocumentEnrichment)
         })
     )
     const manual = jobService.runEnrichNow('doc-manual')

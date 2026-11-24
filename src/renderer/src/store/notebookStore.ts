@@ -45,9 +45,9 @@ export const useNotebookStore = create<NotebookStore>()((set) => ({
         notebooks: [dbNotebook, ...state.notebooks]
       }))
 
-      // 自动创建第一个会话
+      // Automatically create the first session
       try {
-        await window.api.createChatSession(dbNotebook.id, '新对话')
+        await window.api.createChatSession(dbNotebook.id, 'New conversation')
         console.log(`[NotebookStore] Created initial session for notebook ${dbNotebook.id}`)
       } catch (error) {
         console.error('[NotebookStore] Failed to create initial session:', error)
@@ -90,7 +90,7 @@ export const useNotebookStore = create<NotebookStore>()((set) => ({
         const updatedNotebooks = state.notebooks.map((nb) =>
           nb.id === id ? { ...nb, ...updates, updatedAt: new Date() } : nb
         )
-        // 同时更新 openedNotebooks 和 currentNotebook
+        // Update openedNotebooks and currentNotebook as well
         const updatedOpenedNotebooks = state.openedNotebooks.map((nb) =>
           nb.id === id ? { ...nb, ...updates, updatedAt: new Date() } : nb
         )
@@ -120,7 +120,7 @@ export const useNotebookStore = create<NotebookStore>()((set) => ({
     set((state) => {
       const notebook = state.notebooks.find((nb) => nb.id === id)
       if (!notebook) return state
-      // 如果已经打开，不重复添加
+      // Already open: do not add it again
       if (state.openedNotebooks.some((nb) => nb.id === id)) return state
       return {
         openedNotebooks: [...state.openedNotebooks, notebook]

@@ -142,9 +142,9 @@ describe('chat navigation and concurrent streams', () => {
 
     const state = useChatStore.getState()
     expect(state.streamingMessages.a).toBeUndefined()
-    expect(state.messages.some((message) => message.content.includes('AI Provider not configured'))).toBe(
-      true
-    )
+    expect(
+      state.messages.some((message) => message.content.includes('AI Provider not configured'))
+    ).toBe(true)
   })
 
   it('preserves a new stream cache when an earlier abort finishes', async () => {

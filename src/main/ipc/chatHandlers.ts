@@ -1,4 +1,3 @@
-/* eslint-disable no-irregular-whitespace */
 import { ipcMain } from 'electron'
 import * as queries from '../db/queries'
 import { ProviderManager } from '../providers/ProviderManager'
@@ -13,10 +12,7 @@ import type { ChatCitation, ChatMessageMetadata } from '../../shared/types/chat'
 import type { AppSettings } from '../../shared/types'
 import Logger from '../../shared/utils/logger'
 import { buildScopeFilter } from '../utils/chatScope'
-import {
-  createPromptMarker,
-  sanitizeUntrustedPromptBlock
-} from '../services/rag/promptBoundary'
+import { createPromptMarker, sanitizeUntrustedPromptBlock } from '../services/rag/promptBoundary'
 import { ChatSchemas, validate, validateWithEvent } from './validation'
 
 const CONTROL_CHARS_PATTERN = new RegExp(
@@ -367,7 +363,7 @@ export function registerChatHandlers(
         }
       }
 
-      const providerName = String((provider as any)?.name || '').toLowerCase()
+      const providerName = String(provider.name || '').toLowerCase()
       const isLlamaChat = providerName === 'llama' || providerName === 'llama-embed'
       if (isLlamaChat) {
         const chatReady = await llamaService.ensureChatStarted()
@@ -390,7 +386,7 @@ export function registerChatHandlers(
 
       // 3. Load conversation history.
       const history = queries.getMessagesBySession(sessionId)
-      let messages = history.map((m: any) => ({
+      let messages = history.map((m) => ({
         role: m.role as 'user' | 'assistant' | 'system',
         content: m.content
       }))
@@ -545,9 +541,9 @@ export function registerChatHandlers(
 
       let fullTextContent = ''
       let fullReasoningContent = ''
-      let usageMetadata: any = null
+      let usageMetadata: ChatMessageMetadata | null = null
 
-      // 调用 Provider 流式生成,获取 AbortController（基于 AI SDK fullStream）
+      // Call the provider's streaming generation and get an AbortController (based on AI SDK fullStream)
       // Đánh dấu hoạt động để background queue tạm dừng khi user đang chat
       markActive()
       const abortController = await provider.sendMessageStream(
@@ -595,12 +591,12 @@ export function registerChatHandlers(
 
           // 5. Stream metadata and finish marker.
           if (done) {
-            // ä¿å­˜ usage metadata
+            // Save usage metadata
             if (metadata?.usage) {
               usageMetadata = metadata
             }
 
-            // 发送完成事件
+            // Send the completion event
             const finishMetadata: ChatMessageMetadata = {
               ...(metadata || {}),
               citations: citationMetadata

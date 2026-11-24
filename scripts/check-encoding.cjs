@@ -7,14 +7,16 @@
 const fs = require('fs')
 const path = require('path')
 
-const ROOTS = ['src', 'tests']
-const EXTENSIONS = new Set(['.ts', '.tsx'])
+const ROOTS = ['src', 'tests', 'docs']
+const EXTRA_FILES = ['package.json', 'README.md', 'SECURITY.md']
+const EXTENSIONS = new Set(['.ts', '.tsx', '.json', '.md'])
 const CP1252_SPECIAL = '\\u0080-\\u00BF\\u2018\\u2019\\u201C\\u201D\\u2013\\u2014\\u2020\\u2021\\u2030\\u2039\\u203A\\u0152\\u0153\\u0160\\u0161\\u0178\\u017D\\u017E\\u0192\\u02C6\\u02DC'
 const PATTERNS = [
   new RegExp(`Ã[${CP1252_SPECIAL}\\u00C0-\\u00FF]`),
   new RegExp(`Â[${CP1252_SPECIAL}]`),
   /â€/,
   /ð[^\s]/,
+  /[æåäçè][\u0080-\u00FF]/,
   /[æåäç][€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/,
   /[èé][€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/,
   /\uFFFD/,
@@ -46,6 +48,16 @@ for (const root of ROOTS) {
       }
     })
   }
+}
+
+for (const file of EXTRA_FILES) {
+  if (!fs.existsSync(file)) continue
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+  lines.forEach((line, index) => {
+    if (PATTERNS.some((pattern) => pattern.test(line))) {
+      offenders.push(`${file}:${index + 1}: ${line.trim().slice(0, 160)}`)
+    }
+  })
 }
 
 if (offenders.length > 0) {

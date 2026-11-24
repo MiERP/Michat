@@ -5,13 +5,14 @@ import { eq, desc, and, sql } from 'drizzle-orm'
 import { getDatabase, executeCheckpoint, getSqlite, vacuumDatabase } from './index'
 import { isPathInsideDirectory } from '../security/guards'
 import { chatSessions, chatMessages, notebooks, notes, documents, items, chunks } from './schema'
+import type { ChatMessageMetadata } from '../../shared/types/chat'
 import { vectorStoreManager } from '../vectorstore'
 import Logger from '../../shared/utils/logger'
 
 // ==================== Chat Sessions ====================
 
 /**
- * 创建新的聊天会话
+ * Creates a new chat session
  */
 export function createSession(notebookId: string, title: string, parentSessionId?: string) {
   const db = getDatabase()
@@ -35,8 +36,8 @@ export function createSession(notebookId: string, title: string, parentSessionId
 }
 
 /**
- * 获取指定笔记本的活跃会话（栈顶）
- * 每个笔记本只有一个 active session
+ * Returns the active session for a notebook (top of the stack).
+ * Each notebook has exactly one active session.
  */
 export function getActiveSessionByNotebook(notebookId: string) {
   const db = getDatabase()
@@ -49,8 +50,8 @@ export function getActiveSessionByNotebook(notebookId: string) {
 }
 
 /**
- * 获取指定笔记本的所有会话
- * 按更新时间倒序排列
+ * Returns all sessions for a notebook.
+ * Sorted by update time, newest first.
  */
 export function getSessionsByNotebook(notebookId: string) {
   const db = getDatabase()
@@ -64,7 +65,7 @@ export function getSessionsByNotebook(notebookId: string) {
 }
 
 /**
- * 更新会话标题
+ * Updates the session title
  */
 export function updateSessionTitle(sessionId: string, title: string) {
   const db = getDatabase()
@@ -79,8 +80,8 @@ export function updateSessionTitle(sessionId: string, title: string) {
 }
 
 /**
- * 删除会话
- * 外键级联会自动删除该会话的所有消息
+ * Deletes a session.
+ * Foreign-key cascades remove all messages that belong to it.
  */
 export function deleteSession(sessionId: string) {
   const db = getDatabase()
@@ -94,7 +95,7 @@ export function deleteSession(sessionId: string) {
 }
 
 /**
- * 获取单个会话信息
+ * Returns a single session
  */
 export function getSessionById(sessionId: string) {
   const db = getDatabase()
@@ -103,7 +104,7 @@ export function getSessionById(sessionId: string) {
 }
 
 /**
- * 更新会话的 token 计数
+ * Updates the session token count
  */
 export function updateSessionTokens(sessionId: string, tokensToAdd: number) {
   const db = getDatabase()
@@ -123,7 +124,7 @@ export function updateSessionTokens(sessionId: string, tokensToAdd: number) {
 }
 
 /**
- * 更新会话的摘要和状态
+ * Updates the session summary and status
  */
 export function updateSessionSummary(
   sessionId: string,
@@ -145,13 +146,13 @@ export function updateSessionSummary(
 // ==================== Chat Messages ====================
 
 /**
- * 创建新消息
+ * Creates a new message
  */
 export function createMessage(
   sessionId: string,
   role: 'user' | 'assistant' | 'system',
   content: string,
-  metadata?: Record<string, any>
+  metadata?: ChatMessageMetadata
 ) {
   const db = getDatabase()
   const id = `msg_${randomUUID()}`
@@ -170,35 +171,41 @@ export function createMessage(
     .returning()
     .get()
 
-  // 更新会话的 updatedAt
+  // Update the session's updatedAt
   db.update(chatSessions).set({ updatedAt: now }).where(eq(chatSessions.id, sessionId)).run()
 
   return message
 }
 
 /**
- * 获取指定会话的所有消息
- * 按创建时间顺序排列
+ * Returns all messages for a session.
+ * Sorted by creation time.
  */
 export function getMessagesBySession(sessionId: string) {
   const db = getDatabase()
 
-  return db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId)).orderBy(chatMessages.createdAt).limit(200).all()
+  return db
+    .select()
+    .from(chatMessages)
+    .where(eq(chatMessages.sessionId, sessionId))
+    .orderBy(chatMessages.createdAt)
+    .limit(200)
+    .all()
 }
 
 /**
- * 更新消息内容
- * 主要用于更新流式消息的完整内容
+ * Updates message content.
+ * Mainly used to store the complete content of a streamed message.
  */
 export function updateMessageContent(
   messageId: string,
   content: string,
   reasoningContent?: string,
-  metadata?: Record<string, any>
+  metadata?: ChatMessageMetadata
 ) {
   const db = getDatabase()
 
-  const updateData: any = { content }
+  const updateData: Partial<typeof chatMessages.$inferInsert> = { content }
   if (reasoningContent !== undefined) {
     updateData.reasoningContent = reasoningContent
   }
@@ -212,7 +219,7 @@ export function updateMessageContent(
 // ==================== Notebooks ====================
 
 /**
- * 创建新笔记本
+ * Creates a new notebook
  */
 export function createNotebook(title: string, description?: string) {
   const db = getDatabase()
@@ -236,8 +243,8 @@ export function createNotebook(title: string, description?: string) {
 }
 
 /**
- * 获取所有笔记本
- * 按更新时间倒序排列
+ * Returns all notebooks.
+ * Sorted by update time, newest first.
  */
 export function getAllNotebooks() {
   const db = getDatabase()
@@ -245,7 +252,7 @@ export function getAllNotebooks() {
 }
 
 /**
- * 根据 ID 获取笔记本
+ * Returns a notebook by ID
  */
 export function getNotebookById(id: string) {
   const db = getDatabase()
@@ -253,7 +260,7 @@ export function getNotebookById(id: string) {
 }
 
 /**
- * 更新笔记本
+ * Updates a notebook
  */
 export function updateNotebook(
   id: string,
@@ -270,14 +277,14 @@ export function updateNotebook(
 }
 
 /**
- * 删除笔记本
- * 由于外键级联删除，会自动删除该笔记本下的所有会话和消息
+ * Deletes a notebook.
+ * Foreign-key cascades remove every session and message under it.
  */
 export async function deleteNotebook(id: string) {
   const db = getDatabase()
 
   try {
-    // 先获取该笔记本下所有带本地文件的文档
+    // First collect every document under this notebook that has a local file
     const docsWithLocalFiles = db
       .select({ localFilePath: documents.localFilePath })
       .from(documents)
@@ -300,13 +307,13 @@ export async function deleteNotebook(id: string) {
     if (sqlite) {
       sqlite.prepare('DELETE FROM fts_chunks WHERE notebook_id = ?').run(id)
       sqlite.prepare('DELETE FROM vec_documents WHERE notebook_id = ?').run(id)
-        sqlite.prepare('DELETE FROM vec_sections WHERE notebook_id = ?').run(id)
+      sqlite.prepare('DELETE FROM vec_sections WHERE notebook_id = ?').run(id)
     }
 
-    // 删除笔记本（外键级联会自动删除所有关联的 sessions、messages 和 documents）
+    // Delete the notebook (foreign-key cascades remove all related sessions, messages and documents)
     db.delete(notebooks).where(eq(notebooks.id, id)).run()
 
-    // 删除本地文件（异步执行，不阻塞数据库操作）
+    // Delete local files (async, does not block the database operations)
     if (docsWithLocalFiles.length > 0) {
       const { unlink } = await import('fs/promises')
       const knowledgeFilesDir = join(app.getPath('userData'), 'knowledge-files')
@@ -324,7 +331,7 @@ export async function deleteNotebook(id: string) {
 
     await vectorStoreManager.closeStore(id)
 
-    // 执行 checkpoint 确保数据持久化
+    // Run a checkpoint to make sure the data is persisted
     executeCheckpoint('PASSIVE')
     vacuumDatabase()
     Logger.info('Database', `Deleted notebook: ${id}`)
@@ -337,7 +344,7 @@ export async function deleteNotebook(id: string) {
 // ==================== Notes ====================
 
 /**
- * 创建新笔记
+ * Creates a new note
  */
 export function createNote(notebookId: string, title: string, content: string) {
   const db = getDatabase()
@@ -386,8 +393,8 @@ export function createNote(notebookId: string, title: string, content: string) {
 }
 
 /**
- * 获取指定笔记本的所有笔记
- * 按更新时间倒序排列
+ * Returns all notes for a notebook.
+ * Sorted by update time, newest first.
  */
 export function getNotesByNotebook(notebookId: string) {
   const db = getDatabase()
@@ -400,7 +407,7 @@ export function getNotesByNotebook(notebookId: string) {
 }
 
 /**
- * 根据ID获取单个笔记
+ * Returns a single note by ID
  */
 export function getNoteById(id: string) {
   const db = getDatabase()
@@ -408,7 +415,7 @@ export function getNoteById(id: string) {
 }
 
 /**
- * 更新笔记内容
+ * Updates note content
  */
 export function updateNote(id: string, updates: Partial<{ title: string; content: string }>) {
   const db = getDatabase()
@@ -420,7 +427,7 @@ export function updateNote(id: string, updates: Partial<{ title: string; content
 }
 
 /**
- * 删除笔记
+ * Deletes a note
  */
 export function deleteNote(id: string) {
   const db = getDatabase()

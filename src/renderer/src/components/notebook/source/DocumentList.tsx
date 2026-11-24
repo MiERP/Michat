@@ -71,7 +71,7 @@ export default function DocumentList({
     }
   }
 
-  // 未配置嵌入模型的提示（优先级最高）
+  // Prompt when no embedding model is configured (highest priority)
   if (!hasEmbeddingModel && documents.length === 0) {
     return (
       <Empty>
@@ -89,7 +89,7 @@ export default function DocumentList({
     )
   }
 
-  // 暂无文档的空状态（使用Empty组件重构）
+  // Empty state when there are no documents (refactored with the Empty component)
   if (documents.length === 0) {
     return (
       <Empty>
@@ -130,7 +130,7 @@ export default function DocumentList({
   )
 }
 
-// 文档项组件
+// Document item component
 interface DocumentItemProps {
   document: KnowledgeDocument
   selected: boolean
@@ -168,7 +168,7 @@ function DocumentItem({
     }
   }
 
-  // 显示失败提示（仅一次）
+  // Show failure notice (only once)
   useEffect(() => {
     if (document.status === 'failed' && !hasShownErrorRef.current) {
       hasShownErrorRef.current = true
@@ -193,10 +193,10 @@ function DocumentItem({
         selected ? 'brand-selection border ring-1 ring-primary/40' : ''
       }`}
     >
-      {/* 图标列 - 固定宽度 */}
+      {/* Icon column - fixed width */}
       {getTypeIcon()}
 
-      {/* 内容列 - 可被压缩 */}
+      {/* Content column - can shrink */}
       <div className="min-w-0 flex flex-col gap-1">
         <h3 className="text-sm font-medium truncate">{document.title}</h3>
         <p className="text-xs text-muted-foreground">{document.chunkCount} phân đoạn</p>
@@ -224,7 +224,7 @@ function DocumentItem({
         </Button>
       </div>
 
-      {/* 删除文档确认对话框 */}
+      {/* Delete document confirmation dialog */}
       <ConfirmDialog
         isOpen={isDeleteDialogOpen}
         onClose={() => setIsDeleteDialogOpen(false)}

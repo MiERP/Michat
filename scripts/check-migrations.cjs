@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Ensure every recent migration has a drizzle snapshot. Older snapshots are
- * intentionally absent in this repository (0012-0019 were generated
- * incrementally); the latest snapshot still anchors future generate runs.
+ * Ensure every migration in the journal has a matching drizzle snapshot.
+ *
+ * Usage:
+ *   node scripts/check-migrations.cjs
  */
 const fs = require('fs')
 const path = require('path')
@@ -17,21 +18,28 @@ if (!fs.existsSync(journalPath)) {
 }
 
 const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'))
-const requiredFrom = 20
+const entries = journal.entries ?? []
+const present = []
 const missing = []
 
-for (const entry of journal.entries ?? []) {
-  if (entry.idx < requiredFrom) continue
+for (const entry of entries) {
   const snapshot = path.join(metaDir, `${String(entry.idx).padStart(4, '0')}_snapshot.json`)
-  if (!fs.existsSync(snapshot)) {
-    missing.push(`${entry.tag} (expected ${path.basename(snapshot)})`)
+  if (fs.existsSync(snapshot)) {
+    present.push(entry)
+  } else {
+    missing.push(entry)
   }
 }
 
 if (missing.length > 0) {
   console.error('[migrations] missing snapshots:')
-  for (const item of missing) console.error(`  - ${item}`)
+  for (const entry of missing) {
+    console.error(
+      `  - ${entry.tag} (expected ${String(entry.idx).padStart(4, '0')}_snapshot.json)`
+    )
+  }
   process.exit(1)
 }
 
-console.log(`[migrations] snapshots present for ${journal.entries.length} journal entries`)
+console.log(`[migrations] snapshots present for ${present.length}/${entries.length} journal entries`)
+console.log('[migrations] every journal entry has a matching snapshot')

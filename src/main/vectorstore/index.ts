@@ -1,5 +1,5 @@
 /**
- * VectorStore 模块入口
+ * VectorStore module entry point
  */
 
 export * from './types'

@@ -2,7 +2,23 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
-import type { EmbeddingConfig, EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+import type { Database } from '../../src/main/db'
+import type { KnowledgeService } from '../../src/main/services/KnowledgeService'
+import type {
+  EmbeddingConfig,
+  EmbeddingResult
+} from '../../src/main/providers/capabilities/EmbeddingCapability'
+
+type DbModule = typeof import('../../src/main/db')
+type SchemaModule = typeof import('../../src/main/db/schema')
+
+type EvalContext = {
+  dbModule: DbModule
+  schema: SchemaModule
+  db: Database
+  notebookId: string
+  service: KnowledgeService
+}
 
 let userDataDir = ''
 
@@ -67,7 +83,7 @@ interface EvalCase {
 }
 
 describe('RAG eval — real document → section → chunk pipeline', () => {
-  let context: any
+  let context: EvalContext | undefined
 
   beforeEach(async () => {
     userDataDir = await createTempUserData('michat-eval')
@@ -98,7 +114,7 @@ describe('RAG eval — real document → section → chunk pipeline', () => {
   })
 
   it('ranks citation chunks in top 3 through the real retrieval pipeline', async () => {
-    const { service, notebookId } = context
+    const { service, notebookId } = context!
     const markdownFixture = await readFile(
       join(process.cwd(), 'tests/fixtures/rag/local-first.md'),
       'utf8'

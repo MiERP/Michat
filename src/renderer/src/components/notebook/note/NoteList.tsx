@@ -53,10 +53,10 @@ export default function NoteList({
                 : 'border-transparent hover:bg-muted'
             }`}
           >
-            {/* 图标列 - 固定宽度 */}
+            {/* Icon column - fixed width */}
             <FileText className="w-4 h-4 mt-0.5 text-muted-foreground" />
 
-            {/* 内容列 - 可被压缩 */}
+            {/* Content column - can shrink */}
             <div className="min-w-0 flex flex-col gap-1">
               <h3 className="text-sm font-medium truncate">{note.title}</h3>
               <p className="text-xs text-muted-foreground line-clamp-2">
@@ -69,7 +69,7 @@ export default function NoteList({
               </p>
             </div>
 
-            {/* 删除按钮列 - 固定宽度 */}
+            {/* Delete button column - fixed width */}
             <Button
               onClick={(e) => {
                 e.stopPropagation()
@@ -87,7 +87,7 @@ export default function NoteList({
         ))}
       </div>
 
-      {/* 删除笔记确认对话框 */}
+      {/* Delete note confirmation dialog */}
       <DeleteNoteConfirmDialog
         isOpen={showDeleteDialog}
         onClose={() => setShowDeleteDialog(false)}

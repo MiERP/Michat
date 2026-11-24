@@ -1,0 +1,58 @@
+appId: com.michat.app
+productName: MiChat
+
+# Standalone model-less config. Keep the shared packaging fields in sync with
+# electron-builder.yml; `extends` cannot be used here because it merges the
+# parent's extraResources entry and re-copies models/.
+directories:
+  buildResources: build
+files:
+  - 'out/**/*'
+  - 'package.json'
+  - 'node_modules/**/*'
+  - '!**/*.map'
+  - '!**/*.md'
+  - '!tests/**'
+  - '!docs/**'
+  - '!coverage/**'
+  - '!scripts/**'
+  - '!$null'
+  - '!resources/**'
+  - '!resources.zip'
+  - '!**/*.tsbuildinfo'
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/sqlite-vec/**
+  - node_modules/sqlite-vec-*/**
+afterPack: ./scripts/afterPack.cjs
+extraResources:
+  - from: resources
+    to: .
+    filter:
+      - '**/*'
+      - '!models/**'
+  # Keep an empty models directory (plus its tiny metadata) so users have a
+  # place to copy GGUF files after installation.
+  - from: resources/models
+    to: models
+    filter:
+      - 'metadata.json'
+      - 'models.txt'
+win:
+  executableName: michat
+  # Local slim builds are unsigned; signed releases use electron-builder.yml.
+  signAndEditExecutable: false
+nsis:
+  artifactName: ${name}-${version}-slim-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+publish:
+  provider: github
+  owner: HAVS
+  repo: MiChat
+  releaseType: release

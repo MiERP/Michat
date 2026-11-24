@@ -13,25 +13,25 @@ class Logger {
     this.level = level
   }
 
-  static debug(module: string, message: string, ...args: any[]): void {
+  static debug(module: string, message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.DEBUG) {
       console.debug(`[${module}] ${message}`, ...args)
     }
   }
 
-  static info(module: string, message: string, ...args: any[]): void {
+  static info(module: string, message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.INFO) {
       console.log(`[${module}] ${message}`, ...args)
     }
   }
 
-  static warn(module: string, message: string, ...args: any[]): void {
+  static warn(module: string, message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.WARN) {
       console.warn(`[${module}] ${message}`, ...args)
     }
   }
 
-  static error(module: string, message: string, ...args: any[]): void {
+  static error(module: string, message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.ERROR) {
       console.error(`[${module}] ${message}`, ...args)
     }

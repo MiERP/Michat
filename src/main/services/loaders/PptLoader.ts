@@ -20,7 +20,10 @@ export interface ExtractedSlide {
  * Makes slide boundaries visible to the common Markdown normalizer. This keeps
  * page citations and hierarchical section retrieval on the same offset system.
  */
-export function canonicalizeSlides(slides: ExtractedSlide[]): { content: string; pages: PageInfo[] } {
+export function canonicalizeSlides(slides: ExtractedSlide[]): {
+  content: string
+  pages: PageInfo[]
+} {
   const blocks: string[] = []
   const pages: PageInfo[] = []
   let offset = 0
@@ -45,7 +48,7 @@ export function canonicalizeSlides(slides: ExtractedSlide[]): { content: string;
 }
 
 /**
- * PowerPoint 文档加载器
+ * PowerPoint document loader
  */
 export class PptLoader implements IDocumentLoader {
   readonly supportedMimeTypes = [PPTX_MIME, 'application/vnd.ms-powerpoint']

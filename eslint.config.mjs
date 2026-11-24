@@ -7,6 +7,11 @@ import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 
 export default defineConfig(
   {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'error'
+    }
+  },
+  {
     ignores: [
       '**/node_modules',
       '**/dist',

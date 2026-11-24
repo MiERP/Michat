@@ -1,9 +1,8 @@
 import { create } from 'zustand'
 import type { Quiz, QuizSession } from '../../../main/db/schema'
-import type { QuizQuestion } from '../../../shared/types/quiz'
 
 interface QuizStore {
-  // 核心状态
+  // Core state
   currentQuiz: Quiz | null
   currentQuestionIndex: number
   answers: Record<string, number> // questionId -> answerIndex
@@ -11,10 +10,10 @@ interface QuizStore {
   isGenerating: boolean
   generationProgress: { stage: string; progress: number } | null
 
-  // Dialog状态
+  // Dialog state
   isDialogOpen: boolean
-  isResultMode: boolean // 是否显示结果页
-  isReviewMode: boolean // 是否查看详情模式（浏览已答题，不可修改）
+  isResultMode: boolean // Whether the result view is shown
+  isReviewMode: boolean // Review mode (browse answered questions, read-only)
 
   // Actions
   setCurrentQuiz: (quiz: Quiz | null) => void
@@ -27,11 +26,11 @@ interface QuizStore {
   setResultMode: (isResult: boolean) => void
   setReviewMode: (isReview: boolean) => void
 
-  // 计算属性
+  // Computed properties
   getCorrectCount: () => number
   getTotalQuestions: () => number
 
-  // 异步操作
+  // Async operations
   loadLatestQuiz: (notebookId: string) => Promise<void>
   loadQuiz: (quizId: string) => Promise<void>
   generateQuiz: (
@@ -48,7 +47,7 @@ interface QuizStore {
 }
 
 export const useQuizStore = create<QuizStore>()((set, get) => ({
-  // 初始状态
+  // Initial state
   currentQuiz: null,
   currentQuestionIndex: 0,
   answers: {},
@@ -76,12 +75,12 @@ export const useQuizStore = create<QuizStore>()((set, get) => ({
   setResultMode: (isResult) => set({ isResultMode: isResult }),
   setReviewMode: (isReview) => set({ isReviewMode: isReview }),
 
-  // 计算属性
+  // Computed properties
   getCorrectCount: () => {
     const { currentQuiz, answers } = get()
     if (!currentQuiz) return 0
 
-    const questions = currentQuiz.questionsData as any as QuizQuestion[]
+    const questions = currentQuiz.questionsData
     let correctCount = 0
 
     questions.forEach((question) => {
@@ -97,11 +96,11 @@ export const useQuizStore = create<QuizStore>()((set, get) => ({
   getTotalQuestions: () => {
     const { currentQuiz } = get()
     if (!currentQuiz) return 0
-    const questions = currentQuiz.questionsData as any as QuizQuestion[]
+    const questions = currentQuiz.questionsData
     return questions.length
   },
 
-  // 异步操作
+  // Async operations
   loadLatestQuiz: async (notebookId: string) => {
     try {
       const quiz = await window.api.quiz.getLatest(notebookId)
@@ -182,7 +181,7 @@ export const useQuizStore = create<QuizStore>()((set, get) => ({
   }
 }))
 
-// 设置进度监听器
+// Set up the progress listener
 export function setupQuizListeners() {
   return window.api.quiz.onProgress((data) => {
     useQuizStore.setState({

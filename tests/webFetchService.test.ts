@@ -15,9 +15,9 @@ describe('WebFetchService security', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(new WebFetchService(fetchMock as never).fetchUrl('https://1.1.1.1/page')).rejects.toThrow(
-      /private network address/i
-    )
+    await expect(
+      new WebFetchService(fetchMock as never).fetchUrl('https://1.1.1.1/page')
+    ).rejects.toThrow(/private network address/i)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

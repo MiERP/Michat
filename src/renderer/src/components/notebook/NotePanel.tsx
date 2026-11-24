@@ -28,7 +28,7 @@ import UnsavedChangesDialog from '../common/UnsavedChangesDialog'
 import DeleteNoteConfirmDialog from '../common/DeleteNoteConfirmDialog'
 import type { Note } from '../../../../shared/types'
 
-// 编辑器面板子组件 - 管理编辑状态
+// Editor panel subcomponent - manages editing state
 interface NoteEditorPanelProps {
   note: Note
   isSaving: boolean
@@ -51,16 +51,16 @@ function NoteEditorPanel({
   const [editTitle, setEditTitle] = useState(note.title)
   const [editContent, setEditContent] = useState(note.content)
 
-  // 检测是否有未保存的修改
+  // Detect unsaved changes
   useEffect(() => {
     const hasChanges = editTitle !== note.title || editContent !== note.content
     onUnsavedChange(hasChanges)
   }, [editTitle, editContent, note.title, note.content, onUnsavedChange])
 
   const handleSave = () => {
-    // 如果标题为空或只有空格，使用默认标题
+    // If the title is empty or only whitespace, use a default title
     const finalTitle = editTitle.trim() || t('untitledNote')
-    // 更新显示的标题，让用户看到自动设置的标题
+    // Update the displayed title so the user sees the auto-set title
     if (!editTitle.trim()) {
       setEditTitle(finalTitle)
     }
@@ -120,7 +120,7 @@ function NoteEditorPanel({
         }
       />
 
-      {/* 编辑器内容 */}
+      {/* Editor content */}
       <div className="flex-1 overflow-hidden">
         <NoteEditor content={editContent} onChange={setEditContent} />
       </div>
@@ -176,25 +176,25 @@ export default function NotePanel(): ReactElement {
     return () => clearTimeout(timer)
   }, [selected])
 
-  // 管理未保存状态
+  // Manage unsaved state
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
-  // Dialog 状态管理
+  // Dialog state management
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
-  // 监听Notebook切换，清空当前编辑状态
+  // Listen for notebook switches and clear the current editing state
   useEffect(() => {
     if (notebookId) {
-      // 清空当前编辑状态，避免显示旧Notebook的内容
+      // Clear the current editing state to avoid showing content from the previous notebook
       setCurrentNote(null)
       clearCitation()
-      // 使用 setTimeout 将状态更新推迟到下一个事件循环
+      // Use setTimeout to defer the state update to the next event loop
       setTimeout(() => setHasUnsavedChanges(false), 0)
     }
   }, [notebookId, setCurrentNote, clearCitation])
 
-  // 加载 items 列表
+  // Load the items list
   useEffect(() => {
     if (notebookId) {
       loadItems(notebookId)
@@ -212,37 +212,37 @@ export default function NotePanel(): ReactElement {
     return cleanup
   }, [notebookId, loadItems])
 
-  // 创建新笔记
+  // Create a new note
   const handleCreateNote = async () => {
     if (!notebookId) return
     await createNote(notebookId, t('newNoteContent'), t('newNote'))
   }
 
-  // 保存笔记
+  // Save note
   const handleSave = async (title: string, content: string) => {
     if (!currentNote) return
     await updateNote(currentNote.id, { title, content })
   }
 
-  // 删除笔记
+  // Delete note
   const handleDelete = async () => {
     if (!currentNote) return
     setShowDeleteDialog(true)
   }
 
-  // 确认删除笔记
+  // Confirm note deletion
   const confirmDelete = async () => {
     if (!currentNote) return
-    // 找到对应的 item
+    // Find the corresponding item
     const item = items.find((item) => item.type === 'note' && item.resourceId === currentNote.id)
     if (item) {
-      await deleteItem(item.id, true) // 同时删除资源
+      await deleteItem(item.id, true) // Also delete the resource
     }
   }
 
-  // 返回列表页面
+  // Return to the list page
   const handleBack = () => {
-    // 如果有未保存的修改，提示用户
+    // If there are unsaved changes, prompt the user
     if (hasUnsavedChanges) {
       setShowUnsavedDialog(true)
       return
@@ -251,13 +251,13 @@ export default function NotePanel(): ReactElement {
     setHasUnsavedChanges(false)
   }
 
-  // 确认离开（有未保存修改时）
+  // Confirm leaving (when there are unsaved changes)
   const confirmLeave = () => {
     setCurrentNote(null)
     setHasUnsavedChanges(false)
   }
 
-  // 打开答题窗口（查看特定版本）
+  // Open the quiz window (view a specific version)
   const handleOpenQuiz = async (quizId: string) => {
     try {
       if (notebookId) {
@@ -268,7 +268,7 @@ export default function NotePanel(): ReactElement {
     }
   }
 
-  // 打开答题窗口（tạo mới — chưa có quizId)
+  // Open the quiz window (create a new one — no quizId yet)
   const handleOpenQuizWindow = async () => {
     if (!notebookId) return
     try {
@@ -327,7 +327,7 @@ export default function NotePanel(): ReactElement {
   return (
     <div className="flex flex-col bg-card rounded-xl overflow-hidden h-full shadow-md">
       {isEditing && currentNote ? (
-        // 编辑器页面 - 使用 key 强制在切换笔记时重新挂载
+        // Editor page - use key to force remount when switching notes
         <NoteEditorPanel
           key={currentNote.id}
           note={currentNote}
@@ -339,9 +339,9 @@ export default function NotePanel(): ReactElement {
           onUnsavedChange={setHasUnsavedChanges}
         />
       ) : (
-        // 列表页面
+        // List page
         <>
-          {/* 顶部工具栏 */}
+          {/* Top toolbar */}
           <PanelHeader
             draggable
             left={<span className="text-sm text-foreground">{t('creativeSpace')}</span>}
@@ -563,14 +563,14 @@ export default function NotePanel(): ReactElement {
         </>
       )}
 
-      {/* 未保存修改确认对话框 */}
+      {/* Unsaved changes confirmation dialog */}
       <UnsavedChangesDialog
         isOpen={showUnsavedDialog}
         onClose={() => setShowUnsavedDialog(false)}
         onConfirm={confirmLeave}
       />
 
-      {/* 删除笔记确认对话框 */}
+      {/* Delete note confirmation dialog */}
       <DeleteNoteConfirmDialog
         isOpen={showDeleteDialog}
         onClose={() => setShowDeleteDialog(false)}

@@ -233,13 +233,14 @@ export class PdfLoader implements IDocumentLoader {
       return { ...line, text }
     })
 
-    const headingCount = rendered.filter(
-      (line) => this.isHeadingLine(line, bodyFontSize)
-    ).length
+    const headingCount = rendered.filter((line) => this.isHeadingLine(line, bodyFontSize)).length
 
     // Nếu quá nhiều "heading" thì heuristic sai — giữ nguyên text phẳng
     if (headingCount > Math.max(2, rendered.length * 0.35)) {
-      return rendered.map((line) => line.text).join('\n').trim()
+      return rendered
+        .map((line) => line.text)
+        .join('\n')
+        .trim()
     }
 
     return rendered

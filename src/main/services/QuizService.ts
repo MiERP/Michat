@@ -1,6 +1,6 @@
 /**
  * QuizService
- * 答题服务 - 生成和管理笔记本的答题题库
+ * Quiz service - generates and manages quiz banks for notebooks
  */
 
 import { randomUUID } from 'crypto'
@@ -21,6 +21,7 @@ import { eq, desc, and, inArray } from 'drizzle-orm'
 import { ProviderManager } from '../providers/ProviderManager'
 import { AISDKProvider } from '../providers/base/AISDKProvider'
 import { generateText } from 'ai'
+import type { LanguageModel } from 'ai'
 import { z } from 'zod'
 import Logger from '../../shared/utils/logger'
 import { estimateTokens } from '../../shared/utils/tokenEstimate'
@@ -28,7 +29,7 @@ import { parseQuizPayload, sanitizeQuizQuestions } from './quizPayload'
 import { settingsManager } from '../config'
 
 /**
- * 进度回调函数类型
+ * Progress callback function type
  */
 export type QuizProgressCallback = (stage: string, progress: number) => void
 
@@ -79,38 +80,38 @@ function withAbortTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number
 }
 
 /**
- * 答题生成选项
+ * Quiz generation options
  */
 export interface QuizGenerationOptions {
-  questionCount?: number // 题目数量，默认10
-  difficulty?: 'easy' | 'medium' | 'hard' // 难度，默认medium
-  customPrompt?: string // 自定义提示词
-  documentIds?: string[] // 指定文档生成；bỏ trống = tất cả tài liệu
+  questionCount?: number // Number of questions, defaults to 10
+  difficulty?: 'easy' | 'medium' | 'hard' // Difficulty, defaults to medium
+  customPrompt?: string // Custom prompt
+  documentIds?: string[] // Generate from specific documents only; empty = all documents
 }
 
 /**
- * 获取quiz生成 Prompt（支持国际化和自定义）— đồng thời trả về ngôn ngữ
- * để gắn đúng chỉ thị độ khó (trước đây detect sai cho prompt tiếng Việt).
+ * Get the quiz generation prompt (supports i18n and custom prompts) — also returns
+ * the language so the correct difficulty instruction is attached.
  */
 async function getQuizPrompt(customPrompt?: string): Promise<{ prompt: string; language: string }> {
   const settings = await settingsManager.getAllSettings()
   const language = settings.language || 'vi-VN'
 
-  // 如果提供了自定义提示词，直接使用
+  // If a custom prompt is provided, use it directly
   if (customPrompt && customPrompt.trim()) {
     return { prompt: customPrompt.trim(), language }
   }
 
   const prompt = settings.prompts?.quiz?.[language]
   if (!prompt) {
-    throw new Error(`未找到 ${language} 语言的答题生成提示词`)
+    throw new Error(`No quiz generation prompt found for language ${language}`)
   }
 
   return { prompt, language }
 }
 
 /**
- * 获取难度指令文本
+ * Get the difficulty instruction text
  */
 function getDifficultyInstruction(
   difficulty: 'easy' | 'medium' | 'hard',
@@ -119,19 +120,19 @@ function getDifficultyInstruction(
   const difficultyInstructions = {
     easy: {
       'vi-VN':
-        '难度要求：简单 - 请生成简单难度的题目，重点考察基础概念和定义，选项之间的差异要明显。',
+        'Difficulty: Easy - Generate easy-difficulty questions that focus on basic concepts and definitions. Options should have clear differences.',
       'en-US':
         'Difficulty: Easy - Generate easy-difficulty questions that focus on basic concepts and definitions. Options should have clear differences.'
     },
     medium: {
       'vi-VN':
-        '难度要求：中等 - 请生成中等难度的题目，需要理解和应用知识点，适当增加选项的相似性。',
+        'Difficulty: Medium - Generate medium-difficulty questions that require understanding and applying knowledge points, with moderately similar options.',
       'en-US':
         'Difficulty: Medium - Generate medium-difficulty questions that require understanding and applying knowledge points, with moderately similar options.'
     },
     hard: {
       'vi-VN':
-        '难度要求：困难 - 请生成困难题目，需要深度理解、综合应用和分析能力，选项之间要有一定的迷惑性。',
+        'Difficulty: Hard - Generate hard-difficulty questions that require deep understanding, comprehensive application, and analytical ability. Options should be somewhat confusing.',
       'en-US':
         'Difficulty: Hard - Generate hard-difficulty questions that require deep understanding, comprehensive application, and analytical ability. Options should be somewhat confusing.'
     }
@@ -141,40 +142,40 @@ function getDifficultyInstruction(
 }
 
 /**
- * Zod Schema 定义答题结构
+ * Zod schema defining the quiz structure
  */
 const QuizQuestionSchema: z.ZodType<QuizQuestion> = z.object({
-  id: z.string().describe('题目唯一ID'),
-  questionText: z.string().max(500).describe('题目文本'),
-  options: z.array(z.string().max(200)).length(4).describe('4个选项'),
-  correctAnswer: z.number().min(0).max(3).describe('正确答案索引（0-3）'),
-  explanation: z.string().max(500).default('').describe('答案解释'),
-  hints: z.array(z.string().max(200)).max(2).default([]).describe('1-2个提示'),
+  id: z.string().describe('Unique question ID'),
+  questionText: z.string().max(500).describe('Question text'),
+  options: z.array(z.string().max(200)).length(4).describe('4 options'),
+  correctAnswer: z.number().min(0).max(3).describe('Correct answer index (0-3)'),
+  explanation: z.string().max(500).default('').describe('Answer explanation'),
+  hints: z.array(z.string().max(200)).max(2).default([]).describe('1-2 hints'),
   metadata: z
     .object({
-      chunkIds: z.array(z.string()).describe('关联的chunk ID列表')
+      chunkIds: z.array(z.string()).describe('Related chunk ID list')
     })
     .optional()
 })
 
 /**
- * 创建动态Quiz Schema
+ * Create the dynamic quiz schema
  */
 function createQuizSchema(questionCount: number) {
   return z.object({
     // Chấp nhận ít hơn yêu cầu thay vì ép validation lỗi phải sinh lại toàn bộ
     // (một lần sinh trên CPU local có thể mất nhiều phút).
-    questions: z.array(QuizQuestionSchema).min(1).max(questionCount).describe('题目数组'),
+    questions: z.array(QuizQuestionSchema).min(1).max(questionCount).describe('Question array'),
     metadata: z
       .object({
-        totalQuestions: z.number().describe('总题数')
+        totalQuestions: z.number().describe('Total question count')
       })
       .optional()
   })
 }
 
 /**
- * 答题服务
+ * Quiz service
  */
 export class QuizService {
   constructor(
@@ -193,8 +194,8 @@ export class QuizService {
   }
 
   /**
-   * 聚合笔记本内容 — đọc qua KnowledgeService (pipeline dùng chung) thay vì
-   * query thẳng bảng documents/chunks.
+   * Aggregate notebook content — read through KnowledgeService (shared pipeline)
+   * instead of querying the documents/chunks tables directly.
    */
   private trimChunkContent(content: string): string {
     return content.replace(/\s+/g, ' ').trim().slice(0, MAX_CHARS_PER_CHUNK)
@@ -222,14 +223,16 @@ export class QuizService {
       )
 
       if (docsWithChunks.length === 0) {
-        throw new Error('笔记本没有可用内容生成题目，请先添加文档到知识库')
+        throw new Error(
+          'The notebook has no content available to generate questions; add documents to the knowledge base first'
+        )
       }
 
       const contentParts = docsWithChunks.map((doc) => {
         const chunkContent = doc.chunks
           .map((c) => `[chunk:${c.id}] ${this.trimChunkContent(c.content)}`)
           .join('\n')
-        return `[文档: ${doc.title}]\n${chunkContent}`
+        return `[Document: ${doc.title}]\n${chunkContent}`
       })
 
       let mergedContent = contentParts.join('\n\n---\n\n')
@@ -246,9 +249,10 @@ export class QuizService {
   }
 
   /**
-   * 调用LLM生成题目（chạy tuần tự theo batch — streamObject để báo tiến độ
-   * và có thể huỷ khi timeout; không chạy song song vì llama-server local
-   * là single-slot, batch song song chỉ xếp hàng chờ nhau).
+   * Call the LLM to generate questions (runs batches sequentially — streamObject
+   * reports progress and allows cancellation on timeout; batches do not run in
+   * parallel because the local llama-server is single-slot, so parallel batches
+   * would only queue behind each other).
    */
   private async callLLMForGeneration(
     content: string,
@@ -257,11 +261,11 @@ export class QuizService {
   ): Promise<QuizGenerationResult> {
     const provider = await this.providerManager.getActiveChatProvider()
     if (!provider) {
-      throw new Error('没有可用的对话模型,请先配置LLM提供商')
+      throw new Error('No chat model available, please configure an LLM provider first')
     }
 
     if (!(provider instanceof AISDKProvider)) {
-      throw new Error('当前 provider 不支持结构化输出')
+      throw new Error('The current provider does not support structured output')
     }
 
     Logger.info('QuizService', `Using provider: ${provider.name}`)
@@ -336,10 +340,10 @@ export class QuizService {
   }
 
   /**
-   * 生成单个批次的题目（含独立重试）
+   * Generate a single batch of questions (with independent retry)
    */
   private async generateQuestionsBatch(
-    model: any,
+    model: LanguageModel,
     promptTemplate: string,
     contentPart: string,
     questionCount: number,
@@ -426,7 +430,7 @@ export class QuizService {
 
         const questions = validated.data.questions
         if (!questions || questions.length < 1) {
-          throw new Error('生成的题目数量不正确')
+          throw new Error('The number of generated questions is incorrect')
         }
 
         return questions
@@ -446,7 +450,8 @@ export class QuizService {
   }
 
   /**
-   * 将聚合内容按文档段落拆分，尽量均匀分配到指定数量的部分
+   * Split aggregated content by document sections and distribute it as evenly as
+   * possible across the requested number of parts
    */
   private splitContentIntoParts(content: string, parts: number): string[] {
     const sections = content.split('\n\n---\n\n').filter((s) => s.trim().length > 0)
@@ -462,7 +467,7 @@ export class QuizService {
   }
 
   /**
-   * 验证和清洗题目数据
+   * Validate and clean question data
    */
   private async validateAndCleanQuiz(
     notebookId: string,
@@ -470,7 +475,7 @@ export class QuizService {
   ): Promise<QuizGenerationResult> {
     const db = getDatabase()
 
-    // 收集所有提到的chunkIds
+    // Collect all referenced chunkIds
     const allChunkIds = new Set<string>()
     result.questions.forEach((question) => {
       if (question.metadata?.chunkIds) {
@@ -478,7 +483,7 @@ export class QuizService {
       }
     })
 
-    // 验证chunkIds是否存在
+    // Verify that the chunkIds exist
     if (allChunkIds.size > 0) {
       const validChunks = db
         .select({ id: chunks.id })
@@ -488,7 +493,7 @@ export class QuizService {
 
       const validChunkIds = new Set(validChunks.map((c) => c.id))
 
-      // 过滤无效的chunkIds
+      // Filter out invalid chunkIds
       result.questions = result.questions.map((question) => {
         if (question.metadata?.chunkIds) {
           question.metadata.chunkIds = question.metadata.chunkIds.filter((id) =>
@@ -499,7 +504,7 @@ export class QuizService {
       })
     }
 
-    // 题目去重（检查questionText是否重复）
+    // Deduplicate questions (check for duplicate questionText)
     const uniqueQuestions: QuizQuestion[] = []
     const seenTexts = new Set<string>()
     result.questions.forEach((question) => {
@@ -523,7 +528,7 @@ export class QuizService {
   }
 
   /**
-   * 生成题目
+   * Generate a quiz
    */
   async generateQuiz(
     notebookId: string,
@@ -535,19 +540,19 @@ export class QuizService {
     const startTime = Date.now()
 
     try {
-      // 1. 创建记录
+      // 1. Create the record
       onProgress?.('creating_record', 0)
 
       const notebook = db.select().from(notebooks).where(eq(notebooks.id, notebookId)).get()
       if (!notebook) {
-        throw new Error('笔记本不存在')
+        throw new Error('Notebook not found')
       }
 
-      // 获取当前语言设置
+      // Get the current language setting
       const settings = await settingsManager.getAllSettings()
       const language = settings.language || 'vi-VN'
 
-      // 获取当前版本号
+      // Get the current version number
       const latestVersion = db
         .select({ version: quizzes.version })
         .from(quizzes)
@@ -558,7 +563,7 @@ export class QuizService {
 
       const newVersion = (latestVersion?.version || 0) + 1
 
-      // 根据语言生成标题
+      // Generate the title based on the language
       const titleTemplate = language === 'en-US' ? `${notebook.title} Quiz` : `${notebook.title}`
 
       const newQuiz: NewQuiz = {
@@ -566,8 +571,8 @@ export class QuizService {
         notebookId,
         title: titleTemplate,
         version: newVersion,
-        questionsData: [] as any,
-        chunkMapping: {} as any,
+        questionsData: [],
+        chunkMapping: {},
         status: 'generating',
         createdAt: new Date(),
         updatedAt: new Date()
@@ -576,7 +581,7 @@ export class QuizService {
       db.insert(quizzes).values(newQuiz).run()
       Logger.info('QuizService', `Created quiz: ${quizId}, version: ${newVersion}`)
 
-      // 创建对应的 item（添加到列表末尾）
+      // Create the corresponding item (appended to the end of the list)
       const existingItems = db.select().from(items).where(eq(items.notebookId, notebookId)).all()
       const maxOrder = existingItems.reduce((max, item) => Math.max(max, item.order), -1)
       const newOrder = maxOrder + 1
@@ -595,18 +600,18 @@ export class QuizService {
         .run()
       Logger.info('QuizService', `Created item for quiz: ${itemId} with order: ${newOrder}`)
 
-      // 2. 聚合内容
+      // 2. Aggregate content
       onProgress?.('aggregating_content', 10)
       const content = await this.aggregateNotebookContent(notebookId, options?.documentIds)
 
-      // 3. 调用LLM生成
+      // 3. Call the LLM to generate
       const result = await this.callLLMForGeneration(content, options, onProgress)
 
-      // 4. 验证和清洗数据
+      // 4. Validate and clean the data
       onProgress?.('validating_data', 80)
       const validatedResult = await this.validateAndCleanQuiz(notebookId, result)
 
-      // 5. 构建chunkMapping
+      // 5. Build chunkMapping
       const chunkMapping: Record<string, string[]> = {}
       validatedResult.questions.forEach((question) => {
         if (question.metadata?.chunkIds && question.metadata.chunkIds.length > 0) {
@@ -614,20 +619,20 @@ export class QuizService {
         }
       })
 
-      // 6. 更新数据库
+      // 6. Update the database
       onProgress?.('saving_quiz', 90)
 
       const generationTime = Date.now() - startTime
 
       db.update(quizzes)
         .set({
-          questionsData: validatedResult.questions as any,
-          chunkMapping: chunkMapping as any,
+          questionsData: validatedResult.questions,
+          chunkMapping,
           metadata: {
             model: (await this.providerManager.getActiveChatProvider())?.name || 'unknown',
             totalQuestions: validatedResult.metadata.totalQuestions,
             generationTime
-          } as any,
+          },
           status: 'completed',
           updatedAt: new Date()
         })
@@ -656,7 +661,7 @@ export class QuizService {
   }
 
   /**
-   * 获取题库
+   * Get the quiz bank
    */
   getQuiz(quizId: string): Quiz | undefined {
     const db = getDatabase()
@@ -665,7 +670,7 @@ export class QuizService {
   }
 
   /**
-   * 获取笔记本最新版本题库
+   * Get the latest quiz bank for a notebook
    */
   getLatestQuiz(notebookId: string): Quiz | undefined {
     const db = getDatabase()
@@ -680,21 +685,21 @@ export class QuizService {
   }
 
   /**
-   * 提交答题会话
+   * Submit a quiz session
    */
   submitSession(quizId: string, answers: Record<string, number>): string {
     const db = getDatabase()
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 
-    // 获取题库
+    // Get the quiz bank
     const quiz = this.getQuiz(quizId)
     if (!quiz) {
-      throw new Error('题库不存在')
+      throw new Error('Quiz bank not found')
     }
 
-    const questions = quiz.questionsData as any as QuizQuestion[]
+    const questions = quiz.questionsData
 
-    // 计算分数
+    // Calculate the score
     let correctCount = 0
     questions.forEach((question) => {
       const userAnswer = answers[question.id]
@@ -708,7 +713,7 @@ export class QuizService {
 
     // Feedback loop: kết quả quiz trở thành tín hiệu cho retrieval.
     // Câu trả lời đúng → chunk nguồn được boost; sai → giảm trọng số.
-    const chunkMapping = quiz.chunkMapping as Record<string, string[]> | null
+    const chunkMapping = quiz.chunkMapping
     if (chunkMapping) {
       const answeredQuestions = questions.filter((q) => answers[q.id] !== undefined)
       const referencedChunkIds = [
@@ -748,12 +753,12 @@ export class QuizService {
       }
     }
 
-    // 创建会话记录
+    // Create the session record
     const newSession: NewQuizSession = {
       id: sessionId,
       quizId,
       notebookId: quiz.notebookId,
-      answers: answers as any,
+      answers,
       score,
       totalQuestions,
       correctCount,
@@ -769,7 +774,7 @@ export class QuizService {
   }
 
   /**
-   * 获取答题会话
+   * Get a quiz session
    */
   getSession(sessionId: string): QuizSession | undefined {
     const db = getDatabase()
@@ -778,8 +783,8 @@ export class QuizService {
   }
 
   /**
-   * Lấy nguồn chunk của một câu hỏi (từ chunkMapping) — dùng để hiển thị
-   * "câu hỏi này dựa trên đoạn nào của tài liệu nào".
+   * Get the source chunks for a question (from chunkMapping) — used to display
+   * "which document section this question is based on".
    */
   getQuestionChunks(
     quizId: string,
@@ -789,7 +794,7 @@ export class QuizService {
     const quiz = this.getQuiz(quizId)
     if (!quiz) return []
 
-    const chunkMapping = quiz.chunkMapping as Record<string, string[]> | null
+    const chunkMapping = quiz.chunkMapping
     const chunkIds = chunkMapping?.[questionId] || []
     if (chunkIds.length === 0) return []
 
@@ -806,7 +811,7 @@ export class QuizService {
   }
 
   /**
-   * 更新题库
+   * Update the quiz bank
    */
   updateQuiz(quizId: string, updates: Partial<{ title: string }>): void {
     const db = getDatabase()
@@ -819,18 +824,18 @@ export class QuizService {
   }
 
   /**
-   * 删除题库
+   * Delete the quiz bank
    */
   deleteQuiz(quizId: string): void {
     const db = getDatabase()
 
-    // 先删除关联的 item
+    // Delete the associated item first
     db.delete(items)
       .where(and(eq(items.type, 'quiz'), eq(items.resourceId, quizId)))
       .run()
     Logger.info('QuizService', `Deleted item for quiz: ${quizId}`)
 
-    // 删除题库本身（会级联删除quizSessions）
+    // Delete the quiz bank itself (cascades to quizSessions)
     db.delete(quizzes).where(eq(quizzes.id, quizId)).run()
     executeCheckpoint('PASSIVE')
     Logger.info('QuizService', `Quiz deleted: ${quizId}`)

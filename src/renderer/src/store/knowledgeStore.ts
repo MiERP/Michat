@@ -1,6 +1,6 @@
 /**
  * Knowledge Store
- * 知识库状态管理
+ * Knowledge base state management
  */
 
 import { create } from 'zustand'
@@ -15,7 +15,7 @@ import type {
 import { useCitationStore } from './citationStore'
 
 interface KnowledgeStore {
-  // 状态
+  // State
   documents: KnowledgeDocument[]
   searchResults: KnowledgeSearchResult[]
   stats: KnowledgeStats | null
@@ -39,7 +39,7 @@ interface KnowledgeStore {
   setInspectedDocumentId: (documentId: string | null) => void
   clearSearchResults: () => void
 
-  // 异步操作
+  // Async operations
   loadDocuments: (notebookId: string) => Promise<void>
   loadStats: (notebookId: string) => Promise<void>
   addDocument: (
@@ -80,7 +80,7 @@ interface KnowledgeStore {
 }
 
 export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
-  // 初始状态
+  // Initial state
   documents: [],
   searchResults: [],
   stats: null,
@@ -103,7 +103,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
   setInspectedDocumentId: (inspectedDocumentId) => set({ inspectedDocumentId }),
   clearSearchResults: () => set({ searchResults: [] }),
 
-  // 加载文档列表
+  // Load the document list
   loadDocuments: async (notebookId) => {
     set({ isLoading: true, error: null })
     try {
@@ -114,7 +114,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 加载统计信息
+  // Load statistics
   loadStats: async (notebookId) => {
     try {
       const stats = await window.api.knowledge.getStats(notebookId)
@@ -124,7 +124,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 添加文档
+  // Add a document
   addDocument: async (notebookId, options) => {
     set({ isIndexing: true, error: null })
     try {
@@ -141,7 +141,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 从文件添加文档
+  // Add a document from a file
   addDocumentFromFile: async (notebookId, filePath) => {
     set({ isIndexing: true, error: null })
     try {
@@ -174,7 +174,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 从文件夹批量添加文档
+  // Add documents from a folder in bulk
   addDocumentsFromFolder: async (notebookId, folderPath) => {
     set({ isIndexing: true, error: null })
     try {
@@ -189,7 +189,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 将 Note 添加到知识库
+  // Add a note to the knowledge base
   addNoteToKnowledge: async (notebookId, noteId) => {
     set({ isIndexing: true, error: null })
     try {
@@ -206,7 +206,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 搜索
+  // Search
   search: async (notebookId, query, options) => {
     if (!query.trim()) {
       set({ searchResults: [] })
@@ -226,7 +226,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 删除文档
+  // Delete a document
   deleteDocument: async (notebookId, documentId) => {
     try {
       const result = await window.api.knowledge.deleteDocument(documentId)
@@ -247,7 +247,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 选择文件
+  // Select files
   selectFiles: async () => {
     try {
       return await window.api.knowledge.selectFiles()
@@ -257,7 +257,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
     }
   },
 
-  // 选择文件夹
+  // Select a folder
   selectFolder: async () => {
     try {
       return await window.api.knowledge.selectFolder()
@@ -269,7 +269,7 @@ export const useKnowledgeStore = create<KnowledgeStore>()((set, get) => ({
 }))
 
 /**
- * 设置知识库监听器
+ * Set up knowledge base listeners
  */
 export function setupKnowledgeListeners(): () => void {
   const cleanupProgress = window.api.knowledge.onIndexProgress((data: IndexProgress) => {

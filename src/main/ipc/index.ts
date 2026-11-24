@@ -19,11 +19,10 @@ import { registerUpdateHandlers } from './updateHandlers'
 import { registerItemHandlers } from './itemHandlers'
 import { registerShortcutHandlers } from './shortcutHandlers'
 import { registerLlamaHandlers } from './llamaHandlers'
-import { registerLicenseHandlers } from './licenseHandlers'
 import type { NotebookSummaryService } from '../services/NotebookSummaryService'
 
 /**
- * 注册所有 IPC Handlers
+ * Registers all IPC handlers
  */
 export function registerAllHandlers(
   providerManager: ProviderManager,
@@ -36,11 +35,9 @@ export function registerAllHandlers(
   backgroundJobService: BackgroundJobService,
   notebookSummaryService: NotebookSummaryService
 ) {
-  // 实例化 QuizService
-  const quizService = new QuizService(
-    providerManager,
-    knowledgeService,
-    () => llamaService.getChatContextSizeSync()
+  // Instantiate QuizService
+  const quizService = new QuizService(providerManager, knowledgeService, () =>
+    llamaService.getChatContextSizeSync()
   )
 
   registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
@@ -60,7 +57,6 @@ export function registerAllHandlers(
   registerItemHandlers(knowledgeService)
   registerShortcutHandlers(shortcutManager, store)
   registerLlamaHandlers(llamaService)
-  registerLicenseHandlers()
   console.log('[IPC] All handlers registered')
 }
 
@@ -71,6 +67,5 @@ export {
   registerNotebookHandlers,
   registerNoteHandlers,
   registerKnowledgeHandlers,
-  registerQuizHandlers,
-  registerLicenseHandlers
+  registerQuizHandlers
 }

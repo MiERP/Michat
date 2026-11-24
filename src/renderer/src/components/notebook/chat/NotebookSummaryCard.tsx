@@ -71,9 +71,7 @@ export default function NotebookSummaryCard(): ReactElement | null {
         setError(result.error || 'Không thể tạo tóm tắt.')
         return
       }
-      setSummary(
-        result.summary?.summary ? { summary: result.summary.summary } : null
-      )
+      setSummary(result.summary?.summary ? { summary: result.summary.summary } : null)
       setPending(false)
     } catch (regenError) {
       setError((regenError as Error).message)

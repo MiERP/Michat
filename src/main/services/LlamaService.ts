@@ -1,4 +1,4 @@
-// import { app } from 'electron'
+import { app } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import { join, basename } from 'path'
 import fs from 'fs'
@@ -6,6 +6,7 @@ import Logger from '../../shared/utils/logger'
 import { settingsManager } from '../config'
 import { shouldOffloadChatModelToGpu } from './llama/runtimeProfile'
 import { detectMachineInfo as detectMachineInfoImpl, type MachineInfo } from './llama/machineInfo'
+import { resolveLlamaAutoRoot } from './llama/resourceRoot'
 
 export type { MachineInfo } from './llama/machineInfo'
 
@@ -101,34 +102,15 @@ export class LlamaService {
    *   cpu-x64/, cuda-12.4-x64/, cuda-13.1-x64/, vulkan-x64/, models/
    */
   private getAutoRoot(): string {
-    const candidates: string[] = []
-
-    // 1) explicit env override
-    if (process.env.KN_LLAMA_AUTO_ROOT) candidates.push(process.env.KN_LLAMA_AUTO_ROOT)
-    if (process.env.KN_LLAMA_ROOT) candidates.push(process.env.KN_LLAMA_ROOT)
-
-    // 2) dev cwd (often not reliable in electron)
-    candidates.push(join(process.cwd(), 'resources'))
-
-    // 3) IMPORTANT: locate resources relative to compiled out/main/*
-    // out/main/services -> ../../../resources
-    candidates.push(join(__dirname, '..', '..', '..', 'resources'))
-
-    // 4) packaged runtime resources
-    candidates.push(process.resourcesPath)
-
-    for (const c of candidates) {
-      if (!c) continue
-      try {
-        const hasModels = fs.existsSync(join(c, 'models'))
-        const hasAnyBin = fs.existsSync(join(c, 'llama-bin', this.exeName()))
-        if (hasModels && hasAnyBin) return c
-      } catch {
-        // ignore
-      }
-    }
-
-    return ''
+    return resolveLlamaAutoRoot({
+      env: process.env,
+      cwd: process.cwd(),
+      dirname: __dirname,
+      resourcesPath: process.resourcesPath,
+      isPackaged: app.isPackaged,
+      exeName: this.exeName(),
+      exists: (candidate) => fs.existsSync(candidate)
+    })
   }
 
   private getModelsDir(): string | null {
@@ -400,10 +382,7 @@ export class LlamaService {
       const expectedLower = expected.toLowerCase()
       const expectedBase = basename(expectedLower)
       const matches = ids.some(
-        (id) =>
-          id === expectedLower ||
-          id.endsWith(expectedBase) ||
-          expectedLower.endsWith(id)
+        (id) => id === expectedLower || id.endsWith(expectedBase) || expectedLower.endsWith(id)
       )
       if (!matches) {
         Logger.warn(
@@ -500,11 +479,7 @@ export class LlamaService {
     return args
   }
 
-  private async spawnServer(
-    kind: ServerKind,
-    bin: string,
-    modelPath: string
-  ): Promise<void> {
+  private async spawnServer(kind: ServerKind, bin: string, modelPath: string): Promise<void> {
     const runtime = await this.computeRuntimeProfile()
     const args = this.buildArgs(kind, modelPath, runtime)
     const label = kind === 'chat' ? 'chat' : 'embedding'
@@ -633,7 +608,10 @@ export class LlamaService {
 
     if (await this.isServerUp('embedding')) return true
 
-    Logger.warn('LlamaService', 'Embedding server is down (or model changed). Attempting restart...')
+    Logger.warn(
+      'LlamaService',
+      'Embedding server is down (or model changed). Attempting restart...'
+    )
 
     await this.detectMachineInfo()
 
@@ -718,13 +696,13 @@ export class LlamaService {
     try {
       this.chatProc?.kill()
     } catch (e) {
-      Logger.warn('LlamaService', 'Failed to kill chat process:', e as any)
+      Logger.warn('LlamaService', 'Failed to kill chat process:', e)
     }
     this.chatProc = null
     try {
       this.embedProc?.kill()
     } catch (e) {
-      Logger.warn('LlamaService', 'Failed to kill embedding process:', e as any)
+      Logger.warn('LlamaService', 'Failed to kill embedding process:', e)
     }
     this.embedProc = null
   }
@@ -836,8 +814,8 @@ export class LlamaService {
 
     Logger.info('LlamaService', `Importing model: ${sourcePath} -> ${destPath} (type: ${type})`)
 
-    // Copy file
-    fs.copyFileSync(sourcePath, destPath)
+    // Copy file without blocking the main process: models can be several GB.
+    await fs.promises.copyFile(sourcePath, destPath)
 
     // Save metadata
     const metadata = this.readMetadata()
@@ -848,7 +826,7 @@ export class LlamaService {
     }
     this.writeMetadata(metadata)
 
-    const stats = fs.statSync(destPath)
+    const stats = await fs.promises.stat(destPath)
     const sizeMB = Math.round(stats.size / (1024 * 1024))
     Logger.info('LlamaService', `Model imported: ${filename} (${sizeMB} MB, type: ${type})`)
 

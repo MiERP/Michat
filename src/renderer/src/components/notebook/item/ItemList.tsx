@@ -1,6 +1,7 @@
 import { ReactElement, useState, useEffect } from 'react'
 import { FileText, Trash2, Loader2, Edit2, ClipboardList } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction, i18n } from 'i18next'
 import {
   DndContext,
   closestCenter,
@@ -16,6 +17,7 @@ import {
   useSortable
 } from '@dnd-kit/sortable'
 import type { Note } from '../../../../../shared/types'
+import type { Quiz } from '../../../../../main/db/schema'
 import type { ItemDetail } from '../../../store/itemStore'
 import { Button } from '../../ui/button'
 import {
@@ -45,7 +47,7 @@ interface ItemListProps {
   onRefresh?: () => void
 }
 
-// 单个可排序的 Item 组件
+// Single sortable Item component
 function SortableItemRow({
   item,
   currentNote,
@@ -62,8 +64,8 @@ function SortableItemRow({
   onOpenQuiz?: (quizId: string) => void
   onDeleteItem: (itemId: string) => void
   onRefresh?: () => void
-  t: any
-  i18n: any
+  t: TFunction<'notebook'>
+  i18n: i18n
 }) {
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -82,7 +84,7 @@ function SortableItemRow({
   const isNote = item.type === 'note'
   const isQuiz = item.type === 'quiz'
   const note = isNote ? (item.resource as Note) : null
-  const quiz = isQuiz ? item.resource : null
+  const quiz = isQuiz ? (item.resource as Quiz | null) : null
   const isCurrentNote = isNote && currentNote?.id === item.resourceId
   const isGenerating = isQuiz && quiz?.status === 'generating'
   const isFailed = isQuiz && quiz?.status === 'failed'
@@ -140,15 +142,15 @@ function SortableItemRow({
               : 'border-transparent hover:bg-muted'
       }`}
     >
-      {/* 图标列 - 固定宽度 */}
+      {/* Icon column - fixed width */}
       <div className="flex items-center">
-        {/* 图标 */}
+        {/* Icon */}
         {isNote && <FileText className="w-4 h-4 text-muted-foreground" />}
         {isQuiz && !isGenerating && <ClipboardList className="w-4 h-4 text-chart-2" />}
         {isQuiz && isGenerating && <Loader2 className="w-4 h-4 text-chart-1 animate-spin" />}
       </div>
 
-      {/* 内容列 - 可被压缩 */}
+      {/* Content column - can shrink */}
       <div className="min-w-0 flex flex-col gap-1">
         {isNote && note && (
           <>
@@ -182,7 +184,7 @@ function SortableItemRow({
         </p>
       </div>
 
-      {/* 删除按钮列 - 固定宽度 */}
+      {/* Delete button column - fixed width */}
       <Button
         onClick={(e) => {
           e.stopPropagation()
@@ -257,7 +259,7 @@ function SortableItemRow({
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认对话框 */}
+      {/* Delete confirmation dialog */}
       <ConfirmDialog
         isOpen={isDeleteDialogOpen}
         onClose={() => setIsDeleteDialogOpen(false)}
@@ -280,7 +282,7 @@ export default function ItemList({
   const { t, i18n } = useTranslation('notebook')
   const [localItems, setLocalItems] = useState(items)
 
-  // 配置传感器 - 避免轻微抖动触发拖拽
+  // Configure sensors - avoid accidental drags from slight jitter
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -289,7 +291,7 @@ export default function ItemList({
     })
   )
 
-  // 处理拖拽结束
+  // Handle drag end
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event
 
@@ -300,7 +302,7 @@ export default function ItemList({
       const newItems = arrayMove(localItems, oldIndex, newIndex)
       setLocalItems(newItems)
 
-      // 批量更新 order 值
+      // Batch update order values
       const updates: Record<string, number> = {}
       newItems.forEach((item, index) => {
         updates[item.id] = index
@@ -310,13 +312,13 @@ export default function ItemList({
         await window.api.items.batchUpdateOrder(updates)
       } catch (error) {
         console.error('Failed to update item order:', error)
-        // 如果更新失败，恢复原来的顺序
+        // If the update fails, restore the original order
         setLocalItems(items)
       }
     }
   }
 
-  // 当外部 items 改变时，更新本地状态
+  // Update local state when external items change
   useEffect(() => {
     setLocalItems(items)
   }, [items])

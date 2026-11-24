@@ -19,7 +19,7 @@ interface NotebookCardProps {
   onRename: () => void
 }
 
-// 主题图表颜色映射 - 用于侧边装饰
+// Theme chart color mapping - used for the side decoration
 const chartColors = ['bg-chart-1', 'bg-chart-2', 'bg-chart-3', 'bg-chart-4', 'bg-chart-5']
 
 const getChartColor = (id: string): string => {
@@ -53,7 +53,7 @@ export default function NotebookCard({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <Card onClick={onClick} className="relative overflow-hidden">
-          {/* 左侧彩色装饰条 */}
+          {/* Left color accent bar */}
           <div className={`absolute left-0 top-0 bottom-0 w-1 ${chartColor}`} />
 
           <CardHeader>
@@ -93,7 +93,7 @@ export default function NotebookCard({
         </Card>
       </ContextMenuTrigger>
 
-      {/* 右键菜单 */}
+      {/* Context menu */}
       <ContextMenuContent>
         <ContextMenuItem
           onClick={(e) => {

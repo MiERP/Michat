@@ -5,28 +5,28 @@ import { defaultShortcuts } from '../config/defaults'
 import type { StoreSchema } from '../config/types'
 
 /**
- * 快捷键管理器
- * 负责注册、注销和管理应用快捷键
+ * Keyboard shortcut manager
+ * Registers, unregisters, and manages application shortcuts
  */
 export class ShortcutManager {
   private store: Store<StoreSchema>
   private mainWindow: BrowserWindow | null = null
   private shortcuts: ShortcutConfig[] = []
-  private keyboardHandler: ((event: Event, input: Electron.Input) => void) | null = null
+  private keyboardHandler: ((event: Electron.Event, input: Electron.Input) => void) | null = null
 
   constructor(store: Store<StoreSchema>) {
     this.store = store
   }
 
   /**
-   * 设置主窗口引用
+   * Set the main window reference
    */
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
   }
 
   /**
-   * 注册快捷键使用 webContents 监听
+   * Register shortcuts using webContents listeners
    */
   registerShortcuts(): void {
     const shortcuts: ShortcutConfig[] = (this.store.get('shortcuts') as ShortcutConfig[]) || []
@@ -45,52 +45,49 @@ export class ShortcutManager {
       return
     }
 
-    // 移除旧的监听器
+    // Remove old listeners
     if (this.keyboardHandler) {
-      ;(this.mainWindow.webContents as any).removeListener(
-        'before-input-event',
-        this.keyboardHandler
-      )
+      this.mainWindow.webContents.removeListener('before-input-event', this.keyboardHandler)
     }
 
-    // 创建新的处理器
-    this.keyboardHandler = (event: Event, input: Electron.Input) => {
+    // Create a new handler
+    this.keyboardHandler = (event: Electron.Event, input: Electron.Input) => {
       this.handleKeyboardEvent(event, input)
     }
 
-    // 等待 webContents ready 后再注册
+    // Wait until webContents is ready before registering
     if (this.mainWindow.webContents.isLoading()) {
       this.mainWindow.webContents.once('did-finish-load', () => {
-        ;(this.mainWindow!.webContents as any).on('before-input-event', this.keyboardHandler!)
+        this.mainWindow!.webContents.on('before-input-event', this.keyboardHandler!)
       })
     } else {
-      ;(this.mainWindow.webContents as any).on('before-input-event', this.keyboardHandler)
+      this.mainWindow.webContents.on('before-input-event', this.keyboardHandler)
     }
   }
 
   /**
-   * 处理键盘事件
+   * Handle keyboard events
    */
-  private handleKeyboardEvent(event: Event, input: Electron.Input): void {
-    // 只处理 keyDown 事件
+  private handleKeyboardEvent(event: Electron.Event, input: Electron.Input): void {
+    // Only handle keyDown events
     if (input.type !== 'keyDown') return
 
     // IME safety: never process shortcuts while composition is active
-    if ((input as any).isComposing || input.key === 'Process') return
+    if (input.isComposing || input.key === 'Process') return
 
-    // 构建当前按键组合
+    // Build the current key combination
     const modifiers: string[] = []
     if (input.control || input.meta) modifiers.push('CommandOrControl')
     if (input.shift) modifiers.push('Shift')
     if (input.alt) modifiers.push('Alt')
 
-    // 获取按键
+    // Get the key
     let key = input.key
-    // 特殊键映射和大写转换
+    // Special key mapping and uppercase conversion
     if (key === 'Enter') {
       key = 'Enter'
     } else if (key.length === 1) {
-      // 只对字母进行大写转换，保留符号原样
+      // Only uppercase letters; leave symbols unchanged
       if (key >= 'a' && key <= 'z') {
         key = key.toUpperCase()
       }
@@ -98,26 +95,26 @@ export class ShortcutManager {
 
     const accelerator = modifiers.length > 0 ? [...modifiers, key].join('+') : key
 
-    // 查找匹配的快捷键
+    // Find a matching shortcut
     const matchedShortcut = this.shortcuts.find((s) => s.accelerator === accelerator)
 
     if (matchedShortcut) {
-      // 阻止默认行为，避免系统快捷键冲突
+      // Prevent the default behavior to avoid conflicts with system shortcuts
       event.preventDefault()
       this.handleShortcut(matchedShortcut.action)
     }
   }
 
   /**
-   * 注销所有快捷键
+   * Unregister all shortcuts
    */
   unregisterShortcuts(): void {
-    // 清空菜单（移除所有快捷键）
+    // Clear the menu (removes all shortcuts)
     Menu.setApplicationMenu(null)
   }
 
   /**
-   * 更新单个快捷键
+   * Update a single shortcut
    */
   updateShortcut(action: ShortcutAction, newAccelerator: string): void {
     const shortcuts: ShortcutConfig[] = (this.store.get('shortcuts') as ShortcutConfig[]) || []
@@ -126,12 +123,12 @@ export class ShortcutManager {
     if (index !== -1) {
       shortcuts[index].accelerator = newAccelerator
       this.store.set('shortcuts', shortcuts)
-      this.registerShortcuts() // 重新注册
+      this.registerShortcuts() // Re-register
     }
   }
 
   /**
-   * 切换快捷键的启用/禁用状态
+   * Toggle a shortcut's enabled/disabled state
    */
   toggleShortcut(action: ShortcutAction, enabled: boolean): void {
     const shortcuts: ShortcutConfig[] = (this.store.get('shortcuts') as ShortcutConfig[]) || []
@@ -140,12 +137,12 @@ export class ShortcutManager {
     if (index !== -1) {
       shortcuts[index].enabled = enabled
       this.store.set('shortcuts', shortcuts)
-      this.registerShortcuts() // 重新注册
+      this.registerShortcuts() // Re-register
     }
   }
 
   /**
-   * 重置单个快捷键为默认值
+   * Reset a single shortcut to its default value
    */
   resetSingle(action: ShortcutAction): void {
     const shortcuts: ShortcutConfig[] = (this.store.get('shortcuts') as ShortcutConfig[]) || []
@@ -160,7 +157,7 @@ export class ShortcutManager {
   }
 
   /**
-   * 重置为默认配置
+   * Reset to the default configuration
    */
   resetToDefaults(): void {
     this.store.set('shortcuts', defaultShortcuts)
@@ -168,15 +165,15 @@ export class ShortcutManager {
   }
 
   /**
-   * 处理快捷键触发事件
-   * 发送 IPC 事件到渲染进程
+   * Handle shortcut trigger events
+   * Send an IPC event to the renderer process
    */
   private handleShortcut(action: ShortcutAction): void {
     if (!this.mainWindow) {
       return
     }
 
-    // 发送 IPC 事件到 Renderer Process
+    // Send an IPC event to the Renderer Process
     this.mainWindow.webContents.send('shortcut:triggered', action)
   }
 }

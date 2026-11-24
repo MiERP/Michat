@@ -4,10 +4,21 @@ import { LlamaService } from '../services/LlamaService'
 import { providersManager } from '../config'
 import { isEncryptionAvailable } from '../config/secureStorage'
 import { enrichModelsWithType } from '../../shared/utils/modelClassifier'
+import type { Model, ModelType } from '../../shared/types'
 import { ProviderSchemas, validate } from './validation'
 import { registerNoArgHandler } from './handlerRegistry'
 import Logger from '../../shared/utils/logger'
 import { assertLoopbackHttpUrl } from '../security/guards'
+
+/** Shape returned by an OpenAI-compatible /models endpoint (fields are untrusted). */
+interface RemoteModel {
+  id?: string
+  name?: string
+  object?: string
+  owned_by?: string
+  created?: number
+  type?: ModelType
+}
 
 function inferModelTypeFromFilename(filename: string): 'chat' | 'embedding' | 'unknown' {
   const id = filename.toLowerCase()
@@ -142,7 +153,11 @@ export function registerProviderHandlers(
       try {
         const providerConfig = await providersManager.getProviderConfig(args.providerName)
         const descriptor = providerManager.getDescriptor(args.providerName)
-        const baseUrl = providerConfig?.config?.baseUrl || descriptor?.defaultBaseUrl || ''
+        const configuredBaseUrl = providerConfig?.config?.baseUrl
+        const baseUrl =
+          typeof configuredBaseUrl === 'string'
+            ? configuredBaseUrl
+            : descriptor?.defaultBaseUrl || ''
 
         if (!baseUrl) {
           throw new Error(`No base URL configured for ${args.providerName}`)
@@ -165,11 +180,11 @@ export function registerProviderHandlers(
           throw new Error(`HTTP ${response.status}: ${response.statusText}`)
         }
 
-        const data = await response.json()
+        const data = (await response.json()) as { data?: RemoteModel[]; models?: RemoteModel[] }
         const rawModels = data.data || data.models || []
 
-        const models = enrichModelsWithType(
-          rawModels.map((m: any) => ({
+        const models: Model[] = enrichModelsWithType(
+          rawModels.map((m) => ({
             id: m.id || m.name || '',
             object: m.object || 'model',
             owned_by: m.owned_by,

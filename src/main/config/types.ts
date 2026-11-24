@@ -1,23 +1,31 @@
-import type { AppSettings, ShortcutConfig } from '../../shared/types'
+import type { AppSettings, Model, ShortcutConfig } from '../../shared/types'
 
 /**
- * 提供商配置接口
+ * Provider configuration interface
  */
 export interface ProviderConfig {
   providerName: string
-  config: Record<string, any>
+  config: Record<string, unknown>
   enabled: boolean
   updatedAt: number
 }
 
 /**
- * Store Schema 定义
+ * Cached model list stored per provider
+ */
+export interface ProviderModelEntry {
+  models: Model[]
+}
+
+/**
+ * Store schema definition
  */
 export interface StoreSchema {
   settings: AppSettings
   providers: Record<string, ProviderConfig>
   shortcuts: ShortcutConfig[]
+  models?: Record<string, ProviderModelEntry>
 }
 
-// 重新导出 AppSettings 以保持向后兼容
+// Re-export AppSettings for backward compatibility
 export type { AppSettings }

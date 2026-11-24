@@ -77,8 +77,11 @@ async function generateNoteTitle(
 /**
  * Register note-related IPC handlers
  */
-export function registerNoteHandlers(providerManager: ProviderManager, knowledgeService: KnowledgeService) {
-  // Create note（带参数验证）
+export function registerNoteHandlers(
+  providerManager: ProviderManager,
+  knowledgeService: KnowledgeService
+) {
+  // Create note (with argument validation)
   ipcMain.handle(
     'create-note',
     validate(NoteSchemas.createNote, async (args) => {
@@ -100,7 +103,7 @@ export function registerNoteHandlers(providerManager: ProviderManager, knowledge
     })
   )
 
-  // Get all notes in notebook（带参数验证）
+  // Get all notes in notebook (with argument validation)
   ipcMain.handle(
     'get-notes',
     validate(NoteSchemas.getNotes, async (args) => {
@@ -116,7 +119,7 @@ export function registerNoteHandlers(providerManager: ProviderManager, knowledge
     })
   )
 
-  // Get single note（带参数验证）
+  // Get single note (with argument validation)
   ipcMain.handle(
     'get-note',
     validate(NoteSchemas.getNote, async (args) => {
@@ -131,7 +134,7 @@ export function registerNoteHandlers(providerManager: ProviderManager, knowledge
     })
   )
 
-  // Update note（带参数验证）
+  // Update note (with argument validation)
   ipcMain.handle(
     'update-note',
     validate(NoteSchemas.updateNote, async (args) => {
@@ -151,7 +154,7 @@ export function registerNoteHandlers(providerManager: ProviderManager, knowledge
     })
   )
 
-  // Delete note（带参数验证）
+  // Delete note (with argument validation)
   ipcMain.handle(
     'delete-note',
     validate(NoteSchemas.deleteNote, async (args) => {

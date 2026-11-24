@@ -1,6 +1,6 @@
 /**
  * VectorStoreManager
- * 管理不同 notebook 的 VectorStore 实例
+ * Manages the VectorStore instances for different notebooks
  */
 
 import type { VectorStore, VectorStoreType } from './types'
@@ -8,8 +8,8 @@ import { SQLiteVectorStore } from './SQLiteVectorStore'
 import Logger from '../../shared/utils/logger'
 
 /**
- * 向量存储管理器
- * 为每个 notebook 维护独立的 VectorStore 实例
+ * Vector store manager
+ * Keeps an independent VectorStore instance per notebook
  */
 export class VectorStoreManager {
   private stores: Map<string, VectorStore> = new Map()
@@ -17,10 +17,10 @@ export class VectorStoreManager {
   private defaultDimensions: number = 1024
 
   /**
-   * 获取或创建 notebook 的 VectorStore
-   * @param notebookId 笔记本 ID
-   * @param type 存储类型（可选，默认 sqlite）
-   * @param dimensions 向量维度（可选，如果提供则覆盖默认值）
+   * Returns or creates the VectorStore for a notebook
+   * @param notebookId notebook ID
+   * @param type storage type (optional, defaults to sqlite)
+   * @param dimensions vector dimensions (optional; overrides the default when provided)
    */
   async getStore(
     notebookId: string,
@@ -31,14 +31,14 @@ export class VectorStoreManager {
     const key = `${notebookId}_${storeType}`
     const targetDimensions = dimensions || this.defaultDimensions
 
-    // 检查是否已存在且维度匹配
+    // Check whether one already exists with matching dimensions
     const existingStore = this.stores.get(key)
     if (existingStore) {
       const existingDimensions = existingStore.getDimensions()
       if (existingDimensions === targetDimensions) {
         return existingStore
       } else {
-        // 维度不匹配，需要重新创建
+        // Dimensions do not match; the store must be recreated
         Logger.warn(
           'VectorStoreManager',
           `Dimension mismatch for ${key}: existing=${existingDimensions}, new=${targetDimensions}. Recreating store.`
@@ -48,7 +48,7 @@ export class VectorStoreManager {
       }
     }
 
-    // 创建新的 VectorStore
+    // Create a new VectorStore
     const store = this.createStore(storeType)
     await store.initialize({
       notebookId,
@@ -65,17 +65,17 @@ export class VectorStoreManager {
   }
 
   /**
-   * 创建 VectorStore 实例
+   * Creates a VectorStore instance
    */
   private createStore(type: VectorStoreType): VectorStore {
     switch (type) {
       case 'sqlite':
         return new SQLiteVectorStore()
       case 'lancedb':
-        // TODO: 实现 LanceDBVectorStore
+        // TODO: implement LanceDBVectorStore
         throw new Error('LanceDB vector store not implemented yet')
       case 'qdrant':
-        // TODO: 实现 QdrantVectorStore
+        // TODO: implement QdrantVectorStore
         throw new Error('Qdrant vector store not implemented yet')
       default:
         throw new Error(`Unknown vector store type: ${type}`)
@@ -83,7 +83,7 @@ export class VectorStoreManager {
   }
 
   /**
-   * 关闭指定 notebook 的存储
+   * Closes the store for the given notebook
    */
   async closeStore(notebookId: string): Promise<void> {
     const keysToDelete: string[] = []
@@ -102,7 +102,7 @@ export class VectorStoreManager {
   }
 
   /**
-   * 关闭所有存储
+   * Closes all stores
    */
   async closeAll(): Promise<void> {
     for (const [key, store] of this.stores) {
@@ -114,33 +114,33 @@ export class VectorStoreManager {
   }
 
   /**
-   * 设置默认向量维度
+   * Sets the default vector dimensions
    */
   setDefaultDimensions(dimensions: number): void {
     this.defaultDimensions = dimensions
   }
 
   /**
-   * 获取默认向量维度
+   * Returns the default vector dimensions
    */
   getDefaultDimensions(): number {
     return this.defaultDimensions
   }
 
   /**
-   * 设置默认存储类型
+   * Sets the default storage type
    */
   setDefaultType(type: VectorStoreType): void {
     this.defaultType = type
   }
 
   /**
-   * 获取已打开的存储数量
+   * Returns the number of open stores
    */
   getStoreCount(): number {
     return this.stores.size
   }
 }
 
-// 导出单例实例
+// Export the singleton instance
 export const vectorStoreManager = new VectorStoreManager()

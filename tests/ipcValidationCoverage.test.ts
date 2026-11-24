@@ -23,16 +23,14 @@ describe('IPC validation coverage', () => {
 
     for (const file of files) {
       const source = readFileSync(join(IPC_DIR, file), 'utf8')
-      const pattern =
-        /ipcMain\.handle\(\s*(['"`])([^'"`]+)\1\s*,\s*([A-Za-z]+)([\s\S]{0,800})/g
+      const pattern = /ipcMain\.handle\(\s*(['"`])([^'"`]+)\1\s*,\s*([A-Za-z]+)([\s\S]{0,800})/g
       for (const match of source.matchAll(pattern)) {
         registrations++
         const channel = match[2]
         const wrapper = match[3]
         const body = match[4]
         // Some streaming handlers wrap the call themselves with validate(...)(event, args).
-        const selfValidated =
-          wrapper === 'async' && /\b(validate|validateWithEvent)\(/.test(body)
+        const selfValidated = wrapper === 'async' && /\b(validate|validateWithEvent)\(/.test(body)
         if (!WRAPPERS.includes(wrapper) && !selfValidated) {
           offenders.push(`${file}: ${channel} uses ${wrapper}`)
         }

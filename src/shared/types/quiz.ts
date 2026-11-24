@@ -1,25 +1,25 @@
 /**
- * Quiz相关类型定义
- * 答题功能的共享类型
+ * Quiz-related type definitions
+ * Shared types for the quiz feature
  */
 
 /**
- * 题目
+ * Question
  */
 export interface QuizQuestion {
   id: string
   questionText: string
-  options: string[] // 固定4个选项
+  options: string[] // Fixed 4 options
   correctAnswer: number // 0-3
   explanation: string
-  hints: string[] // 1-2个提示
+  hints: string[] // 1-2 hints
   metadata?: {
     chunkIds: string[]
   }
 }
 
 /**
- * 题库
+ * Quiz
  */
 export interface Quiz {
   id: string
@@ -40,7 +40,7 @@ export interface Quiz {
 }
 
 /**
- * 答题会话
+ * Quiz session
  */
 export interface QuizSession {
   id: string
@@ -55,7 +55,7 @@ export interface QuizSession {
 }
 
 /**
- * Quiz生成结果（用于LLM streamObject返回）
+ * Quiz generation result (returned by LLM streamObject)
  */
 export interface QuizGenerationResult {
   questions: QuizQuestion[]

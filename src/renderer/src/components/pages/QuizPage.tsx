@@ -35,7 +35,7 @@ export default function QuizPage() {
   const [showPicker, setShowPicker] = useState(false)
   const [isStartDialogOpen, setIsStartDialogOpen] = useState(false)
 
-  // 获取平台信息
+  // Get platform info
   useEffect(() => {
     const getPlatform = async () => {
       try {
@@ -48,7 +48,7 @@ export default function QuizPage() {
     getPlatform()
   }, [])
 
-  // 加载答题数据
+  // Load quiz data
   useEffect(() => {
     const loadData = async (): Promise<void> => {
       setIsLoading(true)
@@ -96,7 +96,7 @@ export default function QuizPage() {
     }
   }
 
-  // 清理
+  // Cleanup
   useEffect(() => {
     return () => {
       resetQuiz()

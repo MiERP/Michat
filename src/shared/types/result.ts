@@ -1,19 +1,19 @@
 /**
- * 统一的错误处理类型
- * 用于替代混用的 throw Error 和返回错误对象模式
+ * Unified error handling types
+ * Replaces the mixed use of throw Error and returned error objects
  */
 
 /**
- * Result 类型 - 代表操作的成功或失败
- * @template T - 成功时的数据类型
- * @template E - 失败时的错误类型,默认为 Error
+ * Result type - represents the success or failure of an operation
+ * @template T - Data type on success
+ * @template E - Error type on failure, defaults to Error
  */
 export type Result<T, E = Error> = { success: true; data: T } | { success: false; error: E }
 
 /**
- * 创建成功的 Result
- * @param data - 成功的数据
- * @returns 成功的 Result 对象
+ * Create a successful Result
+ * @param data - The success data
+ * @returns A successful Result object
  * @example
  * const result = Ok({ id: '123', name: 'test' })
  * // result = { success: true, data: { id: '123', name: 'test' } }
@@ -23,9 +23,9 @@ export function Ok<T>(data: T): Result<T, never> {
 }
 
 /**
- * 创建失败的 Result
- * @param error - 错误对象或错误消息
- * @returns 失败的 Result 对象
+ * Create a failed Result
+ * @param error - Error object or error message
+ * @returns A failed Result object
  * @example
  * const result = Err(new Error('Something went wrong'))
  * // result = { success: false, error: Error('Something went wrong') }
@@ -39,28 +39,28 @@ export function Err<E = Error>(error: E | string): Result<never, E> {
 }
 
 /**
- * 检查 Result 是否为成功
- * @param result - Result 对象
- * @returns 如果成功返回 true
+ * Check whether a Result is successful
+ * @param result - Result object
+ * @returns true if successful
  */
 export function isOk<T, E>(result: Result<T, E>): result is { success: true; data: T } {
   return result.success === true
 }
 
 /**
- * 检查 Result 是否为失败
- * @param result - Result 对象
- * @returns 如果失败返回 true
+ * Check whether a Result is a failure
+ * @param result - Result object
+ * @returns true if failed
  */
 export function isErr<T, E>(result: Result<T, E>): result is { success: false; error: E } {
   return result.success === false
 }
 
 /**
- * 从 Result 中提取数据,如果失败则抛出错误
- * @param result - Result 对象
- * @returns 成功的数据
- * @throws 如果 Result 是失败状态
+ * Extract data from a Result, throwing if it failed
+ * @param result - Result object
+ * @returns The success data
+ * @throws If the Result is in a failed state
  * @example
  * const result = Ok(42)
  * const value = unwrap(result) // value = 42
@@ -76,10 +76,10 @@ export function unwrap<T, E>(result: Result<T, E>): T {
 }
 
 /**
- * 从 Result 中提取数据,如果失败则返回默认值
- * @param result - Result 对象
- * @param defaultValue - 失败时的默认值
- * @returns 成功的数据或默认值
+ * Extract data from a Result, returning a default value if it failed
+ * @param result - Result object
+ * @param defaultValue - Default value on failure
+ * @returns The success data or the default value
  * @example
  * const result = Ok(42)
  * const value = unwrapOr(result, 0) // value = 42
@@ -95,9 +95,9 @@ export function unwrapOr<T, E>(result: Result<T, E>, defaultValue: T): T {
 }
 
 /**
- * 将异步函数包装为返回 Result 的函数
- * @param fn - 异步函数
- * @returns 返回 Result 的异步函数
+ * Wrap an async function so it returns a Result
+ * @param fn - Async function
+ * @returns An async function returning a Result
  * @example
  * const safeFetch = wrapAsync(async (url: string) => {
  *   const response = await fetch(url)
@@ -125,9 +125,9 @@ export function wrapAsync<T extends unknown[], R>(
 }
 
 /**
- * 将同步函数包装为返回 Result 的函数
- * @param fn - 同步函数
- * @returns 返回 Result 的函数
+ * Wrap a sync function so it returns a Result
+ * @param fn - Sync function
+ * @returns A function returning a Result
  * @example
  * const safeParseInt = wrapSync((str: string) => {
  *   const num = parseInt(str, 10)

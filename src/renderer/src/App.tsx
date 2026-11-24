@@ -26,40 +26,40 @@ function App(): React.JSX.Element {
     initOnboarding
   } = useOnboardingStore()
 
-  // 激活快捷键执行器
+  // Activate the shortcut executor
   useShortcutExecutor()
 
-  // 初始化平台检测（预加载平台信息到缓存）
+  // Initialize platform detection (preload platform info into the cache)
   useEffect(() => {
     initPlatform().catch((error) => {
       console.error('[App] Failed to initialize platform detection:', error)
     })
   }, [])
 
-  // 初始化聊天监听器
+  // Initialize chat listeners
   useEffect(() => {
     const cleanup = setupChatListeners()
     return cleanup
   }, [])
 
-  // 初始化主题
+  // Initialize the theme
   useEffect(() => {
     initTheme()
   }, [initTheme])
 
-  // 初始化语言
+  // Initialize the language
   useEffect(() => {
     initLanguage()
   }, [initLanguage])
 
-  // 监听语言变化
+  // Watch for language changes
   useEffect(() => {
     if (language && i18n.language !== language) {
       i18n.changeLanguage(language)
     }
   }, [language])
 
-  // 初始化笔记本数据（从数据库加载）
+  // Initialize notebook data (load from the database)
   useEffect(() => {
     console.log('[App] Loading notebooks on startup...')
     loadNotebooks().catch((error) => {
@@ -67,12 +67,12 @@ function App(): React.JSX.Element {
     })
   }, [loadNotebooks])
 
-  // 初始化引导状态
+  // Initialize onboarding state
   useEffect(() => {
     initOnboarding()
   }, [initOnboarding])
 
-  // 如果正在加载引导状态，显示加载中
+  // Show a loading state while onboarding state is loading
   if (onboardingLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -86,13 +86,17 @@ function App(): React.JSX.Element {
       <HashRouter>
         <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading...</div>}>
           <Routes>
-            {/* 引导页路由 */}
+            {/* Onboarding route */}
             {!hasCompletedOnboarding && <Route path="/onboarding" element={<OnboardingPage />} />}
-            {/* 主应用路由 */}
+            {/* Main app route */}
             <Route
               path="/"
               element={
-                hasCompletedOnboarding ? <NotebookListPage /> : <Navigate to="/onboarding" replace />
+                hasCompletedOnboarding ? (
+                  <NotebookListPage />
+                ) : (
+                  <Navigate to="/onboarding" replace />
+                )
               }
             />
             <Route path="/notebook/:id" element={<NotebookLayout />} />

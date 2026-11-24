@@ -1,6 +1,6 @@
 /**
  * FileParserService
- * 文件解析服务，使用 Loader 模式统一处理各种文档格式
+ * File parsing service that handles all document formats uniformly with the Loader pattern
  */
 
 import { extname } from 'path'
@@ -14,7 +14,7 @@ import { WebLoader } from './loaders/WebLoader'
 import type { IDocumentLoader, DocumentLoadResult, LoadOptions } from './loaders/types'
 
 /**
- * 支持的文件类型
+ * Supported file types
  */
 export type SupportedFileType =
   | 'pdf'
@@ -29,15 +29,15 @@ export type SupportedFileType =
   | 'text'
 
 /**
- * 文件解析服务
- * 支持 PDF、Word、PowerPoint、Markdown、纯文本
+ * File parsing service
+ * Supports PDF, Word, PowerPoint, Markdown, and plain text
  */
 export class FileParserService {
   private loaders: Map<string, IDocumentLoader>
   private allLoaders: IDocumentLoader[]
 
   constructor() {
-    // 初始化所有 Loader
+    // Initialize all loaders
     this.allLoaders = [
       new PdfLoader(),
       new MarkdownLoader(),
@@ -47,14 +47,14 @@ export class FileParserService {
       new WebLoader()
     ]
 
-    // 按扩展名和 MIME 类型注册 Loader
+    // Register loaders by extension and MIME type
     this.loaders = new Map()
     for (const loader of this.allLoaders) {
-      // 注册扩展名
+      // Register extensions
       for (const ext of loader.supportedExtensions) {
         this.loaders.set(ext.toLowerCase(), loader)
       }
-      // 注册 MIME 类型
+      // Register MIME types
       for (const mime of loader.supportedMimeTypes) {
         this.loaders.set(mime, loader)
       }
@@ -64,7 +64,7 @@ export class FileParserService {
   }
 
   /**
-   * 根据文件路径自动识别格式并解析
+   * Detect the format from the file path and parse it
    */
   async parseFile(filePath: string, options?: LoadOptions): Promise<DocumentLoadResult> {
     const ext = extname(filePath).toLowerCase().slice(1)
@@ -79,7 +79,7 @@ export class FileParserService {
   }
 
   /**
-   * 根据文件类型解析 Buffer
+   * Parse a Buffer by file type
    */
   async parseBuffer(
     buffer: Buffer,
@@ -97,7 +97,7 @@ export class FileParserService {
   }
 
   /**
-   * 解析纯文本/Markdown
+   * Parse plain text/Markdown
    */
   parseText(content: string, mimeType: string = 'text/plain'): DocumentLoadResult {
     return {
@@ -111,14 +111,14 @@ export class FileParserService {
   }
 
   /**
-   * 检查是否支持该文件类型
+   * Check whether the file type is supported
    */
   isSupported(fileType: string): boolean {
     return this.loaders.has(fileType.toLowerCase())
   }
 
   /**
-   * 根据 MIME 类型获取文件类型
+   * Get the file type from the MIME type
    */
   getFileTypeFromMime(mimeType: string): SupportedFileType | null {
     const mimeMap: Record<string, SupportedFileType> = {
@@ -135,7 +135,7 @@ export class FileParserService {
   }
 
   /**
-   * 获取 MIME 类型
+   * Get the MIME type
    */
   getMimeType(fileType: string): string {
     const mimeMap: Record<string, string> = {
@@ -154,16 +154,16 @@ export class FileParserService {
   }
 
   /**
-   * 根据扩展名获取 Loader
+   * Get a loader by extension
    */
   private getLoaderByExtension(ext: string): IDocumentLoader | undefined {
-    // 处理纯文本特殊情况
+    // Handle the plain-text special case
     if (ext === 'txt' || ext === 'text') {
-      return this.loaders.get('md') // 使用 MarkdownLoader 处理纯文本
+      return this.loaders.get('md') // Use MarkdownLoader for plain text
     }
     return this.loaders.get(ext.toLowerCase())
   }
 }
 
-// 导出类型（保持向后兼容）
+// Export types (kept for backward compatibility)
 export type { DocumentLoadResult as ParseResult, LoadOptions }
