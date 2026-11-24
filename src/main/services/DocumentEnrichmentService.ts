@@ -12,7 +12,7 @@
 import { getDatabase } from '../db'
 import { documents } from '../db/schema'
 import { eq } from 'drizzle-orm'
-import { ProviderManager } from '../providers/ProviderManager'
+import { ApiClient } from '../ai/apiClient'
 import { KnowledgeService } from './KnowledgeService'
 import { flattenSectionsWithPath } from './loaders/sections'
 import type { SectionInfo } from './loaders/types'
@@ -58,7 +58,7 @@ export class EnrichmentCancelledError extends Error {
 
 export class DocumentEnrichmentService {
   constructor(
-    private providerManager: ProviderManager,
+    private apiClient: ApiClient,
     private knowledgeService: KnowledgeService
   ) {}
 
@@ -165,7 +165,7 @@ export class DocumentEnrichmentService {
       entities: [] as string[]
     }
 
-    const provider = await this.providerManager.getActiveChatProvider()
+    const provider = await this.apiClient.getChatProvider()
     if (!provider) {
       Logger.warn('DocumentEnrichment', 'No chat provider available, kept fallback enrichment')
       return fallback

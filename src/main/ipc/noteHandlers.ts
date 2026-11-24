@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { createNote, getNotesByNotebook, getNoteById, updateNote, deleteNote } from '../db/queries'
-import { ProviderManager } from '../providers/ProviderManager'
+import { ApiClient } from '../ai/apiClient'
 import { KnowledgeService } from '../services/KnowledgeService'
 import Logger from '../../shared/utils/logger'
 import { NoteSchemas, validate } from './validation'
@@ -12,12 +12,9 @@ import { NoteSchemas, validate } from './validation'
  * đợi stream kết thúc — vì vậy phải gói trong Promise resolve ở onComplete,
  * reject ở onError, kèm trần thời gian để không chặn tạo note vô hạn.
  */
-async function generateNoteTitle(
-  providerManager: ProviderManager,
-  content: string
-): Promise<string> {
+async function generateNoteTitle(apiClient: ApiClient, content: string): Promise<string> {
   try {
-    const provider = await providerManager.getActiveChatProvider()
+    const provider = await apiClient.getChatProvider()
     if (!provider) {
       return 'Untitled Note'
     }
@@ -77,10 +74,7 @@ async function generateNoteTitle(
 /**
  * Register note-related IPC handlers
  */
-export function registerNoteHandlers(
-  providerManager: ProviderManager,
-  knowledgeService: KnowledgeService
-) {
+export function registerNoteHandlers(apiClient: ApiClient, knowledgeService: KnowledgeService) {
   // Create note (with argument validation)
   ipcMain.handle(
     'create-note',
@@ -92,7 +86,7 @@ export function registerNoteHandlers(
 
       try {
         // If no title provided (empty string), use AI to generate
-        const title = args.title || (await generateNoteTitle(providerManager, args.content))
+        const title = args.title || (await generateNoteTitle(apiClient, args.content))
         const note = createNote(args.notebookId, title, args.content)
         Logger.debug('NoteHandlers', 'Note created successfully:', note.id)
         return note

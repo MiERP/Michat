@@ -23,8 +23,6 @@ const appSettingsUpdateSchema = z
     language: z.enum(['vi-VN', 'en-US']).optional(),
     autoLaunch: z.boolean().optional(),
     hasCompletedOnboarding: z.boolean().optional(),
-    defaultChatModel: z.string().optional(),
-    defaultEmbeddingModel: z.string().optional(),
     rerankEnabled: z.boolean().optional(),
     rerankTopN: z.number().int().min(1).max(100).optional(),
     rerankUseHeuristicFallback: z.boolean().optional(),
@@ -45,8 +43,6 @@ const settingValueSchemas = {
   language: appSettingsUpdateSchema.shape.language.unwrap(),
   autoLaunch: appSettingsUpdateSchema.shape.autoLaunch.unwrap(),
   hasCompletedOnboarding: appSettingsUpdateSchema.shape.hasCompletedOnboarding.unwrap(),
-  defaultChatModel: appSettingsUpdateSchema.shape.defaultChatModel.unwrap(),
-  defaultEmbeddingModel: appSettingsUpdateSchema.shape.defaultEmbeddingModel.unwrap(),
   rerankEnabled: appSettingsUpdateSchema.shape.rerankEnabled.unwrap(),
   rerankTopN: appSettingsUpdateSchema.shape.rerankTopN.unwrap(),
   rerankUseHeuristicFallback: appSettingsUpdateSchema.shape.rerankUseHeuristicFallback.unwrap(),
@@ -66,6 +62,26 @@ const settingKeys = Object.keys(settingValueSchemas) as [
   ...Array<keyof typeof settingValueSchemas>
 ]
 const settingKeySchema = z.enum(settingKeys)
+
+/**
+ * External local API configuration schemas
+ */
+const apiConfigInputSchema = z
+  .object({
+    baseUrl: z.string().max(2048).optional(),
+    chatModel: z.string().max(256).optional(),
+    embeddingModel: z.string().max(256).optional(),
+    embeddingBaseUrl: z.string().max(2048).optional(),
+    contextWindow: z.number().int().min(2048).max(1_000_000).optional(),
+    apiKey: z.string().max(4096).optional(),
+    clearApiKey: z.boolean().optional()
+  })
+  .strict()
+
+export const ApiSchemas = {
+  saveConfig: apiConfigInputSchema,
+  testConnection: apiConfigInputSchema
+}
 
 /**
  * Settings validation schemas
@@ -153,50 +169,6 @@ export const NoteSchemas = {
 
   deleteNote: z.object({
     id: z.string().min(1, 'ID cannot be empty')
-  })
-}
-
-const providerConfigSchema = z
-  .object({
-    baseUrl: z.string().url().optional(),
-    embeddingBaseUrl: z.string().url().optional(),
-    apiKey: z.string().optional(),
-    model: z.string().optional(),
-    models: z.array(z.string()).optional()
-  })
-  .passthrough()
-
-/**
- * Provider validation schemas
- */
-export const ProviderSchemas = {
-  saveProviderConfig: z.object({
-    providerName: z.string().min(1, { message: 'Provider name cannot be empty' }),
-    config: providerConfigSchema,
-    enabled: z.boolean(),
-    clearApiKey: z.boolean().optional()
-  }),
-
-  getProviderConfig: z.object({
-    providerName: z.string().min(1, 'Provider name cannot be empty')
-  }),
-
-  deleteProviderConfig: z.object({
-    providerName: z.string().min(1, 'Provider name cannot be empty')
-  }),
-
-  validateProviderConfig: z.object({
-    providerName: z.string().min(1, 'Provider name cannot be empty'),
-    config: providerConfigSchema
-  }),
-
-  fetchModels: z.object({
-    providerName: z.string().min(1, 'Provider name cannot be empty'),
-    apiKey: z.string().min(1, 'API Key cannot be empty')
-  }),
-
-  getProviderModels: z.object({
-    providerName: z.string().min(1, 'Provider name cannot be empty')
   })
 }
 

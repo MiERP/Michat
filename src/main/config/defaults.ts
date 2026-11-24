@@ -10,9 +10,6 @@ export const defaultSettings: AppSettings = {
   language: 'vi-VN',
   autoLaunch: false,
   hasCompletedOnboarding: false,
-  // Default to no model selected - user must choose manually
-  defaultChatModel: '',
-  defaultEmbeddingModel: '',
   rerankEnabled: true,
   rerankTopN: 12,
   rerankUseHeuristicFallback: true,

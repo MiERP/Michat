@@ -6,11 +6,11 @@ import type {
   ChatMessageCreatedEvent,
   Note,
   Notebook,
-  ProviderConfig,
   SendMessageResult,
   ShortcutAction,
   ShortcutConfig
 } from '../shared/types'
+import type { PublicApiConfig, SaveApiConfigInput, ApiTestResult } from '../shared/types/api'
 import type { UpdateState } from '../shared/types/update'
 import type { StreamChunk } from '../shared/types/chat'
 import type { AddDocumentOptions, IndexProgress, SearchOptions } from '../shared/types/knowledge'
@@ -167,36 +167,20 @@ const api = {
     return () => ipcRenderer.removeListener('session-auto-switched', listener)
   },
 
-  // Provider config
-  saveProviderConfig: (config: ProviderConfig & { clearApiKey?: boolean }) =>
-    invokeWithTimeout('save-provider-config', 5000, config),
-  getProviderConfig: (providerName: string) =>
-    ipcRenderer.invoke('get-provider-config', { providerName }),
-  getAllProviderConfigs: () => ipcRenderer.invoke('get-all-provider-configs'),
-  deleteProviderConfig: (providerName: string) =>
-    ipcRenderer.invoke('delete-provider-config', { providerName }),
-  validateProviderConfig: (providerName: string, config: ProviderConfig['config']) =>
-    invokeWithTimeout('validate-provider-config', 15000, { providerName, config }),
-  fetchModels: (providerName: string, apiKey: string) =>
-    invokeWithTimeout('fetch-models', 15000, { providerName, apiKey }),
-  getProviderModels: (providerName: string) =>
-    ipcRenderer.invoke('get-provider-models', { providerName }),
-
-  onProviderConfigChanged: (callback: () => void) => {
-    const listener = () => callback()
-    ipcRenderer.on('provider-config-changed', listener)
-    return () => ipcRenderer.removeListener('provider-config-changed', listener)
-  },
-
-  // Check if API key encryption is available
-  checkEncryption: (): Promise<{ encrypted: boolean }> => ipcRenderer.invoke('check-encryption'),
-
-  // Llama model management
-  llama: {
-    listModels: () => ipcRenderer.invoke('llama:list-models'),
-    importModel: (type: 'chat' | 'embedding') => ipcRenderer.invoke('llama:import-model', { type }),
-    removeModel: (filename: string) => ipcRenderer.invoke('llama:remove-model', { filename }),
-    getServerInfo: () => ipcRenderer.invoke('llama:get-server-info')
+  // External local API configuration
+  api: {
+    getConfig: (): Promise<PublicApiConfig> => ipcRenderer.invoke('api:get-config'),
+    saveConfig: (config: SaveApiConfigInput): Promise<PublicApiConfig> =>
+      invokeWithTimeout('api:save-config', 5000, config),
+    testConnection: (config?: SaveApiConfigInput): Promise<ApiTestResult> =>
+      invokeWithTimeout('api:test-connection', 15000, config ?? {}),
+    checkEncryption: (): Promise<{ encrypted: boolean }> =>
+      ipcRenderer.invoke('api:check-encryption'),
+    onConfigChanged: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('api:config-changed', listener)
+      return () => ipcRenderer.removeListener('api:config-changed', listener)
+    }
   },
 
   // Knowledge base

@@ -6,15 +6,8 @@ import type {
   SendMessageResult,
   StreamChunk
 } from '../shared/types/chat'
-import type {
-  Notebook,
-  Note,
-  ProviderConfig,
-  PublicProviderConfig,
-  AppSettings,
-  ShortcutAction,
-  ShortcutConfig
-} from '../shared/types'
+import type { Notebook, Note, AppSettings, ShortcutAction, ShortcutConfig } from '../shared/types'
+import type { PublicApiConfig, SaveApiConfigInput, ApiTestResult } from '../shared/types/api'
 import type {
   KnowledgeDocument,
   KnowledgeChunk,
@@ -171,43 +164,14 @@ declare global {
         callback: (data: { oldSessionId: string; newSessionId: string }) => void
       ) => () => void
 
-      // Provider configuration
-      saveProviderConfig: (
-        config: ProviderConfig & { clearApiKey?: boolean }
-      ) => Promise<{ encrypted: boolean }>
-      getProviderConfig: (providerName: string) => Promise<PublicProviderConfig | null>
-      getAllProviderConfigs: () => Promise<PublicProviderConfig[]>
-      deleteProviderConfig: (providerName: string) => Promise<void>
-      validateProviderConfig: (
-        providerName: string,
-        config: ProviderConfig['config']
-      ) => Promise<boolean>
-      fetchModels: (
-        providerName: string,
-        apiKey: string
-      ) => Promise<
-        | {
-            models: {
-              id: string
-              object: string
-              owned_by?: string
-              created?: number
-              type?: string
-            }[]
-            source: 'merged' | 'builtin'
-            builtinCount?: number
-            remoteCount?: number
-            error?: string
-          }
-        | { id: string; object: string; owned_by?: string; created?: number }[]
-      >
-      getProviderModels: (
-        providerName: string
-      ) => Promise<{ id: string; object: string; owned_by?: string; created?: number }[]>
-      onProviderConfigChanged: (callback: () => void) => () => void
-
-      // Check if secure encryption is available for API keys
-      checkEncryption: () => Promise<{ encrypted: boolean }>
+      // External local API configuration
+      api: {
+        getConfig: () => Promise<PublicApiConfig>
+        saveConfig: (config: SaveApiConfigInput) => Promise<PublicApiConfig>
+        testConnection: (config?: SaveApiConfigInput) => Promise<ApiTestResult>
+        checkEncryption: () => Promise<{ encrypted: boolean }>
+        onConfigChanged: (callback: () => void) => () => void
+      }
 
       // Knowledge base
       knowledge: {
@@ -357,35 +321,6 @@ declare global {
         ) => () => void
         // Listen for documents newly reloaded into the KB
         onDocumentsChanged: (callback: (data: { notebookId: string }) => void) => () => void
-      }
-
-      // Llama model management
-      llama: {
-        listModels: () => Promise<
-          Array<{
-            filename: string
-            type: 'chat' | 'embedding' | 'unknown'
-            sizeMB: number
-            addedAt: string | null
-          }>
-        >
-        importModel: (type: 'chat' | 'embedding') => Promise<{
-          success: boolean
-          filename?: string
-          sizeMB?: number
-          type?: string
-          reason?: string
-        }>
-        removeModel: (filename: string) => Promise<{ success: boolean; reason?: string }>
-        getServerInfo: () => Promise<{
-          binary: string | null
-          chatPort: number
-          embedPort: number
-          backend: 'cuda-12.4-x64' | 'cuda-13.1-x64' | 'vulkan-x64' | 'cpu-x64'
-          chatCtxSize: number
-          embeddingCtxSize: number
-          threads: number
-        }>
       }
 
       // Keyboard shortcuts

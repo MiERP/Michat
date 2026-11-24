@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from 'vitest'
-import { KnowledgeSchemas, ProviderSchemas, SettingsSchemas } from '../src/main/ipc/validation'
+import { ApiSchemas, KnowledgeSchemas, SettingsSchemas } from '../src/main/ipc/validation'
 
 describe('ipc validation schemas', () => {
   it('rejects impossible metadata dates and accepts leap days', () => {
@@ -32,22 +32,18 @@ describe('ipc validation schemas', () => {
     expect(() => SettingsSchemas.update.parse({ updates: { unexpected: true } })).toThrow()
   })
 
-  it('validates provider endpoint shape without allowing invalid URLs', () => {
+  it('validates API configuration shape and rejects unknown fields', () => {
     expect(
-      ProviderSchemas.saveProviderConfig.parse({
-        providerName: 'llama',
-        enabled: true,
-        config: { baseUrl: 'http://127.0.0.1:8000/v1', apiKey: '' }
-      }).providerName
-    ).toBe('llama')
+      ApiSchemas.saveConfig.parse({
+        baseUrl: 'http://127.0.0.1:8000/v1',
+        chatModel: 'local-chat',
+        embeddingModel: 'local-embed',
+        contextWindow: 8192
+      }).chatModel
+    ).toBe('local-chat')
 
-    expect(() =>
-      ProviderSchemas.saveProviderConfig.parse({
-        providerName: 'remote',
-        enabled: true,
-        config: { baseUrl: 'not-a-url' }
-      })
-    ).toThrow()
+    expect(() => ApiSchemas.saveConfig.parse({ unexpected: true })).toThrow()
+    expect(() => ApiSchemas.saveConfig.parse({ contextWindow: 1024 })).toThrow()
   })
   it('validates document metadata updates', () => {
     expect(

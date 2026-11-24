@@ -9,8 +9,7 @@ import { KnowledgeService } from '../services/KnowledgeService'
 import { KnowledgeLinkService } from '../services/KnowledgeLinkService'
 import { BackgroundJobService } from '../services/BackgroundJobService'
 import { NotebookSummaryService } from '../services/NotebookSummaryService'
-import { LlamaService } from '../services/LlamaService'
-import { ProviderManager } from '../providers/ProviderManager'
+import { ApiClient } from '../ai/apiClient'
 import Logger from '../../shared/utils/logger'
 import { KnowledgeSchemas, validate, validateWithEvent } from './validation'
 import { registerNoArgHandler } from './handlerRegistry'
@@ -20,24 +19,24 @@ import { isAllowedExternalOpenUrl, normalizeFsPath } from '../security/guards'
  * Registers the knowledge base IPC handlers
  */
 export function registerKnowledgeHandlers(
-  providerManager: ProviderManager,
+  apiClient: ApiClient,
   knowledgeService: KnowledgeService,
-  llamaService: LlamaService,
   backgroundJobService: BackgroundJobService,
   notebookSummaryService: NotebookSummaryService
 ) {
   const approvedFilePaths = new Set<string>()
   const approvedFolderPaths = new Set<string>()
-  const linkService = new KnowledgeLinkService(providerManager)
+  const linkService = new KnowledgeLinkService(apiClient)
 
   const ensureEmbeddingServiceReady = async (): Promise<string | null> => {
     try {
-      const embeddingReady = await llamaService.ensureEmbeddingStarted()
-      if (embeddingReady) return null
-      return 'Embedding server is unavailable. Please import/select an embedding model (e.g. bge/e5) and try again.'
+      await knowledgeService.ensureEmbeddingReady()
+      return null
     } catch (error) {
-      Logger.error('KnowledgeHandlers', 'Failed to ensure embedding server readiness:', error)
-      return 'Embedding server startup failed. Please verify llama binary/model configuration and try again.'
+      Logger.error('KnowledgeHandlers', 'Embedding API readiness check failed:', error)
+      return error instanceof Error
+        ? error.message
+        : 'Embedding API is unavailable. Check Settings > API and try again.'
     }
   }
 
@@ -431,12 +430,12 @@ export function registerKnowledgeHandlers(
       Logger.debug('KnowledgeHandlers', 'enrich-document:', params.documentId)
 
       try {
-        const chatProvider = await providerManager.getActiveChatProvider()
+        const chatProvider = await apiClient.getChatProvider()
         if (!chatProvider) {
           return {
             success: false,
             error:
-              'Chưa cấu hình model chat. Hãy chọn model chat trong Cài đặt để làm giàu tài liệu.'
+              'Chat API is not configured. Set the API base URL and chat model in Settings > API.'
           }
         }
 
@@ -480,11 +479,12 @@ export function registerKnowledgeHandlers(
     'knowledge:regenerate-notebook-summary',
     validate(KnowledgeSchemas.notebookSummary, async (params) => {
       try {
-        const chatProvider = await providerManager.getActiveChatProvider()
+        const chatProvider = await apiClient.getChatProvider()
         if (!chatProvider) {
           return {
             success: false,
-            error: 'Chưa cấu hình model chat để tổng hợp tóm tắt notebook.'
+            error:
+              'Chat API is not configured. Set the API base URL and chat model in Settings > API.'
           }
         }
 

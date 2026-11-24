@@ -7,28 +7,17 @@
  */
 
 import type { EmbeddingService } from '../EmbeddingService'
-import type { LlamaService } from '../LlamaService'
 import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../../shared/types/knowledge'
 
 export class KnowledgeEmbeddingRuntime {
-  constructor(
-    private readonly embeddingService: EmbeddingService,
-    private readonly llamaService?: LlamaService
-  ) {}
+  constructor(private readonly embeddingService: EmbeddingService) {}
 
   /**
-   * Ensure the embedding server (llama.cpp :8001) is running before indexing
-   * or searching. This is the service-level guard for every caller (IPC,
-   * watcher, background queue), not just handlers that call it manually.
+   * Verify that an embedding API is configured before indexing or searching.
+   * This is the service-level guard for every caller (IPC, watcher, queue).
    */
   async ensureReady(): Promise<void> {
-    if (!this.llamaService) return
-    const ready = await this.llamaService.ensureEmbeddingStarted()
-    if (!ready) {
-      throw new Error(
-        'Embedding server is unavailable. Please import/select an embedding model (e.g. bge/e5) and try again.'
-      )
-    }
+    await this.embeddingService.assertReady()
   }
 
   /**

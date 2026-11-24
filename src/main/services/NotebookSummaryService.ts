@@ -12,8 +12,8 @@ import { createHash } from 'crypto'
 import { getDatabase } from '../db'
 import { notebooks, documents } from '../db/schema'
 import { and, eq } from 'drizzle-orm'
-import type { ProviderManager } from '../providers/ProviderManager'
-import type { ChatProvider } from '../providers/types'
+import type { ApiClient } from '../ai/apiClient'
+import type { ChatProvider } from '../ai/types'
 import Logger from '../../shared/utils/logger'
 
 /** Trần cứng số từ của tóm tắt notebook. */
@@ -28,7 +28,7 @@ export interface NotebookSummary {
 }
 
 export class NotebookSummaryService {
-  constructor(private providerManager: ProviderManager) {}
+  constructor(private apiClient: ApiClient) {}
 
   private buildSignature(notebookId: string): string {
     const db = getDatabase()
@@ -129,7 +129,7 @@ export class NotebookSummaryService {
       // Một tài liệu duy nhất → dùng thẳng tóm tắt tài liệu, chỉ cắt từ.
       summary = briefs[0].summary
     } else {
-      const provider = await this.providerManager.getActiveChatProvider()
+      const provider = await this.apiClient.getChatProvider()
       if (!provider) {
         Logger.warn('NotebookSummary', 'No chat provider; falling back to concatenated summaries')
         summary = briefs.map((brief) => `${brief.title}: ${brief.summary}`).join(' ')

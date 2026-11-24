@@ -1,7 +1,7 @@
 /**
  * ActivityTracker
  * Theo dõi thời điểm hoạt động cuối của người dùng để background queue
- * biết khi nào app "idle" (tránh tranh chấp llama-server khi user đang chat).
+ * biết khi nào app "idle" (tránh tranh chấp API khi người dùng đang chat).
  */
 
 let lastActivity = 0

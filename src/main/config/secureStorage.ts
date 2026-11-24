@@ -109,26 +109,3 @@ export function decryptObjectFields<T extends Record<string, unknown>>(
 
   return result as T
 }
-
-/**
- * List of sensitive fields in a provider configuration
- */
-export const PROVIDER_SENSITIVE_FIELDS = ['apiKey', 'apiSecret', 'accessToken']
-
-/**
- * Encrypts a provider configuration
- * @param config provider configuration object
- * @returns the encrypted configuration
- */
-export function encryptProviderConfig(config: Record<string, unknown>): Record<string, unknown> {
-  return encryptObjectFields(config, PROVIDER_SENSITIVE_FIELDS)
-}
-
-/**
- * Decrypts a provider configuration
- * @param config encrypted provider configuration object
- * @returns the decrypted configuration
- */
-export function decryptProviderConfig(config: Record<string, unknown>): Record<string, unknown> {
-  return decryptObjectFields(config, PROVIDER_SENSITIVE_FIELDS)
-}

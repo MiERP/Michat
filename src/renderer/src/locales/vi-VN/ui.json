@@ -19,8 +19,6 @@
   "clickToEditTitle": "Nhấp để chỉnh sửa tiêu đề",
   "selectOrCreateNotebook": "Vui lòng chọn hoặc tạo sổ ghi chú",
   "selectSession": "Vui lòng chọn phiên làm việc trước",
-  "noProviderConfigured": "Chưa cấu hình AI Provider, vui lòng cấu hình trong phần Cài đặt",
-  "noDefaultModel": "Vui lòng chọn mô hình hội thoại mặc định trong phần Cài đặt",
   "inputMessage": "Nhập tin nhắn... (Shift+Enter để xuống dòng)",
   "knowledgeBase": "Cơ sở tri thức",
   "knowledgeBaseDesc": "Thêm tài liệu để cung cấp kiến thức nền cho cuộc hội thoại",
@@ -47,8 +45,8 @@
   "add": "Thêm",
   "cancel": "Hủy",
   "processing": "Đang xử lý...",
-  "noEmbeddingModelConfigured": "Vui lòng cấu hình mô hình embedding mặc định trong phần Cài đặt",
-  "noEmbeddingModelConfiguredDesc": "Sau khi cấu hình mô hình embedding, bạn có thể thêm tài liệu vào cơ sở tri thức để tăng cường nền tảng kiến thức cho cuộc hội thoại",
+  "noEmbeddingModelConfigured": "Vui lòng cấu hình API embedding trong Cài đặt > API trước",
+  "noEmbeddingModelConfiguredDesc": "Nhập địa chỉ API và mô hình embedding để thêm tài liệu vào cơ sở tri thức và tăng cường ngữ cảnh hội thoại",
   "goToSettings": "Đi tới Cài đặt",
   "emptyNoteCannotImport": "Nội dung ghi chú trống, không thể nhập vào cơ sở tri thức",
   "backToList": "Quay lại danh sách",
@@ -106,5 +104,6 @@
   "emoji": "Biểu tượng cảm xúc",
   "preview": "Xem trước",
   "sourceCode": "Mã nguồn",
-  "splitView": "Chế độ chia đôi"
+  "splitView": "Chế độ chia đôi",
+  "apiNotConfigured": "Chưa cấu hình API. Mở Cài đặt > API để kết nối API cục bộ."
 }

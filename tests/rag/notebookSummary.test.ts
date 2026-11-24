@@ -115,7 +115,7 @@ describe('NotebookSummaryService', () => {
 
     let capturedPrompt = ''
     const fakeProvider = {
-      getActiveChatProvider: async () => ({
+      getChatProvider: async () => ({
         sendMessageStream: async (
           messages: Array<{ role: string; content: string }>,
           onChunk: (chunk: { content: string }) => void,

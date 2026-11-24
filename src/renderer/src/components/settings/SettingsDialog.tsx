@@ -1,9 +1,9 @@
-import { Globe, Database, HelpCircle, MessageSquare, Keyboard } from 'lucide-react'
+import { Globe, Server, HelpCircle, MessageSquare, Keyboard } from 'lucide-react'
 import { useState, useEffect, useMemo, ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import GeneralSettings from './GeneralSettings'
 import { useUIStore } from '../../store/uiStore'
-import ProvidersSettings from './ProvidersSettings'
+import ApiSettings from './ApiSettings'
 import PromptsSettings from './PromptsSettings'
 import ShortcutSettings from './ShortcutSettings'
 import AboutSettings from './AboutSettings'
@@ -17,8 +17,7 @@ import {
   SidebarMenuButton,
   SidebarProvider
 } from '../ui/sidebar'
-import type { AppSettings, PublicProviderConfig } from '../../../../shared/types'
-import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../../../shared/types/knowledge'
+import type { AppSettings } from '../../../../shared/types'
 
 export default function SettingsDialog(): ReactElement {
   const { t } = useTranslation('settings')
@@ -26,8 +25,6 @@ export default function SettingsDialog(): ReactElement {
   const [activeSection, setActiveSection] = useState<string>('general')
   const [originalSettings, setOriginalSettings] = useState<AppSettings | null>(null)
   const [pendingSettings, setPendingSettings] = useState<AppSettings | null>(null)
-  const [originalProviders, setOriginalProviders] = useState<PublicProviderConfig[]>([])
-  const [pendingProviders, setPendingProviders] = useState<PublicProviderConfig[]>([])
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -41,24 +38,16 @@ export default function SettingsDialog(): ReactElement {
       const settings = await window.api.settings.getAll()
       setOriginalSettings(settings)
       setPendingSettings(settings)
-
-      const providers = await window.api.getAllProviderConfigs()
-      setOriginalProviders(providers)
-      setPendingProviders(providers)
     }
     loadSettings()
   }, [])
 
-  // Use useMemo to compute whether anything changed
   const hasChanges = useMemo(() => {
-    if (originalSettings && pendingSettings && originalProviders && pendingProviders) {
-      const settingsChanged = JSON.stringify(originalSettings) !== JSON.stringify(pendingSettings)
-      const providersChanged =
-        JSON.stringify(originalProviders) !== JSON.stringify(pendingProviders)
-      return settingsChanged || providersChanged
+    if (originalSettings && pendingSettings) {
+      return JSON.stringify(originalSettings) !== JSON.stringify(pendingSettings)
     }
     return false
-  }, [originalSettings, pendingSettings, originalProviders, pendingProviders])
+  }, [originalSettings, pendingSettings])
 
   const menuItems = [
     {
@@ -69,11 +58,11 @@ export default function SettingsDialog(): ReactElement {
       description: t('generalSettingsDesc')
     },
     {
-      id: 'provider',
-      icon: Database,
-      label: t('aiProviders'),
-      title: t('aiProviders'),
-      description: t('aiProvidersDesc')
+      id: 'api',
+      icon: Server,
+      label: t('apiSettings'),
+      title: t('apiSettings'),
+      description: t('apiSettingsDesc')
     },
     {
       id: 'prompts',
@@ -105,63 +94,11 @@ export default function SettingsDialog(): ReactElement {
     }
   }
 
-  // Update pending provider configs
-  const updatePendingProviders = (updatedProviders: PublicProviderConfig[]) => {
-    setPendingProviders(updatedProviders)
-  }
-
-  // Refresh provider configs (sync state after add/delete)
-  const refreshProviders = async () => {
-    const providers = await window.api.getAllProviderConfigs()
-    setOriginalProviders(providers)
-    setPendingProviders(providers)
-  }
-
   // Confirm and save
   const handleConfirm = async () => {
-    // Save general settings
     if (pendingSettings) {
       await window.api.settings.update(pendingSettings)
-      let resolvedSettings = pendingSettings
-
-      // Model embedding phải khớp schema vector 1024 chiều; nếu không thì giữ model cũ.
-      if (pendingSettings.defaultEmbeddingModel !== originalSettings?.defaultEmbeddingModel) {
-        const probe = await window.api.knowledge.probeEmbeddingDimensions()
-        if (
-          probe.success &&
-          probe.dimensions &&
-          probe.dimensions !== REQUIRED_EMBEDDING_DIMENSIONS
-        ) {
-          const fallback = originalSettings?.defaultEmbeddingModel ?? ''
-          resolvedSettings = { ...pendingSettings, defaultEmbeddingModel: fallback }
-          await window.api.settings.update({ defaultEmbeddingModel: fallback })
-          alert(
-            t('embeddingDimensionMismatch', {
-              dimensions: probe.dimensions,
-              required: REQUIRED_EMBEDDING_DIMENSIONS
-            })
-          )
-        }
-      }
-
-      setPendingSettings(resolvedSettings)
-      setOriginalSettings(resolvedSettings)
-    }
-
-    // Save provider configs (adds/deletes are saved immediately; only edits are saved here)
-    let anyUnencrypted = false
-    for (const provider of pendingProviders) {
-      const result = await window.api.saveProviderConfig(provider)
-      if (!result.encrypted) {
-        anyUnencrypted = true
-      }
-    }
-    setOriginalProviders(pendingProviders)
-
-    if (anyUnencrypted) {
-      alert(
-        'Warning: API keys are stored in plain text because system encryption is not available on this platform. This is a security risk.'
-      )
+      setOriginalSettings(pendingSettings)
     }
   }
 
@@ -169,9 +106,6 @@ export default function SettingsDialog(): ReactElement {
   const handleCancel = () => {
     if (originalSettings) {
       setPendingSettings(originalSettings)
-    }
-    if (originalProviders) {
-      setPendingProviders(originalProviders)
     }
   }
 
@@ -229,16 +163,9 @@ export default function SettingsDialog(): ReactElement {
                     <GeneralSettings
                       settings={pendingSettings}
                       onSettingsChange={updatePendingSettings}
-                      providers={pendingProviders}
                     />
                   )}
-                  {activeSection === 'provider' && (
-                    <ProvidersSettings
-                      providers={pendingProviders}
-                      onProvidersChange={updatePendingProviders}
-                      onRefresh={refreshProviders}
-                    />
-                  )}
+                  {activeSection === 'api' && <ApiSettings />}
                   {pendingSettings && activeSection === 'prompts' && (
                     <PromptsSettings
                       settings={pendingSettings}

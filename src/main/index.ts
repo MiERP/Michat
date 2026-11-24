@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, dialog, session } from 'electron'
 import { isAbsolute } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { LlamaService } from './services/LlamaService'
 import {
   initDatabase,
   runMigrations,
@@ -13,7 +12,7 @@ import {
 import { notebooks } from './db/schema'
 import { getAllNotebooks } from './db/queries'
 import { wasVectorIndexRebuilt } from './db'
-import { ProviderManager } from './providers/ProviderManager'
+import { ApiClient } from './ai/apiClient'
 import { SessionAutoSwitchService } from './services/SessionAutoSwitchService'
 import { KnowledgeService } from './services/KnowledgeService'
 import { KnowledgeLinkService } from './services/KnowledgeLinkService'
@@ -24,7 +23,7 @@ import { UpdateService } from './services/UpdateService'
 import { ShortcutManager } from './services/ShortcutManager'
 import { createMainWindow } from './windows'
 import { registerAllHandlers } from './ipc'
-import { getStore, settingsManager } from './config'
+import { apiConfigManager, getStore } from './config'
 import Logger from '../shared/utils/logger'
 import { isAllowedExternalOpenUrl } from './security/guards'
 import {
@@ -33,15 +32,13 @@ import {
   installWebContentsGuards
 } from './security/appHardening'
 
-let providerManager: ProviderManager | null = null
+let apiClient: ApiClient | null = null
 let sessionAutoSwitchService: SessionAutoSwitchService | null = null
 let knowledgeService: KnowledgeService | null = null
 let backgroundJobService: BackgroundJobService | null = null
 let updateService: UpdateService | null = null
 let shortcutManager: ShortcutManager | null = null
 let isQuitting = false // Flag to indicate if app is quitting
-
-let llamaService: LlamaService | null = null
 
 enforceSingleInstance(app)
 
@@ -117,32 +114,6 @@ app.whenReady().then(async () => {
     installPermissionHandlers(session.defaultSession)
     installWebContentsGuards(app)
 
-    // Auto-start llama.cpp servers (best effort)
-    llamaService = new LlamaService()
-
-    // Seed local model defaults so chat and RAG work on first launch without
-    // the user having to open Settings → General and save first.
-    const currentSettings = await settingsManager.getAllSettings()
-    const seeded: { defaultChatModel?: string; defaultEmbeddingModel?: string } = {}
-    if (!currentSettings.defaultChatModel || !currentSettings.defaultEmbeddingModel) {
-      const models = llamaService.listModels()
-      if (!currentSettings.defaultChatModel) {
-        const chatModel = models.find((model) => model.type === 'chat')
-        if (chatModel) seeded.defaultChatModel = `llama:${chatModel.filename}`
-      }
-      if (!currentSettings.defaultEmbeddingModel) {
-        const embeddingModel = models.find((model) => model.type === 'embedding')
-        if (embeddingModel) seeded.defaultEmbeddingModel = `llama:${embeddingModel.filename}`
-      }
-      if (Object.keys(seeded).length > 0) {
-        await settingsManager.updateSettings(seeded)
-        Logger.info('Main', `Seeded default models: ${JSON.stringify(seeded)}`)
-      }
-    }
-
-    // llama.cpp is started after the window is visible (see below); a cold
-    // model load must not block first paint.
-
     // Set app user model id for windows
     electronApp.setAppUserModelId('com.michat.app')
 
@@ -160,27 +131,31 @@ app.whenReady().then(async () => {
     initExtensions()
     Logger.info('Main', 'Database initialized')
 
-    // Initialize Provider Manager
-    Logger.info('Main', 'Initializing Provider Manager...')
-    providerManager = new ProviderManager()
-    await providerManager.initialize()
-    Logger.info('Main', 'Provider Manager initialized')
+    // Initialize the external local API client
+    Logger.info('Main', 'Initializing API client...')
+    const apiConfig = await apiConfigManager.getConfig()
+    apiClient = new ApiClient(apiConfigManager)
+    Logger.info('Main', 'API client initialized')
 
     // Initialize Knowledge Service
     Logger.info('Main', 'Initializing Knowledge Service...')
-    knowledgeService = new KnowledgeService(providerManager, llamaService ?? undefined)
+    knowledgeService = new KnowledgeService(apiClient)
     Logger.info('Main', 'Knowledge Service initialized')
 
     // Initialize Session Auto Switch Service (cần knowledgeService để lưu memory)
     Logger.info('Main', 'Initializing Session Auto Switch Service...')
-    sessionAutoSwitchService = new SessionAutoSwitchService(providerManager, knowledgeService, null)
+    sessionAutoSwitchService = new SessionAutoSwitchService(
+      apiClient,
+      knowledgeService,
+      apiConfig.contextWindow
+    )
     Logger.info('Main', 'Session Auto Switch Service initialized')
 
     // Initialize Background Job Service (queue cho auto-link/decay/reindex/enrich)
     Logger.info('Main', 'Initializing Background Job Service...')
-    const linkService = new KnowledgeLinkService(providerManager)
-    const enrichmentService = new DocumentEnrichmentService(providerManager, knowledgeService)
-    const notebookSummaryService = new NotebookSummaryService(providerManager)
+    const linkService = new KnowledgeLinkService(apiClient)
+    const enrichmentService = new DocumentEnrichmentService(apiClient, knowledgeService)
+    const notebookSummaryService = new NotebookSummaryService(apiClient)
     backgroundJobService = new BackgroundJobService(
       knowledgeService,
       linkService,
@@ -272,13 +247,13 @@ app.whenReady().then(async () => {
 
     // Register all IPC Handlers
     registerAllHandlers(
-      providerManager,
+      apiClient,
+      apiConfigManager,
       sessionAutoSwitchService,
       knowledgeService,
       updateService,
       shortcutManager,
       store,
-      llamaService,
       backgroundJobService,
       notebookSummaryService
     )
@@ -313,18 +288,9 @@ app.whenReady().then(async () => {
       }
     })
 
-    // Create main window before starting llama.cpp. The server/model load can
-    // take tens of seconds; the UI must be visible and responsive meanwhile.
+    // Create the main window. The external API is only contacted on demand,
+    // so first paint never waits for a model or server startup.
     const mainWindow = createMainWindow()
-
-    void llamaService
-      .ensureStarted()
-      .then(async () => {
-        const runtime = await llamaService!.getRuntimeInfo()
-        sessionAutoSwitchService?.setChatCtxSize(runtime.chatCtxSize)
-        Logger.info('Main', 'llama.cpp servers are ready')
-      })
-      .catch((error) => Logger.warn('Main', 'llama.cpp background start failed:', error))
 
     // Start knowledge auto-sync (watcher + incremental reindex)
     knowledgeService.startAutoSync((payload) => {
@@ -390,10 +356,6 @@ app.on('window-all-closed', () => {
     // Other platforms: Quit app when window closes
     app.quit()
   }
-
-  if (llamaService) {
-    llamaService.stop()
-  }
 })
 
 // First line of defense: before-quit event (user initiated quit)
@@ -415,11 +377,10 @@ app.on('before-quit', (event) => {
 
   void (async () => {
     try {
-      // Shutdown barrier: chờ llama.cpp và job nền dừng hẳn
-      // TRƯỚC KHI đóng DB — tránh ghi dở dang hoặc truy vấn vào DB đã đóng.
-      // Có trần tổng 10 giây để một thành phần treo không chặn app thoát.
+      // Shutdown barrier: wait for background jobs before closing the DB to
+      // avoid partial writes or queries against a closed database.
+      // A 10 second cap keeps a stuck component from blocking quit.
       const tasks: Promise<unknown>[] = []
-      if (llamaService) tasks.push(llamaService.stop())
       if (backgroundJobService) tasks.push(backgroundJobService.shutdown())
       const cap = new Promise<void>((resolve) => setTimeout(resolve, 10000))
       await Promise.race([Promise.allSettled(tasks), cap])

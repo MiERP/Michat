@@ -1,5 +1,5 @@
 import * as queries from '../db/queries'
-import { ProviderManager } from '../providers/ProviderManager'
+import { ApiClient } from '../ai/apiClient'
 import { KnowledgeService } from './KnowledgeService'
 import Logger from '../../shared/utils/logger'
 
@@ -9,20 +9,20 @@ import Logger from '../../shared/utils/logger'
  */
 export class SessionAutoSwitchService {
   // Ngưỡng mặc định (fallback khi không có ctx của model local).
-  // Khi có ctx thực tế: dùng 80% ctx của model đang chạy (tránh tràn ctx llama-server).
+  // Khi có ctx thực tế: dùng 80% ctx của model đang chạy (tránh tràn context của API).
   private static readonly DEFAULT_TOKEN_THRESHOLD = 8000
   private static readonly MAX_TOKEN_THRESHOLD = 100000
 
-  private providerManager: ProviderManager
+  private apiClient: ApiClient
   private knowledgeService: KnowledgeService | null
   private tokenThreshold: number
 
   constructor(
-    providerManager: ProviderManager,
+    apiClient: ApiClient,
     knowledgeService?: KnowledgeService | null,
     chatCtxSize?: number | null
   ) {
-    this.providerManager = providerManager
+    this.apiClient = apiClient
     this.knowledgeService = knowledgeService ?? null
     this.tokenThreshold =
       chatCtxSize && chatCtxSize > 0
@@ -35,18 +35,6 @@ export class SessionAutoSwitchService {
       'SessionAutoSwitch',
       `Token threshold set to ${this.tokenThreshold}${chatCtxSize ? ` (ctx=${chatCtxSize})` : ''}`
     )
-  }
-
-  /** Update the threshold after the llama runtime profile becomes available. */
-  setChatCtxSize(chatCtxSize: number | null): void {
-    this.tokenThreshold =
-      chatCtxSize && chatCtxSize > 0
-        ? Math.min(
-            Math.max(Math.floor(chatCtxSize * 0.8), 2048),
-            SessionAutoSwitchService.MAX_TOKEN_THRESHOLD
-          )
-        : SessionAutoSwitchService.DEFAULT_TOKEN_THRESHOLD
-    Logger.info('SessionAutoSwitch', `Token threshold set to ${this.tokenThreshold}`)
   }
 
   /**
@@ -141,7 +129,7 @@ ${conversationText}
 Please provide summary:`
 
     // Call AI to generate summary
-    const provider = await this.providerManager.getActiveChatProvider()
+    const provider = await this.apiClient.getChatProvider()
     if (!provider) {
       // If no provider configured, return a basic summary
       return `This conversation contains ${messages.length} messages.`

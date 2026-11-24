@@ -5,12 +5,8 @@ node_modules
 dist
 out
 
-# Local runtime assets and sample/private documents
-resources/models/*.gguf
-resources/**/*.exe
-resources/**/*.dll
+# Local sample/private documents
 vanbantest/
-src/main/config/key-mi.lic
 
 # Environment variables
 .env

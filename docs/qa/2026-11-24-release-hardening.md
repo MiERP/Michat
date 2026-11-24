@@ -69,3 +69,36 @@ text from the source tree, and Windows app/installer branding.
   current chunking until it can be split with a verified runtime test.
 - macOS/Linux packaging and signing still require their respective CI
   credentials and have not been smoke-tested here.
+
+
+## API-only follow-up (worktree `feature/api-only`)
+
+MiChat no longer contains a provider registry, llama.cpp runtime, model
+selection, or model import/removal. It now configures one external local
+OpenAI-compatible API.
+
+- Removed `src/main/providers/`, `LlamaService`, `services/llama/`,
+  llama/provider IPC handlers, preload APIs, model settings UI, bundled
+  `resources/llama-bin` and `resources/models`, and runtime-asset build
+  checks.
+- Added `src/main/ai/` (`ApiConfigManager`, `ApiClient`,
+  `OpenAICompatibleClient`) and `api:*` IPC channels.
+- New Settings → API page: loopback base URL, encrypted API key, chat model,
+  embedding model, context window, test connection, save.
+- Playwright E2E now starts a fake local API, saves the config through the UI,
+  tests the connection, and verifies the persisted public config.
+
+Latest verification:
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Pass |
+| `pnpm lint` | 0 errors, 0 warnings |
+| `pnpm test` | 43 files, 232 tests passed |
+| `pnpm test:e2e` | Pass (API configuration flow) |
+| `pnpm check:cjk` / `check:encoding` | Clean |
+| `pnpm build:win` | Pass; no llama/model assets in the package |
+| Packaged renderer (CDP) | Onboarding renders, app boots without any model runtime |
+
+Installer: `dist/michat-1.1.1-setup.exe`, 167,790,133 bytes, SHA-256
+`2F8531965B18E35D9ACCAF0B11B5E4A24C6B9398093F87F9FD67E268B6EA6BEF`.

@@ -9,7 +9,7 @@ import type {
   DocumentEnrichmentService
 } from '../../src/main/services/DocumentEnrichmentService'
 import type { BackgroundJobService } from '../../src/main/services/BackgroundJobService'
-import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+import type { EmbeddingResult } from '../../src/main/ai/types'
 
 type DbModule = typeof import('../../src/main/db')
 type SchemaModule = typeof import('../../src/main/db/schema')
@@ -94,7 +94,7 @@ class FakeChatProvider {
 class FakeProviderManager {
   public chat = new FakeChatProvider()
 
-  async getActiveEmbeddingProvider() {
+  async getEmbeddingProvider() {
     return {
       createEmbedding: async (text: string) => embedding(text),
       createEmbeddings: async (texts: string[]) => texts.map(embedding),
@@ -102,7 +102,7 @@ class FakeProviderManager {
     }
   }
 
-  async getActiveChatProvider() {
+  async getChatProvider() {
     return this.chat
   }
 

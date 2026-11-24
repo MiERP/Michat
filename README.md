@@ -3,7 +3,7 @@
 # MiChat
 
 > A local-first, open-source alternative to Google NotebookLM
-> Built for learners and developers who want private LLMs, no Docker, and full control.
+> Bring your own local OpenAI-compatible API; no Docker, no bundled model runtime.
 
 **Transform your documents into an intelligent, conversational knowledge base**
 
@@ -39,7 +39,7 @@ It’s still early, but the core idea works — and I’m excited to share it an
 
 - 📚 Build a local knowledge base from documents and notes
 - 💬 Chat, summarize, and reason with your content using LLMs
-- 🔌 Local llama.cpp models served through an OpenAI-compatible endpoint
+- 🔌 Connect to any local OpenAI-compatible API (LM Studio, llama.cpp server, Ollama, ...)
 - 🔍 RAG-powered retrieval with precise source traceability
 - 🖥️ Desktop app built with Electron — no Docker, no server setup
 
@@ -66,13 +66,13 @@ MiChat is for you if:
 ### 🤖 AI-Powered Q&A
 
 - Retrieval-Augmented Generation (RAG)
-- Local llama.cpp chat and embedding models (no cloud provider required)
+- Bring your own local API for chat and embeddings (no cloud provider required)
 - Answers with precise source references
 
 ### 🔒 Local-First by Design
 
 - All data stored locally
-- Offline-friendly (LLM APIs optional)
+- Offline-friendly: all data stays local; only a loopback API is contacted
 - Full control over your knowledge assets
 
 ### 🔍 Vector Search
@@ -102,7 +102,8 @@ Feedback and suggestions are very welcome.
 
 ### Current limitations
 
-- Only local llama.cpp models are supported; cloud providers are intentionally disabled.
+- MiChat does not bundle models or a model runtime. A local OpenAI-compatible API must be provided by another application (chat + embedding models).
+- Only loopback API endpoints (localhost/127.0.0.1/::1) are accepted.
 - Scanned/image-only PDFs need an OCR engine, which is not bundled yet.
 - Office document generation was removed; the note editor and quiz generation remain.
 - Drizzle snapshots are complete for every journal entry; `pnpm check:migrations` enforces this.
@@ -118,13 +119,13 @@ Requirements: Node.js 22 and pnpm 11.
 pnpm install
 pnpm dev              # development app
 pnpm build            # typecheck + main/preload/renderer bundles
-pnpm build:win        # Windows installer; requires models in resources/models
-pnpm build:win:slim   # Windows installer without GGUF models
+pnpm build:win        # Windows installer
 ```
 
-`pnpm build:win` enforces the runtime-asset check (`resources:check`). The slim
-build skips that check; see `resources/README.md` for where to copy models after
-installation.
+After installing, open **Settings → API** and enter the base URL, API key (if
+any), chat model, and embedding model. The API must expose OpenAI-compatible
+`/v1/models`, chat completions, and embeddings. MiChat verifies the connection
+but never starts or manages the model server.
 
 ---
 
@@ -132,7 +133,7 @@ installation.
 
 ### ✅ Completed
 
-- Local llama.cpp chat and embedding models
+- External local OpenAI-compatible API integration
 - Structured note generation
 - Hierarchical, metadata-aware RAG with source citations
 - Multi-format document import (PDF / Word / PowerPoint / Excel / Markdown / Web)

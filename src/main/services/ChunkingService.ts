@@ -52,7 +52,7 @@ export interface ChunkResult {
 export class ChunkingService {
   private defaultOptions: Required<ChunkOptions> = {
     // Giữ kích thước đoạn an toàn để tránh vượt giới hạn token mỗi input của embedding server
-    // (ví dụ một số server llama.cpp cục bộ có thể từ chối input > 128 token)
+    // (ví dụ một số API cục bộ có thể từ chối input > 128 token)
     chunkSize: 300,
     chunkOverlap: 30,
     minChunkSize: 50,

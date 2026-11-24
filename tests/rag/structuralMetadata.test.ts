@@ -10,7 +10,7 @@ import {
 import { MarkdownNormalizer } from '../../src/main/services/MarkdownNormalizer'
 import type { Database } from '../../src/main/db'
 import type { KnowledgeService } from '../../src/main/services/KnowledgeService'
-import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+import type { EmbeddingResult } from '../../src/main/ai/types'
 
 type DbModule = typeof import('../../src/main/db')
 type SchemaModule = typeof import('../../src/main/db/schema')
@@ -226,7 +226,7 @@ function embedding(text: string): EmbeddingResult {
 }
 
 class FakeProviderManager {
-  async getActiveEmbeddingProvider() {
+  async getEmbeddingProvider() {
     return {
       createEmbedding: async (text: string) => embedding(text),
       createEmbeddings: async (texts: string[]) => texts.map(embedding),

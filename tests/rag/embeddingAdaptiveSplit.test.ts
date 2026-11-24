@@ -4,7 +4,7 @@ import { EmbeddingService } from '../../src/main/services/EmbeddingService'
 class OversizedInputProvider {
   public calls: string[] = []
 
-  async getActiveEmbeddingProvider() {
+  async getEmbeddingProvider() {
     const make = async (text: string) => {
       this.calls.push(text)
       if (text.length > 1200) {

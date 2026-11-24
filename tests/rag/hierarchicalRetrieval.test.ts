@@ -6,7 +6,7 @@ import type {
   KnowledgeService
 } from '../../src/main/services/KnowledgeService'
 import type { FetchResult } from '../../src/main/services/WebFetchService'
-import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+import type { EmbeddingResult } from '../../src/main/ai/types'
 
 type DbModule = typeof import('../../src/main/db')
 type SchemaModule = typeof import('../../src/main/db/schema')
@@ -64,7 +64,7 @@ function embedding(text: string): EmbeddingResult {
 }
 
 class FakeProviderManager {
-  async getActiveEmbeddingProvider() {
+  async getEmbeddingProvider() {
     return {
       createEmbedding: async (text: string) => embedding(text),
       createEmbeddings: async (texts: string[]) => texts.map(embedding),

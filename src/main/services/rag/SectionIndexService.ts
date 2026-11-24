@@ -17,7 +17,7 @@ import {
   sanitizeCompactSections,
   type CompactSection
 } from '../loaders/sections'
-import type { EmbeddingResult } from '../../providers/capabilities/EmbeddingCapability'
+import type { EmbeddingResult } from '../../ai/types'
 import {
   SECTION_INDEX_MAX_CHARS,
   extractLegalMetadata,

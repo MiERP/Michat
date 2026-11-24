@@ -5,10 +5,7 @@ import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
 import ExcelJS from 'exceljs'
 import type { DocumentMetadata, DocumentMetadataInspector } from '../../src/shared/legalMetadata'
 import type { DocumentStructureLike } from '../../src/main/services/KnowledgeService'
-import type {
-  EmbeddingConfig,
-  EmbeddingResult
-} from '../../src/main/providers/capabilities/EmbeddingCapability'
+import type { EmbeddingConfig, EmbeddingResult } from '../../src/main/ai/types'
 
 type KnowledgeServiceInternals = {
   embeddingService: {
@@ -81,7 +78,7 @@ class FakeProviderManager {
     }
   }
 
-  async getActiveEmbeddingProvider() {
+  async getEmbeddingProvider() {
     return {
       createEmbedding: async (text: string, config?: EmbeddingConfig) => {
         this.embeddingCalls.push(text)

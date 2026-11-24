@@ -36,8 +36,7 @@ export default function ProcessPanel({
   const { t } = useTranslation('ui')
   const [input, setInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
-  const [hasProvider, setHasProvider] = useState(true)
-  const [defaultChatModel, setDefaultChatModel] = useState<string | null>(null)
+  const [apiReady, setApiReady] = useState(false)
   const {
     currentSession,
     messages,
@@ -74,47 +73,28 @@ export default function ProcessPanel({
   const isCurrentNotebookStreaming = currentNotebookId
     ? isNotebookStreaming(currentNotebookId)
     : false
-  const canSend =
-    currentSession && !isCurrentNotebookStreaming && input.trim() && hasProvider && defaultChatModel
+  const canSend = currentSession && !isCurrentNotebookStreaming && input.trim() && apiReady
   const canStop = currentSession && isCurrentNotebookStreaming
 
-  // Check if there are available providers and get default model
-  const checkProvider = async (): Promise<void> => {
+  // Check whether the external API is configured.
+  const checkApiConfig = async (): Promise<void> => {
     try {
-      const providers = await window.api.getAllProviderConfigs()
-      const hasEnabledProvider = providers.some((p) => p.enabled)
-      setHasProvider(hasEnabledProvider)
-
-      // Get default chat model
-      const defaultModel = await window.api.settings.get('defaultChatModel')
-      setDefaultChatModel(defaultModel || null)
+      const config = await window.api.api.getConfig()
+      setApiReady(Boolean(config.baseUrl && config.chatModel))
     } catch (error) {
-      console.error('Failed to check Provider configuration:', error)
-      setHasProvider(false)
-      setDefaultChatModel(null)
+      console.error('Failed to read API configuration:', error)
+      setApiReady(false)
     }
   }
 
   // Add useEffect listeners
   useEffect(() => {
-    // 1. Check on page load
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void checkProvider()
+    void checkApiConfig()
 
-    // 2. Listen for Provider configuration change events
-    const cleanup = window.api.onProviderConfigChanged(() => {
-      void checkProvider()
+    return window.api.api.onConfigChanged(() => {
+      void checkApiConfig()
     })
-
-    // 3. Listen for settings change events
-    const cleanupSettings = window.api.settings.onSettingsChange((newSettings) => {
-      setDefaultChatModel(newSettings.defaultChatModel || null)
-    })
-
-    return () => {
-      cleanup()
-      cleanupSettings()
-    }
   }, [])
 
   const handleSend = (): void => {
@@ -364,15 +344,11 @@ export default function ProcessPanel({
             placeholder={
               !currentSession
                 ? t('selectSession')
-                : !hasProvider
-                  ? t('noProviderConfigured')
-                  : !defaultChatModel
-                    ? t('noDefaultModel')
-                    : t('inputMessage')
+                : !apiReady
+                  ? t('apiNotConfigured')
+                  : t('inputMessage')
             }
-            disabled={
-              !currentSession || isCurrentNotebookStreaming || !hasProvider || !defaultChatModel
-            }
+            disabled={!currentSession || isCurrentNotebookStreaming || !apiReady}
             rows={1}
             className="w-full bg-transparent border-0 pl-4 pr-14 py-3 text-sm text-foreground placeholder-muted-foreground resize-none focus-visible:ring-0 focus-visible:ring-offset-0 overflow-y-auto min-h-[84px] max-h-[280px]"
           />
@@ -395,9 +371,7 @@ export default function ProcessPanel({
             <Button
               onClick={handleSend}
               disabled={!canSend}
-              title={
-                !hasProvider ? t('noProviderConfigured') : !currentSession ? t('selectSession') : ''
-              }
+              title={!apiReady ? t('apiNotConfigured') : !currentSession ? t('selectSession') : ''}
               size="icon"
               className="absolute right-2 bottom-3 w-8 h-8 rounded-full"
             >

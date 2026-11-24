@@ -12,7 +12,7 @@ import { getDatabase, getSqlite } from '../db'
 import { documents, chunks, knowledgeLinks } from '../db/schema'
 import type { NewKnowledgeLink } from '../db/schema'
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import { ProviderManager } from '../providers/ProviderManager'
+import { ApiClient } from '../ai/apiClient'
 import Logger from '../../shared/utils/logger'
 
 const MAX_KEYWORDS = 10
@@ -32,17 +32,17 @@ export interface LinkInfo {
 }
 
 export class KnowledgeLinkService {
-  private providerManager: ProviderManager
+  private apiClient: ApiClient
 
-  constructor(providerManager: ProviderManager) {
-    this.providerManager = providerManager
+  constructor(apiClient: ApiClient) {
+    this.apiClient = apiClient
   }
 
   /**
    * Trích keyword bằng LLM (fallback: từ khóa từ tiêu đề nếu LLM lỗi)
    */
   private async extractKeywords(title: string, contentSnippet: string): Promise<string[]> {
-    const provider = await this.providerManager.getActiveChatProvider()
+    const provider = await this.apiClient.getChatProvider()
 
     if (provider) {
       try {

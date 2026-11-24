@@ -4,14 +4,14 @@
  */
 
 import { createHash } from 'crypto'
-import { ProviderManager } from '../providers/ProviderManager'
-import type { EmbeddingResult, EmbeddingConfig } from '../providers/types'
+import { ApiClient } from '../ai/apiClient'
+import type { EmbeddingResult, EmbeddingConfig } from '../ai/types'
 import Logger from '../../shared/utils/logger'
 import { REQUIRED_EMBEDDING_DIMENSIONS } from '../../shared/types/knowledge'
 
 /**
  * Texts longer than this are split before hitting the embedding server. The
- * local llama.cpp embedding batch must hold a whole input; splitting here avoids
+ * local API embedding batch must hold a whole input; splitting here avoids
  * a failed round-trip for documents, enrichment summaries, etc.
  */
 const MAX_EMBED_TEXT_CHARS = 1200
@@ -33,15 +33,15 @@ export interface EmbeddingServiceConfig {
  * Đóng gói logic tạo vector embedding, hỗ trợ xử lý theo lô, retry và kiểm soát tốc độ
  */
 export class EmbeddingService {
-  private providerManager: ProviderManager
+  private apiClient: ApiClient
   private config: Required<EmbeddingServiceConfig>
   private cache = new Map<string, EmbeddingResult>()
   private cacheHits = 0
   private cacheMisses = 0
   private probedDimensions: number | null = null
 
-  constructor(providerManager: ProviderManager, config?: EmbeddingServiceConfig) {
-    this.providerManager = providerManager
+  constructor(apiClient: ApiClient, config?: EmbeddingServiceConfig) {
+    this.apiClient = apiClient
     this.config = {
       batchSize: config?.batchSize ?? 20,
       maxRetries: config?.maxRetries ?? 3,
@@ -49,6 +49,18 @@ export class EmbeddingService {
       rateLimit: config?.rateLimit ?? 100,
       cacheEnabled: config?.cacheEnabled ?? true,
       cacheMaxEntries: config?.cacheMaxEntries ?? 4096
+    }
+  }
+
+  /**
+   * Fail early with an actionable message when the embedding API is missing.
+   */
+  async assertReady(): Promise<void> {
+    const provider = await this.apiClient.getEmbeddingProvider()
+    if (!provider) {
+      throw new Error(
+        'Embedding API is not configured. Set the API base URL and embedding model in Settings > API.'
+      )
     }
   }
 
@@ -117,10 +129,12 @@ export class EmbeddingService {
    * Tạo embedding cho một đoạn văn bản
    */
   async embed(text: string, config?: EmbeddingConfig): Promise<EmbeddingResult> {
-    const provider = await this.providerManager.getActiveEmbeddingProvider()
+    const provider = await this.apiClient.getEmbeddingProvider()
 
     if (!provider) {
-      throw new Error('No embedding provider available')
+      throw new Error(
+        'Embedding API is not configured. Set the API base URL and embedding model in Settings > API.'
+      )
     }
 
     const model = provider.getDefaultEmbeddingModel()
@@ -151,7 +165,7 @@ export class EmbeddingService {
       return []
     }
 
-    const provider = await this.providerManager.getActiveEmbeddingProvider()
+    const provider = await this.apiClient.getEmbeddingProvider()
 
     if (!provider) {
       throw new Error('No embedding provider available')
@@ -212,7 +226,7 @@ export class EmbeddingService {
    * Embed lô text chưa có trong cache (giữ nguyên hành vi batch/retry cũ)
    */
   private async embedBatchUncached(
-    provider: NonNullable<Awaited<ReturnType<ProviderManager['getActiveEmbeddingProvider']>>>,
+    provider: NonNullable<Awaited<ReturnType<ApiClient['getEmbeddingProvider']>>>,
     texts: string[],
     config?: EmbeddingConfig,
     onProgress?: (completed: number, total: number) => void
@@ -252,7 +266,7 @@ export class EmbeddingService {
    * Lấy mô hình Embedding mặc định của provider hiện tại
    */
   async getDefaultModel(): Promise<string | undefined> {
-    const provider = await this.providerManager.getActiveEmbeddingProvider()
+    const provider = await this.apiClient.getEmbeddingProvider()
     return provider?.getDefaultEmbeddingModel()
   }
 
@@ -260,7 +274,7 @@ export class EmbeddingService {
    * Kiểm tra provider hiện tại có hỗ trợ Embedding hay không
    */
   async isAvailable(): Promise<boolean> {
-    const provider = await this.providerManager.getActiveEmbeddingProvider()
+    const provider = await this.apiClient.getEmbeddingProvider()
     return provider !== null
   }
 
@@ -288,7 +302,7 @@ export class EmbeddingService {
    * sau đó gộp vector bằng trung bình đơn giản.
    */
   private async embedBatchWithAdaptiveSplit(
-    provider: NonNullable<Awaited<ReturnType<ProviderManager['getActiveEmbeddingProvider']>>>,
+    provider: NonNullable<Awaited<ReturnType<ApiClient['getEmbeddingProvider']>>>,
     texts: string[],
     config?: EmbeddingConfig
   ): Promise<EmbeddingResult[]> {
@@ -313,7 +327,7 @@ export class EmbeddingService {
   }
 
   private async embedSingleWithAdaptiveSplit(
-    provider: NonNullable<Awaited<ReturnType<ProviderManager['getActiveEmbeddingProvider']>>>,
+    provider: NonNullable<Awaited<ReturnType<ApiClient['getEmbeddingProvider']>>>,
     text: string,
     config?: EmbeddingConfig,
     depth = 0
@@ -362,7 +376,7 @@ export class EmbeddingService {
   }
 
   private async poolEmbeddings(
-    provider: NonNullable<Awaited<ReturnType<ProviderManager['getActiveEmbeddingProvider']>>>,
+    provider: NonNullable<Awaited<ReturnType<ApiClient['getEmbeddingProvider']>>>,
     parts: [string, string],
     config: EmbeddingConfig | undefined,
     depth: number

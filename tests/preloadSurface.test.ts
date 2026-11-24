@@ -47,6 +47,8 @@ describe('preload surface', () => {
     expect(api.ipcRenderer).toBeUndefined()
     expect(api.electron).toBeUndefined()
     expect(typeof (api.shortcuts as Record<string, unknown>).getAll).toBe('function')
+    expect(typeof (api.api as Record<string, unknown>).getConfig).toBe('function')
+    expect(api.llama).toBeUndefined()
   })
 
   it('routes shortcut calls through the curated shortcuts API', async () => {

@@ -1,19 +1,22 @@
 /**
- * AI SDK Provider
- * Local llama.cpp servers exposed through the OpenAI-compatible provider.
+ * OpenAI-compatible client
+ * Talks to a local API exposed by another application.
  */
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { streamText, embed, embedMany } from 'ai'
 import type { LanguageModel } from 'ai'
-import type { BaseProvider, LLMProviderConfig } from '../capabilities/BaseProvider'
-import type { ChatCapability } from '../capabilities/ChatCapability'
-import type { EmbeddingCapability } from '../capabilities/EmbeddingCapability'
-import type { APIMessage, StreamChunk } from '../../../shared/types/chat'
-import type { EmbeddingConfig, EmbeddingResult } from '../capabilities/EmbeddingCapability'
-import type { ProviderDescriptor } from '../registry/ProviderDescriptor'
-import Logger from '../../../shared/utils/logger'
-import { assertLoopbackHttpUrl } from '../../security/guards'
+import type {
+  ChatClientDescriptor,
+  ChatProvider,
+  ClientConfig,
+  EmbeddingConfig,
+  EmbeddingProvider,
+  EmbeddingResult
+} from './types'
+import type { APIMessage, StreamChunk } from '../../shared/types/chat'
+import Logger from '../../shared/utils/logger'
+import { assertLoopbackHttpUrl } from '../security/guards'
 
 const CONTROL_CHARS_PATTERN = new RegExp(
   '[' +
@@ -45,22 +48,21 @@ function sanitizeMessageContent(content: string): string {
 }
 
 /**
- * AISDKProvider
- * Unified Provider implementation backed by the Vercel AI SDK
- * Provider backed by the Vercel AI SDK; model selection comes from ProviderDescriptor.
+ * OpenAICompatibleClient
+ * Client backed by the Vercel AI SDK; model selection comes from ChatClientDescriptor.
  */
-export class AISDKProvider implements BaseProvider {
+export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
   readonly name: string
-  private descriptor: ProviderDescriptor
-  protected config: LLMProviderConfig
+  private descriptor: ChatClientDescriptor
+  protected config: ClientConfig
 
-  // AI SDK provider instance (OpenAI-compatible llama.cpp server).
+  // AI SDK provider instance for the external OpenAI-compatible API.
   private aiProvider: ReturnType<typeof createOpenAICompatible> | null = null
 
   // Optional separate provider instance for embeddings (useful when embedding server runs on different baseUrl)
   private aiProviderEmbed: ReturnType<typeof createOpenAICompatible> | null = null
 
-  constructor(descriptor: ProviderDescriptor) {
+  constructor(descriptor: ChatClientDescriptor) {
     this.name = descriptor.name
     this.descriptor = descriptor
 
@@ -72,34 +74,29 @@ export class AISDKProvider implements BaseProvider {
       maxTokens: 2048
     }
 
-    Logger.info('AISDKProvider', `Provider ${this.name} initialized`)
+    Logger.info('OpenAICompatibleClient', `Provider ${this.name} initialized`)
   }
 
   /**
    * Configure the Provider
    */
-  configure(config: LLMProviderConfig): void {
+  configure(config: ClientConfig): void {
     this.config = { ...this.config, ...config }
 
     // Reset embed client each time we reconfigure
     this.aiProviderEmbed = null
 
-    // Recreate the AI SDK provider instance
-    // NOTE:
-    // - Some local OpenAI-compatible servers (e.g. llama.cpp server) do not require an API key.
-    // - Previously we only created the underlying AI SDK provider when apiKey exists (or Ollama).
-    //   That makes keyless local servers unusable.
-    // Only local llama.cpp providers are registered; both expose an
-    // OpenAI-compatible API and do not require an API key.
+    // Recreate the AI SDK provider instance. The external API may be keyless.
     this.aiProvider = createOpenAICompatible({
       name: this.name,
       baseURL: this.config.baseUrl || '',
       apiKey: config.apiKey || ''
     })
 
-    // If embedding server uses a different base URL (e.g., llama.cpp on :8001),
-    // create a dedicated embedding client.
-    const embedBaseUrl = this.config.baseUrlembed || this.config.embeddingBaseUrl
+    // Optional separate base URL for embeddings.
+    const embedBaseUrl = (this.config.baseUrlembed || this.config.embeddingBaseUrl) as
+      | string
+      | undefined
     if (embedBaseUrl && embedBaseUrl !== this.config.baseUrl) {
       this.aiProviderEmbed = createOpenAICompatible({
         name: `${this.name}-embed`,
@@ -110,15 +107,15 @@ export class AISDKProvider implements BaseProvider {
       this.aiProviderEmbed = null
     }
 
-    Logger.debug('AISDKProvider', `Provider ${this.name} configured`)
+    Logger.debug('OpenAICompatibleClient', `Provider ${this.name} configured`)
   }
 
   /**
    * Validate that the configured endpoint answers /models.
    */
-  async validateConfig(config: LLMProviderConfig): Promise<boolean> {
+  async validateConfig(config: ClientConfig): Promise<boolean> {
     try {
-      const baseUrl = assertLoopbackHttpUrl(config.baseUrl || '', 'Provider base URL')
+      const baseUrl = assertLoopbackHttpUrl(config.baseUrl || '', 'API base URL')
       const headers: Record<string, string> = {}
       if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
       const response = await fetch(`${baseUrl.toString().replace(/\/$/, '')}/models`, {
@@ -137,7 +134,7 @@ export class AISDKProvider implements BaseProvider {
    * Stream a chat completion and report chunks through callbacks.
    * TypeScript type guard
    */
-  hasChatCapability(): this is BaseProvider & ChatCapability {
+  hasChatCapability(): this is ChatProvider {
     return this.descriptor.capabilities.chat && this.aiProvider !== null
   }
 
@@ -145,13 +142,9 @@ export class AISDKProvider implements BaseProvider {
    * Type guard for the embedding capability.
    * TypeScript type guard
    */
-  hasEmbeddingCapability(): this is BaseProvider & EmbeddingCapability {
-    // Some local OpenAI-compatible servers (e.g. llama.cpp) may be able to serve embeddings even if
-    // the descriptor capability flag is stale (older builds). Make llama robust by allowing it.
+  hasEmbeddingCapability(): this is EmbeddingProvider {
     if (this.aiProvider === null) return false
-    if (this.descriptor.capabilities.embedding) return true
-    // Fallback: allow embeddings for llama providers when configured.
-    return this.name === 'llama' || this.name === 'llama-embed'
+    return this.descriptor.capabilities.embedding
   }
 
   // ==================== Embedding capability ====================
@@ -168,7 +161,7 @@ export class AISDKProvider implements BaseProvider {
   ): Promise<AbortController> {
     if (!this.aiProvider) {
       const error = new Error(
-        `Provider ${this.name} is not configured. Please configure API key first.`
+        `API client ${this.name} is not configured. Set the base URL and models in Settings > API.`
       )
       onError(error)
       const abortController = new AbortController()
@@ -177,7 +170,7 @@ export class AISDKProvider implements BaseProvider {
     }
 
     if (!this.descriptor.capabilities.chat) {
-      const error = new Error(`Provider ${this.name} does not support chat capability`)
+      const error = new Error(`API client ${this.name} does not support chat capability`)
       onError(error)
       const abortController = new AbortController()
       abortController.abort()
@@ -190,9 +183,9 @@ export class AISDKProvider implements BaseProvider {
     // Run streaming generation asynchronously
     ;(async () => {
       const modelId = this.config.model || this.descriptor.defaultChatModel!
-      const emitReasoningChunks = this.name !== 'llama' && this.name !== 'llama-embed'
+      const emitReasoningChunks = true
       try {
-        Logger.debug('AISDKProvider', `Streaming with model: ${modelId}`)
+        Logger.debug('OpenAICompatibleClient', `Streaming with model: ${modelId}`)
 
         // Convert messages to the AI SDK core format.
         const coreMessages = convertToCoreMessages(messages)
@@ -213,7 +206,7 @@ export class AISDKProvider implements BaseProvider {
         // fullStream carries text, reasoning, usage and error parts.
         for await (const part of result.fullStream) {
           if (abortController.signal.aborted) {
-            Logger.debug('AISDKProvider', 'Stream aborted by user')
+            Logger.debug('OpenAICompatibleClient', 'Stream aborted by user')
             break
           }
 
@@ -270,13 +263,13 @@ export class AISDKProvider implements BaseProvider {
 
             case 'tool-call': {
               const toolName = (part as { toolName?: string }).toolName
-              Logger.info('AISDKProvider', `Tool call: ${toolName ?? 'unknown'}`)
+              Logger.info('OpenAICompatibleClient', `Tool call: ${toolName ?? 'unknown'}`)
               break
             }
 
             case 'tool-result': {
               const toolName = (part as { toolName?: string }).toolName
-              Logger.debug('AISDKProvider', `Tool result: ${toolName ?? 'unknown'}`)
+              Logger.debug('OpenAICompatibleClient', `Tool result: ${toolName ?? 'unknown'}`)
               break
             }
 
@@ -313,10 +306,10 @@ export class AISDKProvider implements BaseProvider {
         onComplete()
       } catch (error) {
         if (abortController.signal.aborted) {
-          Logger.debug('AISDKProvider', 'Stream aborted')
+          Logger.debug('OpenAICompatibleClient', 'Stream aborted')
           onComplete()
         } else {
-          Logger.error('AISDKProvider', 'Stream error:', error)
+          Logger.error('OpenAICompatibleClient', 'Stream error:', error)
           const normalizedError = this.normalizeChatStreamError(error, modelId)
           onError(normalizedError)
         }
@@ -346,7 +339,7 @@ export class AISDKProvider implements BaseProvider {
     }
     const model = modelId || this.config.model || this.descriptor.defaultChatModel
     if (!model) {
-      throw new Error(`No model specified for provider ${this.name}`)
+      throw new Error(`No chat model configured for ${this.name}`)
     }
     return this.aiProvider(model)
   }
@@ -363,17 +356,17 @@ export class AISDKProvider implements BaseProvider {
     }
 
     if (!this.descriptor.capabilities.embedding) {
-      throw new Error(`Provider ${this.name} does not support embedding capability`)
+      throw new Error(`API client ${this.name} does not support embedding capability`)
     }
 
     const modelId =
       config?.model || this.config.model || this.descriptor.defaultEmbeddingModel || ''
 
     if (!modelId) {
-      throw new Error(`No embedding model specified for provider ${this.name}`)
+      throw new Error(`No embedding model configured for ${this.name}`)
     }
 
-    Logger.debug('AISDKProvider', `Creating embedding with model: ${modelId}`)
+    Logger.debug('OpenAICompatibleClient', `Creating embedding with model: ${modelId}`)
 
     // Use the AI SDK embed function
     // Different providers use different method names
@@ -422,7 +415,7 @@ export class AISDKProvider implements BaseProvider {
     }
 
     Logger.debug(
-      'AISDKProvider',
+      'OpenAICompatibleClient',
       `Creating embeddings for ${texts.length} texts with model: ${modelId}`
     )
 
@@ -464,7 +457,6 @@ export class AISDKProvider implements BaseProvider {
   }
 
   /**
-   * Build provider-specific options
    * Build provider-specific options for embedding requests.
    */
   private buildProviderOptions(
@@ -474,23 +466,8 @@ export class AISDKProvider implements BaseProvider {
       return undefined
     }
 
-    // Providers that support the dimensions parameter (allowlist)
-    const supportedProviders = ['openai', 'deepseek', 'zhipu', 'siliconflow', 'openai-compatible']
-
-    if (!supportedProviders.includes(this.name)) {
-      Logger.debug(
-        'AISDKProvider',
-        `Provider ${this.name} does not support dimensions parameter, ignoring`
-      )
-      return undefined
-    }
-
-    // OpenAI-compatible providers use the 'openai' provider key; SiliconFlow is mapped below.
-    // SiliconFlow uses 'openai' as the providerKey
-    const providerKey = this.name === 'siliconflow' ? 'openai' : this.name
-
     return {
-      [providerKey]: {
+      [this.name]: {
         dimensions: config.dimensions
       }
     }
@@ -505,33 +482,30 @@ export class AISDKProvider implements BaseProvider {
       )
     )
 
-    if (noLogitsError && (this.name === 'llama' || this.name === 'llama-embed')) {
+    if (noLogitsError) {
       const baseUrl = this.config.baseUrl || ''
       return new Error(
         [
-          'llama.cpp chat server cannot generate logits.',
+          'The configured API cannot generate logits for this request.',
           `Current model: ${modelId}`,
           `Current baseUrl: ${baseUrl || '(empty)'}`,
-          'Likely causes:',
-          '1) Chat is pointing to embedding server (usually :8001 instead of :8000).',
-          '2) An embedding-only model is selected as chat model.',
-          'Please set a chat/instruct model for chat and use chat endpoint (default: http://127.0.0.1:8000/v1).'
+          'Check that the chat model is a chat/instruct model (not an embedding-only model).'
         ].join(' ')
       )
     }
 
     const connectionRefused = messages.some((message) =>
-      /ECONNREFUSED|connect\s+econnrefused|127\.0\.0\.1:8000/i.test(message)
+      /ECONNREFUSED|connect\s+econnrefused/i.test(message)
     )
 
-    if (connectionRefused && (this.name === 'llama' || this.name === 'llama-embed')) {
-      const baseUrl = this.config.baseUrl || 'http://127.0.0.1:8000/v1'
+    if (connectionRefused) {
+      const baseUrl = this.config.baseUrl || ''
       return new Error(
         [
-          'Cannot connect to local llama.cpp chat server.',
-          `Target endpoint: ${baseUrl}`,
+          'Cannot connect to the configured local API.',
+          `Target endpoint: ${baseUrl || '(empty)'}`,
           `Current model: ${modelId}`,
-          'The local server may have stopped or not started yet. Please verify llama-server is running on port 8000.'
+          'Check that the API application is running and that Settings > API points at its address.'
         ].join(' ')
       )
     }
@@ -545,7 +519,7 @@ export class AISDKProvider implements BaseProvider {
           `Current model: ${modelId}`,
           `Current baseUrl: ${baseUrl || '(empty)'}`,
           'Likely causes: upstream stream error, prompt too large, or invalid control characters in context.',
-          'Please check llama-server stderr logs for the first upstream error line.'
+          'Check the API application logs for the first upstream error line.'
         ].join(' ')
       )
     }

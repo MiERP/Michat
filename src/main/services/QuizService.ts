@@ -18,8 +18,8 @@ import type { Quiz, NewQuiz, QuizSession, NewQuizSession, NewChunkFeedback } fro
 import type { KnowledgeService } from './KnowledgeService'
 import type { QuizQuestion, QuizGenerationResult } from '../../shared/types/quiz'
 import { eq, desc, and, inArray } from 'drizzle-orm'
-import { ProviderManager } from '../providers/ProviderManager'
-import { AISDKProvider } from '../providers/base/AISDKProvider'
+import { ApiClient } from '../ai/apiClient'
+import { OpenAICompatibleClient } from '../ai/OpenAICompatibleClient'
 import { generateText } from 'ai'
 import type { LanguageModel } from 'ai'
 import { z } from 'zod'
@@ -57,7 +57,7 @@ function getQualityMode(): QualityMode {
 
 /**
  * Hẹn giờ cho promise generation kèm AbortSignal — khi hết giờ, huỷ luôn
- * request đang chạy để llama-server không tiếp tục ngốn slot (gây xếp hàng).
+ * request đang chạy để API không tiếp tục ngốn slot (gây xếp hàng).
  */
 function withAbortTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
   const controller = new AbortController()
@@ -179,7 +179,7 @@ function createQuizSchema(questionCount: number) {
  */
 export class QuizService {
   constructor(
-    private providerManager: ProviderManager,
+    private apiClient: ApiClient,
     private knowledgeService: KnowledgeService,
     private getChatContextSize?: () => number
   ) {}
@@ -251,7 +251,7 @@ export class QuizService {
   /**
    * Call the LLM to generate questions (runs batches sequentially — streamObject
    * reports progress and allows cancellation on timeout; batches do not run in
-   * parallel because the local llama-server is single-slot, so parallel batches
+   * parallel because the local API is single-slot, so parallel batches
    * would only queue behind each other).
    */
   private async callLLMForGeneration(
@@ -259,12 +259,12 @@ export class QuizService {
     options?: QuizGenerationOptions,
     onProgress?: QuizProgressCallback
   ): Promise<QuizGenerationResult> {
-    const provider = await this.providerManager.getActiveChatProvider()
+    const provider = await this.apiClient.getChatProvider()
     if (!provider) {
       throw new Error('No chat model available, please configure an LLM provider first')
     }
 
-    if (!(provider instanceof AISDKProvider)) {
+    if (!(provider instanceof OpenAICompatibleClient)) {
       throw new Error('The current provider does not support structured output')
     }
 
@@ -368,7 +368,7 @@ export class QuizService {
         return `${next}${correction}\n\nChỉ trả về một đối tượng JSON hợp lệ theo đúng định dạng trên; không markdown, không giải thích, không thêm chữ nào khác.`
       }
 
-      // Keep the prompt inside the model context; otherwise llama.cpp rejects
+      // Keep the prompt inside the model context; otherwise the API rejects
       // the whole request (or generates nothing) on 8k-context models.
       let contentForBatch = contentPart
       let prompt = buildPrompt(contentForBatch)
@@ -629,7 +629,7 @@ export class QuizService {
           questionsData: validatedResult.questions,
           chunkMapping,
           metadata: {
-            model: (await this.providerManager.getActiveChatProvider())?.name || 'unknown',
+            model: (await this.apiClient.getChatProvider())?.getDefaultChatModel() || 'unknown',
             totalQuestions: validatedResult.metadata.totalQuestions,
             generationTime
           },

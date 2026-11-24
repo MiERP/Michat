@@ -42,61 +42,6 @@ export interface Note {
 }
 
 /**
- * Provider configuration interface
- */
-export interface ProviderConfig {
-  providerName: string
-  config: Record<string, unknown>
-  enabled: boolean
-  updatedAt: number
-}
-
-/** Renderer-safe provider view: never contains the stored API key. */
-export interface PublicProviderConfig {
-  providerName: string
-  config: Record<string, unknown>
-  enabled: boolean
-  updatedAt: number
-  hasApiKey: boolean
-}
-
-/**
- * Model type enum
- */
-export enum ModelType {
-  CHAT = 'chat',
-  EMBEDDING = 'embedding',
-  RERANKER = 'reranker',
-  IMAGE = 'image',
-  AUDIO = 'audio',
-  VIDEO = 'video',
-  UNKNOWN = 'unknown'
-}
-
-/**
- * Model interface
- */
-export interface Model {
-  id: string
-  object: string
-  owned_by?: string
-  created?: number
-  type?: ModelType
-  max_context?: number // Maximum context length (from built-in configuration)
-  description?: string // Model description (from built-in configuration)
-}
-
-/**
- * Categorized model list interface
- */
-export interface CategorizedModels {
-  chat: Model[]
-  embedding: Model[]
-  reranker: Model[]
-  other: Model[]
-}
-
-/**
  * Application settings interface
  */
 export interface AppSettings {
@@ -104,8 +49,6 @@ export interface AppSettings {
   language: 'vi-VN' | 'en-US'
   autoLaunch: boolean
   hasCompletedOnboarding: boolean
-  defaultChatModel?: string // Default chat model
-  defaultEmbeddingModel?: string // Default embedding model
   rerankEnabled?: boolean
   rerankTopN?: number
   rerankUseHeuristicFallback?: boolean

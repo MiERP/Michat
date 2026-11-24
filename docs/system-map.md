@@ -3,6 +3,12 @@
 > Historical snapshot (2026-05-04). Office assistant, mind maps, React Flow and
 > cloud-provider sections below are obsolete; use README and the current source
 > as the source of truth.
+>
+> API-only update (2026-11-24): the provider registry and llama.cpp runtime were
+> removed. MiChat now talks to one external local OpenAI-compatible API through
+> `src/main/ai/`. Any references to `LlamaService`, `ProviderManager`, model
+> import/selection, or bundled GGUF files below describe the previous
+> architecture.
 
 ## Snapshot
 - Updated at: `2026-05-04`

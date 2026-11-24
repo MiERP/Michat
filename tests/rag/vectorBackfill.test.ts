@@ -3,7 +3,7 @@ import { createTempUserData, closeAndRemove } from '../helpers/tempUserData'
 import type { Database } from '../../src/main/db'
 import type { KnowledgeService } from '../../src/main/services/KnowledgeService'
 import type { BackgroundJobService } from '../../src/main/services/BackgroundJobService'
-import type { EmbeddingResult } from '../../src/main/providers/capabilities/EmbeddingCapability'
+import type { EmbeddingResult } from '../../src/main/ai/types'
 
 type DbModule = typeof import('../../src/main/db')
 type SchemaModule = typeof import('../../src/main/db/schema')
@@ -44,7 +44,7 @@ function embedding(text: string): EmbeddingResult {
 }
 
 class FakeProviderManager {
-  async getActiveEmbeddingProvider() {
+  async getEmbeddingProvider() {
     return {
       createEmbedding: async (text: string) => embedding(text),
       createEmbeddings: async (texts: string[]) => texts.map(embedding),

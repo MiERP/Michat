@@ -621,7 +621,7 @@ export default function SourcePanel(): ReactElement {
   const { id: notebookId } = useParams()
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [modalType, setModalType] = useState<AddSourceType | null>(null)
-  const [defaultEmbeddingModel, setDefaultEmbeddingModel] = useState<string | undefined>(undefined)
+  const [hasEmbeddingApi, setHasEmbeddingApi] = useState(false)
   const [openedDocument, setOpenedDocument] = useState<KnowledgeDocument | null>(null)
   const [metadataDocument, setMetadataDocument] = useState<KnowledgeDocument | null>(null)
   const [isLegalMetadataOpen, setIsLegalMetadataOpen] = useState(false)
@@ -650,20 +650,17 @@ export default function SourcePanel(): ReactElement {
   const inspectedDocument =
     documents.find((document) => document.id === inspectedDocumentId) || null
 
-  // Load the default embedding model setting
+  // Track whether an embedding API is configured.
   useEffect(() => {
-    const loadEmbeddingModel = async () => {
-      const model = await window.api.settings.get('defaultEmbeddingModel')
-      setDefaultEmbeddingModel(model)
+    const loadApiConfig = async () => {
+      const config = await window.api.api.getConfig()
+      setHasEmbeddingApi(Boolean(config.baseUrl && config.embeddingModel))
     }
-    loadEmbeddingModel()
+    void loadApiConfig()
 
-    // Listen for settings changes
-    const unsubscribe = window.api.settings.onSettingsChange((newSettings) => {
-      setDefaultEmbeddingModel(newSettings.defaultEmbeddingModel)
+    return window.api.api.onConfigChanged(() => {
+      void loadApiConfig()
     })
-
-    return unsubscribe
   }, [])
 
   // Set up listeners
@@ -721,7 +718,7 @@ export default function SourcePanel(): ReactElement {
     if (!notebookId) return
 
     // Check whether a default embedding model is configured
-    if (!defaultEmbeddingModel) {
+    if (!hasEmbeddingApi) {
       alert(t('noEmbeddingModelConfigured'))
       return
     }
@@ -731,13 +728,13 @@ export default function SourcePanel(): ReactElement {
       await addDocumentFromFile(notebookId, filePath)
     }
     setShowAddMenu(false)
-  }, [notebookId, defaultEmbeddingModel, selectFiles, addDocumentFromFile, t])
+  }, [notebookId, hasEmbeddingApi, selectFiles, addDocumentFromFile, t])
 
   // Handle folder upload
   const handleFolderUpload = useCallback(async () => {
     if (!notebookId) return
 
-    if (!defaultEmbeddingModel) {
+    if (!hasEmbeddingApi) {
       alert(t('noEmbeddingModelConfigured'))
       return
     }
@@ -760,7 +757,7 @@ export default function SourcePanel(): ReactElement {
     }
 
     setShowAddMenu(false)
-  }, [notebookId, defaultEmbeddingModel, selectFolder, addDocumentsFromFolder, t, setShowAddMenu])
+  }, [notebookId, hasEmbeddingApi, selectFolder, addDocumentsFromFolder, t, setShowAddMenu])
 
   // Handle text paste
   const handleTextPaste = useCallback(
@@ -768,7 +765,7 @@ export default function SourcePanel(): ReactElement {
       if (!notebookId || !data.title || !data.content) return
 
       // Check whether a default embedding model is configured
-      if (!defaultEmbeddingModel) {
+      if (!hasEmbeddingApi) {
         alert(t('noEmbeddingModelConfigured'))
         setModalType(null)
         return
@@ -781,7 +778,7 @@ export default function SourcePanel(): ReactElement {
       })
       setModalType(null)
     },
-    [notebookId, defaultEmbeddingModel, addDocument, t]
+    [notebookId, hasEmbeddingApi, addDocument, t]
   )
 
   const handleUrlImport = useCallback(
@@ -800,7 +797,7 @@ export default function SourcePanel(): ReactElement {
       if (!notebookId || !data.noteId) return
 
       // Check whether a default embedding model is configured
-      if (!defaultEmbeddingModel) {
+      if (!hasEmbeddingApi) {
         alert(t('noEmbeddingModelConfigured'))
         setModalType(null)
         return
@@ -820,7 +817,7 @@ export default function SourcePanel(): ReactElement {
         setModalType(null)
       }
     },
-    [notebookId, defaultEmbeddingModel, addNoteToKnowledge, t]
+    [notebookId, hasEmbeddingApi, addNoteToKnowledge, t]
   )
 
   // Handle document deletion
@@ -942,11 +939,11 @@ export default function SourcePanel(): ReactElement {
               >
                 <Button
                   onClick={() => setShowAddMenu(!showAddMenu)}
-                  disabled={!defaultEmbeddingModel}
+                  disabled={!hasEmbeddingApi}
                   variant="ghost"
                   size="icon"
                   className="w-8 h-8"
-                  title={!defaultEmbeddingModel ? t('noEmbeddingModelConfigured') : t('addSource')}
+                  title={!hasEmbeddingApi ? t('noEmbeddingModelConfigured') : t('addSource')}
                 >
                   <Plus className="w-4 h-4" />
                 </Button>
@@ -1022,7 +1019,7 @@ export default function SourcePanel(): ReactElement {
               <ScrollArea className="min-h-0 flex-1">
                 <DocumentList
                   documents={documents}
-                  hasEmbeddingModel={!!defaultEmbeddingModel}
+                  hasEmbeddingModel={!!hasEmbeddingApi}
                   selectedDocumentId={inspectedDocumentId}
                   onDeleteDocument={handleDelete}
                   onSelectDocument={handleInspectDocument}

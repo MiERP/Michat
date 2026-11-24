@@ -1,9 +1,8 @@
 import { ipcMain } from 'electron'
 import * as queries from '../db/queries'
-import { ProviderManager } from '../providers/ProviderManager'
+import { ApiClient } from '../ai/apiClient'
 import { SessionAutoSwitchService } from '../services/SessionAutoSwitchService'
 import { KnowledgeService } from '../services/KnowledgeService'
-import { LlamaService } from '../services/LlamaService'
 import { validateAndCleanMessages } from '../utils/messageValidator'
 import { settingsManager } from '../config'
 import { markActive } from '../utils/activityTracker'
@@ -291,10 +290,9 @@ function buildCitations(
  * Register chat-related IPC Handlers
  */
 export function registerChatHandlers(
-  providerManager: ProviderManager,
+  apiClient: ApiClient,
   sessionAutoSwitchService: SessionAutoSwitchService,
-  knowledgeService: KnowledgeService,
-  llamaService: LlamaService
+  knowledgeService: KnowledgeService
 ) {
   // ==================== Chat Session ====================
   ipcMain.handle(
@@ -355,24 +353,12 @@ export function registerChatHandlers(
 
       // Fail before writing rows so the renderer never receives an error for a
       // placeholder it has not seen yet.
-      const provider = await providerManager.getActiveChatProvider()
+      const provider = await apiClient.getChatProvider()
       if (!provider) {
         return {
           messageId: '',
-          error: 'AI Provider not configured, please configure in settings'
-        }
-      }
-
-      const providerName = String(provider.name || '').toLowerCase()
-      const isLlamaChat = providerName === 'llama' || providerName === 'llama-embed'
-      if (isLlamaChat) {
-        const chatReady = await llamaService.ensureChatStarted()
-        if (!chatReady) {
-          return {
-            messageId: '',
-            error:
-              'Local llama chat server is unavailable. Please check llama binary/model configuration and try again.'
-          }
+          error:
+            'Chat API is not configured. Set the API base URL and chat model in Settings > API.'
         }
       }
 
@@ -446,9 +432,7 @@ export function registerChatHandlers(
       // Skip RAG only for chit-chat or very short queries.
       try {
         const effectiveSettings = (settings || {}) as Partial<AppSettings>
-        const hasEmbeddingModel =
-          effectiveSettings.defaultEmbeddingModel &&
-          effectiveSettings.defaultEmbeddingModel.includes(':')
+        const hasEmbeddingModel = Boolean(await apiClient.getEmbeddingProvider())
         const ragTopK = Math.min(Math.max(effectiveSettings.ragTopK ?? 3, 1), 8)
         const ragThreshold = Math.min(Math.max(effectiveSettings.ragThreshold ?? 0.62, 0), 1)
         const shortQueryLength = Math.min(

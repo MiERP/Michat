@@ -41,7 +41,7 @@ export function installWebContentsGuards(app: App): void {
   })
 }
 
-/** Only one app instance may own the SQLite database and llama servers. */
+/** Only one app instance may own the SQLite database. */
 export function enforceSingleInstance(app: App): boolean {
   const acquired = app.requestSingleInstanceLock()
   if (!acquired) {

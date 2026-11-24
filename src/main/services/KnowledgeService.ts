@@ -18,8 +18,7 @@ import { ParserWorkerClient } from './import/ParserWorkerClient'
 import { SectionIndexService } from './rag/SectionIndexService'
 import { MarkdownNormalizer } from './MarkdownNormalizer'
 import { RerankService } from './RerankService'
-import { ProviderManager } from '../providers/ProviderManager'
-import { LlamaService } from './LlamaService'
+import { ApiClient } from '../ai/apiClient'
 import { DocumentMetadataIndexService } from './DocumentMetadataIndexService'
 import type { DocumentMetadata } from './DocumentMetadataExtractionService'
 import { WebFetchService } from './WebFetchService'
@@ -75,8 +74,8 @@ export class KnowledgeService {
   private documentService: KnowledgeDocumentService
   private autoSyncService: KnowledgeAutoSyncService
 
-  constructor(providerManager: ProviderManager, llamaService?: LlamaService) {
-    this.embeddingService = new EmbeddingService(providerManager)
+  constructor(apiClient: ApiClient) {
+    this.embeddingService = new EmbeddingService(apiClient)
     const chunkingService = new ChunkingService()
     const fileParserService = new FileParserService()
     this.parserWorker = new ParserWorkerClient()
@@ -88,7 +87,7 @@ export class KnowledgeService {
     const metadataIndexService = new DocumentMetadataIndexService()
     this.webFetchService = new WebFetchService()
     this.fileStore = new KnowledgeFileStore(join(app.getPath('userData'), 'knowledge-files'))
-    this.embeddingRuntime = new KnowledgeEmbeddingRuntime(this.embeddingService, llamaService)
+    this.embeddingRuntime = new KnowledgeEmbeddingRuntime(this.embeddingService)
 
     const documentIndexerDeps: KnowledgeDocumentIndexerDeps = {
       embeddingService: this.embeddingService,
@@ -137,6 +136,13 @@ export class KnowledgeService {
     })
 
     this.fileStore.ensureDir()
+  }
+
+  /**
+   * Verify that the embedding API is configured before indexing/searching.
+   */
+  async ensureEmbeddingReady(): Promise<void> {
+    await this.embeddingRuntime.ensureReady()
   }
 
   /**

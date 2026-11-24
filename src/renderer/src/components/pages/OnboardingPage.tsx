@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useOnboardingStore } from '../../store/onboardingStore'
@@ -20,14 +20,6 @@ export default function OnboardingPage() {
   const { language, changeLanguage } = useI18nStore()
   const [selectedLanguage, setSelectedLanguage] = useState<Language>(language)
   const [isCompleting, setIsCompleting] = useState(false)
-  const [modelCount, setModelCount] = useState<number | null>(null)
-
-  useEffect(() => {
-    window.api.llama
-      .listModels()
-      .then((models) => setModelCount(models.length))
-      .catch(() => setModelCount(0))
-  }, [])
 
   const handleComplete = async () => {
     setIsCompleting(true)
@@ -69,12 +61,10 @@ export default function OnboardingPage() {
           </Select>
         </div>
 
-        {modelCount === 0 && (
-          <div className="mb-6 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-left">
-            <p className="text-sm font-medium text-foreground">{t('onboarding.noModelsTitle')}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{t('onboarding.noModelsHint')}</p>
-          </div>
-        )}
+        <div className="mb-6 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-left">
+          <p className="text-sm font-medium text-foreground">{t('onboarding.apiHintTitle')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('onboarding.apiHint')}</p>
+        </div>
 
         <Button size="lg" onClick={handleComplete} disabled={isCompleting} className="w-full">
           {isCompleting ? t('onboarding.starting') : t('onboarding.getStarted')}

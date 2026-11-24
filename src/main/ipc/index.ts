@@ -1,15 +1,15 @@
-import { ProviderManager } from '../providers/ProviderManager'
+import type { ApiClient } from '../ai/apiClient'
+import type { ApiConfigManager } from '../ai/apiConfigManager'
 import { SessionAutoSwitchService } from '../services/SessionAutoSwitchService'
 import { KnowledgeService } from '../services/KnowledgeService'
 import { BackgroundJobService } from '../services/BackgroundJobService'
 import { UpdateService } from '../services/UpdateService'
 import { QuizService } from '../services/QuizService'
 import { ShortcutManager } from '../services/ShortcutManager'
-import { LlamaService } from '../services/LlamaService'
 import type Store from 'electron-store'
 import type { StoreSchema } from '../config/types'
 import { registerChatHandlers } from './chatHandlers'
-import { registerProviderHandlers } from './providerHandlers'
+import { registerApiHandlers } from './apiHandlers'
 import { registerSettingsHandlers } from './settingsHandlers'
 import { registerNotebookHandlers } from './notebookHandlers'
 import { registerNoteHandlers } from './noteHandlers'
@@ -18,37 +18,34 @@ import { registerQuizHandlers } from './quizHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import { registerItemHandlers } from './itemHandlers'
 import { registerShortcutHandlers } from './shortcutHandlers'
-import { registerLlamaHandlers } from './llamaHandlers'
 import type { NotebookSummaryService } from '../services/NotebookSummaryService'
 
 /**
  * Registers all IPC handlers
  */
 export function registerAllHandlers(
-  providerManager: ProviderManager,
+  apiClient: ApiClient,
+  apiConfigManager: ApiConfigManager,
   sessionAutoSwitchService: SessionAutoSwitchService,
   knowledgeService: KnowledgeService,
   updateService: UpdateService,
   shortcutManager: ShortcutManager,
   store: Store<StoreSchema>,
-  llamaService: LlamaService,
   backgroundJobService: BackgroundJobService,
   notebookSummaryService: NotebookSummaryService
 ) {
-  // Instantiate QuizService
-  const quizService = new QuizService(providerManager, knowledgeService, () =>
-    llamaService.getChatContextSizeSync()
+  const quizService = new QuizService(apiClient, knowledgeService, () =>
+    apiConfigManager.getContextWindowSync()
   )
 
-  registerChatHandlers(providerManager, sessionAutoSwitchService, knowledgeService, llamaService)
-  registerProviderHandlers(providerManager, llamaService)
+  registerChatHandlers(apiClient, sessionAutoSwitchService, knowledgeService)
+  registerApiHandlers(apiClient, apiConfigManager)
   registerSettingsHandlers()
   registerNotebookHandlers()
-  registerNoteHandlers(providerManager, knowledgeService)
+  registerNoteHandlers(apiClient, knowledgeService)
   registerKnowledgeHandlers(
-    providerManager,
+    apiClient,
     knowledgeService,
-    llamaService,
     backgroundJobService,
     notebookSummaryService
   )
@@ -56,13 +53,12 @@ export function registerAllHandlers(
   registerUpdateHandlers(updateService)
   registerItemHandlers(knowledgeService)
   registerShortcutHandlers(shortcutManager, store)
-  registerLlamaHandlers(llamaService)
   console.log('[IPC] All handlers registered')
 }
 
 export {
   registerChatHandlers,
-  registerProviderHandlers,
+  registerApiHandlers,
   registerSettingsHandlers,
   registerNotebookHandlers,
   registerNoteHandlers,
