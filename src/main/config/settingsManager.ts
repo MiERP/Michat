@@ -47,6 +47,7 @@ function mergeSettings(stored: Partial<AppSettings>): AppSettings {
 export class SettingsManager {
   private getStore: () => Promise<Store<StoreSchema>>
   private storeCache: Store<StoreSchema> | null = null
+  private migrated = false
 
   constructor(getStore: () => Promise<Store<StoreSchema>>) {
     this.getStore = getStore
@@ -57,12 +58,42 @@ export class SettingsManager {
   }
 
   /**
+   * One-time migration for the 2.2.0 RAG defaults. Only rows still on the old
+   * defaults are touched; explicit user choices are preserved.
+   */
+  private ensureMigrated(store: Store<StoreSchema>): void {
+    if (this.migrated) return
+    this.migrated = true
+
+    const version = store.get('settingsVersion') ?? 1
+    if (version >= 2) return
+
+    const stored = (store.get('settings') ?? {}) as Partial<AppSettings>
+    const next: Partial<AppSettings> = { ...stored }
+
+    const usesOldRagDefaults =
+      (next.ragTopK ?? 3) === 3 &&
+      (next.ragThreshold ?? 0.62) === 0.62 &&
+      (next.rerankEnabled ?? true) === true
+
+    if (usesOldRagDefaults) {
+      next.ragTopK = defaultSettings.ragTopK
+      next.ragThreshold = defaultSettings.ragThreshold
+      next.rerankEnabled = defaultSettings.rerankEnabled
+    }
+
+    store.set('settings', next as AppSettings)
+    store.set('settingsVersion', 2)
+  }
+
+  /**
    * Reads a single setting synchronously (only available once the store is initialized, otherwise returns the default)
    */
   getSettingSync<K extends keyof AppSettings>(key: K): AppSettings[K] {
     if (!this.storeCache) {
       return defaultSettings[key]
     }
+    this.ensureMigrated(this.storeCache)
     const storedSettings: Partial<AppSettings> = this.storeCache.get('settings') ?? defaultSettings
     const mergedSettings = mergeSettings(storedSettings)
     return mergedSettings[key]
@@ -73,6 +104,7 @@ export class SettingsManager {
    */
   async getAllSettings(): Promise<AppSettings> {
     const store = await this.getStore()
+    this.ensureMigrated(store)
     const storedSettings: Partial<AppSettings> = store.get('settings') ?? defaultSettings
     return mergeSettings(storedSettings)
   }
@@ -108,6 +140,7 @@ export class SettingsManager {
   async resetSettings(): Promise<void> {
     const store = await this.getStore()
     store.set('settings', defaultSettings)
+    store.set('settingsVersion', 2)
   }
 
   /**

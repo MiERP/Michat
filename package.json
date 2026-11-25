@@ -1,6 +1,6 @@
 {
     "name": "michat",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Ứng dụng máy tính local-first giúp biến tài liệu thành cơ sở tri thức có thể truy vấn bằng AI.",
     "main": "./out/main/index.js",
     "author": "HAVS",

@@ -23,13 +23,19 @@ export interface ClientConfig {
   [key: string]: unknown
 }
 
+export interface GenerationOptions {
+  temperature?: number
+  maxTokens?: number
+}
+
 export interface ChatProvider {
   readonly name: string
   sendMessageStream(
     messages: APIMessage[],
     onChunk: (chunk: StreamChunk) => void,
     onError: (error: Error) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    options?: GenerationOptions
   ): Promise<AbortController>
   getDefaultChatModel(): string
 }

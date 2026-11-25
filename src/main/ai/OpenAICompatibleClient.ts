@@ -12,7 +12,8 @@ import type {
   ClientConfig,
   EmbeddingConfig,
   EmbeddingProvider,
-  EmbeddingResult
+  EmbeddingResult,
+  GenerationOptions
 } from './types'
 import type { APIMessage, StreamChunk } from '../../shared/types/chat'
 import Logger from '../../shared/utils/logger'
@@ -70,7 +71,7 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
     this.config = {
       baseUrl: descriptor.defaultBaseUrl,
       model: descriptor.defaultChatModel || descriptor.defaultEmbeddingModel,
-      temperature: 0.7,
+      temperature: 0.2,
       maxTokens: 2048
     }
 
@@ -157,7 +158,8 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
     messages: APIMessage[],
     onChunk: (chunk: StreamChunk) => void,
     onError: (error: Error) => void,
-    onComplete: () => void
+    onComplete: () => void,
+    options?: GenerationOptions
   ): Promise<AbortController> {
     if (!this.aiProvider) {
       const error = new Error(
@@ -197,8 +199,8 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
         const result = streamText({
           model,
           messages: coreMessages,
-          temperature: this.config.temperature,
-          maxOutputTokens: this.config.maxTokens,
+          temperature: options?.temperature ?? this.config.temperature,
+          maxOutputTokens: options?.maxTokens ?? this.config.maxTokens,
           abortSignal: abortController.signal
         })
 

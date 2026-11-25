@@ -48,6 +48,20 @@ works, and feedback is very welcome.
 MiChat does **not** bundle models, start a model server, or manage model files.
 You configure an API once and MiChat uses it for chat and embeddings.
 
+### What's new in 2.2.0
+
+- **Better legal-document answers:** `Chương`/`Mục`/`Điều` headings become real sections, so
+  retrieval can use document → section → chunk context instead of isolated 250-character chunks.
+- **More reliable citations:** article-number boost for questions that name `Điều N`, plus
+  definition-question handling for `khoản 10b`/`10c`-style definitions.
+- **No more empty answers:** persona, memory, and RAG context are merged into one system message
+  that llama.cpp/Qwen chat templates accept.
+- **Faster replies:** tighter RAG budget, `temperature=0.2`, 1,400-token output cap, and shorter
+  grounded answers.
+
+> Upgrading from 2.1.x: re-index each legal PDF once (source panel → **Trích xuất lại**) so the
+> new section index is built. Chat answers improve only after the document is re-indexed.
+
 ---
 
 ## Download

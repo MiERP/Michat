@@ -135,6 +135,326 @@ describe('MarkdownNormalizer', () => {
 
     expect(normalized.content).toBe(content)
   })
+
+  it('adds legal article headings to plain Vietnamese legal text', () => {
+    const content = [
+      'Chương I',
+      'NHỮNG QUY ĐỊNH CHUNG',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Luật này quy định về an ninh mạng.',
+      'Điều 2. Giải thích từ ngữ',
+      'Trong Luật này, các từ ngữ dưới đây được hiểu như sau:',
+      'Điều 3. Nguyên tắc bảo vệ an ninh mạng',
+      'Tuân thủ Hiến pháp và pháp luật.'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toContain('# Chương I')
+    expect(normalized.content).toContain('### Điều 1. Phạm vi điều chỉnh')
+    expect(normalized.content).toContain('### Điều 2. Giải thích từ ngữ')
+
+    const flat = flattenSectionsWithPath(normalized.structure!.sections!)
+    expect(flat.map((section) => section.title)).toEqual([
+      'Chương I',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Điều 2. Giải thích từ ngữ',
+      'Điều 3. Nguyên tắc bảo vệ an ninh mạng'
+    ])
+    expect(flat[1].headingPath).toEqual(['Chương I', 'Điều 1. Phạm vi điều chỉnh'])
+  })
+
+  it('does not turn in-text article references into headings', () => {
+    const content = [
+      'Điều 1. Phạm vi điều chỉnh',
+      'Nội dung một.',
+      'Điều 2. Giải thích từ ngữ',
+      'Nội dung hai.',
+      'Điều 3. Nguyên tắc',
+      'Điều 1 của Luật này quy định về phạm vi điều chỉnh.',
+      'Chương I của Luật này quy định về nguyên tắc chung.'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toContain('### Điều 1. Phạm vi điều chỉnh')
+    expect(normalized.content).toContain('Điều 1 của Luật này quy định')
+    expect(normalized.content).not.toContain('### Điều 1 của Luật này')
+    expect(normalized.content).not.toContain('# Chương I của Luật này')
+  })
+
+  it('maps Chương/Mục/Điều to nested heading levels with aligned offsets', () => {
+    const content = [
+      'Chương I',
+      'NHỮNG QUY ĐỊNH CHUNG',
+      'Mục 1',
+      'PHẠM VI ĐIỀU CHỈNH',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Luật này quy định về an ninh mạng.',
+      'Điều 2. Đối tượng áp dụng',
+      'Cơ quan, tổ chức, cá nhân.',
+      'Mục 2',
+      'GIẢI THÍCH TỪ NGỮ',
+      'Điều 3. Giải thích từ ngữ',
+      'Từ ngữ dưới đây được hiểu như sau:'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+    const flat = flattenSectionsWithPath(normalized.structure!.sections!)
+
+    expect(flat.map((section) => [section.level, section.title])).toEqual([
+      [1, 'Chương I'],
+      [2, 'Mục 1'],
+      [3, 'Điều 1. Phạm vi điều chỉnh'],
+      [3, 'Điều 2. Đối tượng áp dụng'],
+      [2, 'Mục 2'],
+      [3, 'Điều 3. Giải thích từ ngữ']
+    ])
+    expect(flat[2].headingPath).toEqual(['Chương I', 'Mục 1', 'Điều 1. Phạm vi điều chỉnh'])
+    expect(flat[5].headingPath).toEqual(['Chương I', 'Mục 2', 'Điều 3. Giải thích từ ngữ'])
+
+    for (const section of flat) {
+      const marker = `${'#'.repeat(section.level)} ${section.title}`
+      expect(
+        normalized.content.slice(section.startOffset, section.startOffset + marker.length)
+      ).toBe(marker)
+    }
+  })
+
+  it('keeps duplicate headings as separate sections in document order', () => {
+    const content = [
+      'Chương I',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Nội dung văn bản thứ nhất.',
+      'Điều 2. Đối tượng áp dụng',
+      'Nội dung văn bản thứ hai.',
+      'Chương I',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Nội dung văn bản thứ ba.'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+    const flat = flattenSectionsWithPath(normalized.structure!.sections!)
+
+    expect(flat.map((section) => section.title)).toEqual([
+      'Chương I',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Điều 2. Đối tượng áp dụng',
+      'Chương I',
+      'Điều 1. Phạm vi điều chỉnh'
+    ])
+    expect(flat[1].headingPath).toEqual(['Chương I', 'Điều 1. Phạm vi điều chỉnh'])
+    expect(flat[4].headingPath).toEqual(['Chương I', 'Điều 1. Phạm vi điều chỉnh'])
+    expect(flat[1].startOffset).toBeLessThan(flat[4].startOffset)
+
+    for (const section of flat) {
+      const marker = `${'#'.repeat(section.level)} ${section.title}`
+      expect(
+        normalized.content.slice(section.startOffset, section.startOffset + marker.length)
+      ).toBe(marker)
+    }
+  })
+
+  it('leaves long paragraph lines that start with an article number as body text', () => {
+    const longLine = `Điều 10. ${'Nội dung '.repeat(25)}`
+    const content = [
+      'Điều 1. Phạm vi điều chỉnh',
+      'Nội dung một.',
+      'Điều 2. Đối tượng áp dụng',
+      'Nội dung hai.',
+      longLine
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(longLine.length).toBeGreaterThan(160)
+    expect(normalized.content).toContain('### Điều 1. Phạm vi điều chỉnh')
+    expect(normalized.content).toContain(longLine)
+    expect(normalized.content).not.toContain(`### ${longLine}`)
+  })
+
+  it('leaves documents with fewer than three article lines untouched', () => {
+    const content = ['Điều 1. Phạm vi điều chỉnh', 'Nội dung.', 'Điều 2. Đối tượng áp dụng'].join(
+      '\n'
+    )
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toBe(content)
+    expect(normalized.structure).toBeUndefined()
+  })
+
+  it('is idempotent and does not double-prefix existing headings', () => {
+    const content = [
+      '# Chương I',
+      'QUY ĐỊNH CHUNG',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Nội dung một.',
+      'Điều 2. Đối tượng áp dụng',
+      'Nội dung hai.',
+      'Điều 3. Nguyên tắc áp dụng',
+      'Nội dung ba.'
+    ].join('\n')
+
+    const normalizer = new MarkdownNormalizer()
+    const once = normalizer.normalize({ content, mimeType: 'text/plain' })
+    const twice = normalizer.normalize({ content: once.content, mimeType: 'text/plain' })
+
+    expect(once.content).toContain('### Điều 1. Phạm vi điều chỉnh')
+    expect(once.content).not.toContain('# # Chương I')
+    expect(twice.content).toBe(once.content)
+    expect(twice.structure?.sections?.length).toBe(once.structure?.sections?.length)
+  })
+
+  it('recognizes an article number that sits on its own line', () => {
+    const content = [
+      'Điều 1',
+      'Phạm vi điều chỉnh',
+      'Luật này quy định về an ninh mạng.',
+      'Điều 2',
+      'Giải thích từ ngữ',
+      'Nội dung giải thích.',
+      'Điều 3',
+      'Nguyên tắc',
+      'Nội dung nguyên tắc.'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toContain('### Điều 1')
+    expect(normalized.content).toContain('### Điều 2')
+    expect(normalized.structure?.sections?.length).toBeGreaterThan(0)
+  })
+
+  it('skips table-of-contents rows with dot leaders', () => {
+    const content = [
+      'Điều 1. Phạm vi điều chỉnh ........ 3',
+      'Điều 2. Giải thích từ ngữ ........ 4',
+      'Điều 3. Nguyên tắc ........ 5'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toBe(content)
+    expect(normalized.structure?.sections?.length ?? 0).toBe(0)
+  })
+
+  it('skips table-of-contents rows with a single space before the page number', () => {
+    const content = [
+      'Điều 1. Phạm vi điều chỉnh 3',
+      'Điều 2. Giải thích từ ngữ 4',
+      'Điều 3. Nguyên tắc 5'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toBe(content)
+    expect(normalized.structure?.sections?.length ?? 0).toBe(0)
+  })
+
+  it('skips table-of-contents rows separated by spaces', () => {
+    const content = [
+      'Điều 1. Phạm vi điều chỉnh   3',
+      'Điều 2. Giải thích từ ngữ    4',
+      'Điều 3. Nguyên tắc    5'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toBe(content)
+    expect(normalized.structure?.sections?.length ?? 0).toBe(0)
+  })
+
+  it('accepts a chapter title on the same line as the chapter number', () => {
+    const content = [
+      'Chương I QUY ĐỊNH CHUNG',
+      'Điều 1. Phạm vi điều chỉnh',
+      'Nội dung một.',
+      'Điều 2. Đối tượng áp dụng',
+      'Nội dung hai.',
+      'Điều 3. Nguyên tắc áp dụng',
+      'Nội dung ba.'
+    ].join('\n')
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'text/plain'
+    })
+
+    expect(normalized.content).toContain('# Chương I QUY ĐỊNH CHUNG')
+    expect(flattenSectionsWithPath(normalized.structure!.sections!)[0].headingPath).toEqual([
+      'Chương I QUY ĐỊNH CHUNG'
+    ])
+  })
+
+  it('keeps page offsets aligned after inserting legal headings', () => {
+    const page1 = 'Điều 1. Phạm vi điều chỉnh\nNội dung trang một.'
+    const page2 = 'Điều 2. Giải thích từ ngữ\nNội dung trang hai.'
+    const page3 = 'Điều 3. Nguyên tắc\nNội dung trang ba.'
+    const content = [page1, page2, page3].join('\n')
+    const starts = [0, page1.length + 1, page1.length + 1 + page2.length + 1]
+
+    const normalized = new MarkdownNormalizer().normalize({
+      content,
+      mimeType: 'application/pdf',
+      structure: {
+        type: 'pages',
+        pages: [
+          { pageNumber: 1, content: page1, startOffset: starts[0], endOffset: page1.length },
+          {
+            pageNumber: 2,
+            content: page2,
+            startOffset: starts[1],
+            endOffset: starts[1] + page2.length
+          },
+          {
+            pageNumber: 3,
+            content: page3,
+            startOffset: starts[2],
+            endOffset: content.length
+          }
+        ]
+      }
+    })
+
+    const pages = normalized.structure!.pages!
+    for (const [index, page] of pages.entries()) {
+      expect(
+        normalized.content.slice(page.startOffset, page.endOffset),
+        `page ${index + 1}`
+      ).toContain(`Điều ${index + 1}`)
+    }
+  })
 })
 
 describe('ChunkingService structural metadata', () => {

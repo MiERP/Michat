@@ -6,6 +6,7 @@ import type { StoredApiConfig } from '../ai/types'
  */
 export interface StoreSchema {
   settings: AppSettings
+  settingsVersion?: number
   shortcuts: ShortcutConfig[]
   api?: StoredApiConfig
 }

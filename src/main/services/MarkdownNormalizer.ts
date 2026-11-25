@@ -19,14 +19,16 @@ import type { DocumentLoadResult, SectionInfo } from './loaders/types'
 import { extractSectionsFromMarkdown } from './loaders/sections'
 
 const HEADING_REGEX = /^#{1,6}\s+\S/m
+const LEGAL_ARTICLE_LINE_REGEX = /^\s*Điều\s+\d+[a-z]?(?:\s*$|[.:]\s*\S)/gim
 
 export class MarkdownNormalizer {
   /**
    * Chuẩn hóa DocumentLoadResult. Không sửa đổi object gốc.
    */
   normalize(result: DocumentLoadResult): DocumentLoadResult {
-    const content = result.content ?? ''
-    const structure = result.structure
+    const legal = this.insertLegalHeadings(result.content ?? '')
+    const content = legal.content
+    const structure = this.shiftPageOffsets(result.structure, legal.insertions)
 
     // 1. Content đã có heading marker (PDF heuristic, DOCX turndown, .md nguồn):
     //    chỉ cần suy lại sections từ chính content, không chèn gì thêm.
@@ -39,6 +41,7 @@ export class MarkdownNormalizer {
       const hasPages = !!structure?.pages?.length
       return {
         ...result,
+        content,
         structure: {
           ...(structure ?? {}),
           type: hasPages ? (structure?.type ?? 'pages') : 'sections',
@@ -65,6 +68,112 @@ export class MarkdownNormalizer {
 
   hasMarkdownHeadings(content: string): boolean {
     return HEADING_REGEX.test(content)
+  }
+
+  /**
+   * Văn bản luật Việt Nam thường dùng "Chương/Mục/Điều" in đậm cùng cỡ chữ với
+   * body, nên PdfLoader không nhận ra heading. Bổ sung marker markdown để
+   * chunking và section index hoạt động. Trả thêm vị trí/độ dài marker để dịch
+   * offset trang sau khi chèn.
+   */
+  private insertLegalHeadings(content: string): {
+    content: string
+    insertions: Array<{ offset: number; delta: number }>
+  } {
+    if (!this.looksLikeLegalDocument(content)) return { content, insertions: [] }
+
+    const insertions: Array<{ offset: number; delta: number }> = []
+    let offset = 0
+    let changed = false
+
+    const lines = content.split('\n').map((line) => {
+      const lineStart = offset
+      offset += line.length + 1
+
+      if (/^#{1,6}[ \t]+/.test(line)) return line
+
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.length > 160) return line
+
+      const level = this.legalHeadingLevel(trimmed)
+      if (level === null) return line
+
+      const marker = `${'#'.repeat(level)} `
+      insertions.push({
+        offset: lineStart,
+        delta: marker.length - (line.length - trimmed.length)
+      })
+      changed = true
+      return `${marker}${trimmed}`
+    })
+
+    return {
+      content: changed ? lines.join('\n') : content,
+      insertions: changed ? insertions : []
+    }
+  }
+
+  private legalHeadingLevel(line: string): number | null {
+    if (this.isTocLike(line)) return null
+
+    const chapter = /^(Chương)\s+([0-9]+|[IVXLC]+)(.*)$/iu.exec(line)
+    if (chapter && this.isHeadingTitleRest(chapter[3])) return 1
+
+    const section = /^(Mục)\s+(\d+)(.*)$/iu.exec(line)
+    if (section && this.isHeadingTitleRest(section[3])) return 2
+
+    if (/^(Điều)\s+(\d+[a-z]?)[.:]\s*\S/iu.test(line)) return 3
+    // Consolidated legal PDFs often put the article number on its own line.
+    if (/^(Điều)\s+(\d+[a-z]?)\s*$/iu.test(line)) return 3
+
+    return null
+  }
+
+  /**
+   * Reject table-of-contents rows such as "Điều 1. Phạm vi ....... 3" or
+   * "Điều 1. Phạm vi   3" so the TOC does not become real sections.
+   */
+  private isTocLike(line: string): boolean {
+    return (
+      /(?:\.{2,}|…{2,}|·{2,})\s*\d+\s*$/u.test(line) ||
+      /\s{2,}\d+\s*$/u.test(line) ||
+      /^Điều\b.*[.:]\s+\S.*\s+\d{1,4}\s*$/u.test(line)
+    )
+  }
+
+  private isHeadingTitleRest(rest: string): boolean {
+    const trimmed = rest.trim()
+    if (!trimmed) return true
+    const first = trimmed[0]
+    return first === '-' || first === ':' || first === '.' || /\p{Lu}/u.test(first)
+  }
+
+  /**
+   * Dịch offset trang theo các marker đã chèn. Marker nằm trong trang nên
+   * startOffset không đổi khi marker đúng ở đầu trang; endOffset và các trang
+   * sau dịch đủ độ dài marker.
+   */
+  private shiftPageOffsets(
+    structure: DocumentLoadResult['structure'],
+    insertions: Array<{ offset: number; delta: number }>
+  ): DocumentLoadResult['structure'] {
+    if (!structure?.pages?.length || insertions.length === 0) return structure
+
+    const shift = (offset: number): number =>
+      insertions.reduce((sum, item) => (item.offset < offset ? sum + item.delta : sum), 0)
+
+    return {
+      ...structure,
+      pages: structure.pages.map((page) => ({
+        ...page,
+        startOffset: page.startOffset + shift(page.startOffset),
+        endOffset: page.endOffset + shift(page.endOffset)
+      }))
+    }
+  }
+
+  private looksLikeLegalDocument(content: string): boolean {
+    return (content.match(LEGAL_ARTICLE_LINE_REGEX)?.length ?? 0) >= 3
   }
 
   /**
