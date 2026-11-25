@@ -12,14 +12,22 @@ function notifyConfigChanged(): void {
   }
 }
 
-export function registerApiHandlers(apiClient: ApiClient, configManager: ApiConfigManager): void {
+export function registerApiHandlers(
+  apiClient: ApiClient,
+  configManager: ApiConfigManager,
+  onApiConfigSaved?: () => void
+): void {
   registerNoArgHandler('api:get-config', async () => {
     return configManager.getPublicConfig()
   })
 
   registerValidatedHandler('api:save-config', ApiSchemas.saveConfig, async (args) => {
     const saved = await configManager.saveConfig(args)
+    apiClient.clearCache()
     notifyConfigChanged()
+    // The embedding endpoint/model may have changed. The callback checks the
+    // stored vectors and rebuilds only when their model no longer matches.
+    onApiConfigSaved?.()
     return saved
   })
 

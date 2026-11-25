@@ -13,7 +13,8 @@ import Logger from '../../shared/utils/logger'
 const SENSITIVE_FIELDS = ['apiKey']
 
 export const DEFAULT_API_CONFIG: StoredApiConfig = {
-  baseUrl: 'http://127.0.0.1:1234/v1',
+  // llama-server's default port. Existing installs keep their saved URL.
+  baseUrl: 'http://127.0.0.1:8080/v1',
   chatModel: '',
   embeddingModel: '',
   contextWindow: 8192
@@ -29,11 +30,16 @@ export interface SaveApiConfigInput {
   clearApiKey?: boolean
 }
 
-function normalizeBaseUrl(value: string): string {
+function normalizeBaseUrl(value: string, label = 'API base URL'): string {
   const trimmed = value.trim()
   if (!trimmed) return ''
-  const url = assertLoopbackHttpUrl(trimmed, 'API base URL')
+  const url = assertLoopbackHttpUrl(trimmed, label)
   return url.toString().replace(/\/$/, '')
+}
+
+function normalizeOptionalBaseUrl(value: string, label: string): string | undefined {
+  const normalized = normalizeBaseUrl(value, label)
+  return normalized || undefined
 }
 
 function toPublic(config: StoredApiConfig): PublicApiConfig {
@@ -94,7 +100,7 @@ export class ApiConfigManager {
       embeddingBaseUrl:
         input.embeddingBaseUrl === undefined
           ? existing.embeddingBaseUrl
-          : input.embeddingBaseUrl.trim(),
+          : normalizeOptionalBaseUrl(input.embeddingBaseUrl, 'Embedding API base URL'),
       contextWindow:
         input.contextWindow === undefined
           ? existing.contextWindow

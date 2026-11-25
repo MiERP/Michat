@@ -20,6 +20,7 @@ import {
   type NewEmbedding
 } from '../../db/schema'
 import { documentVectorStore, sectionVectorStore, vectorStoreManager } from '../../vectorstore'
+import { beginIndexing, endIndexing, isEmbeddingRebuildActive } from './embeddingRebuildState'
 import type { ChunkingService, ChunkOptions, ChunkStructureContext } from '../ChunkingService'
 import type { EmbeddingService } from '../EmbeddingService'
 import type { SectionIndexService } from './SectionIndexService'
@@ -86,7 +87,11 @@ export class KnowledgeDocumentIndexer {
    * Update the document-level vector (tier 1 of hierarchical retrieval).
    * Support step: failures are logged and never break the main index flow.
    */
-  async updateDocumentVector(documentId: string, notebookId: string): Promise<void> {
+  async updateDocumentVector(
+    documentId: string,
+    notebookId: string,
+    throwOnError = false
+  ): Promise<void> {
     try {
       const db = getDatabase()
       const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()
@@ -98,10 +103,9 @@ export class KnowledgeDocumentIndexer {
       const [result] = await this.deps.embeddingService.embedBatch([text], { dimensions: 1024 })
       if (!result) return
       if (result.dimensions !== 1024) {
-        Logger.warn(
-          'KnowledgeService',
-          `Skip document vector for ${documentId}: unexpected dimensions ${result.dimensions}`
-        )
+        const message = `Document vector for ${documentId} has ${result.dimensions} dimensions; 1024 required`
+        if (throwOnError) throw new Error(message)
+        Logger.warn('KnowledgeService', message)
         return
       }
 
@@ -110,6 +114,7 @@ export class KnowledgeDocumentIndexer {
       ])
     } catch (error) {
       Logger.warn('KnowledgeService', `Failed to update document vector for ${documentId}:`, error)
+      if (throwOnError) throw error
     }
   }
 
@@ -117,12 +122,15 @@ export class KnowledgeDocumentIndexer {
    * Refresh the document-level vector (used after enrichment produces a new
    * summary).
    */
-  async refreshDocumentVector(documentId: string): Promise<void> {
+  async refreshDocumentVector(documentId: string, throwOnError = false): Promise<void> {
     const db = getDatabase()
     const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()
-    if (!doc) return
+    if (!doc) {
+      if (throwOnError) throw new Error(`Document ${documentId} not found`)
+      return
+    }
 
-    await this.updateDocumentVector(documentId, doc.notebookId)
+    await this.updateDocumentVector(documentId, doc.notebookId, throwOnError)
   }
 
   /**
@@ -167,11 +175,38 @@ export class KnowledgeDocumentIndexer {
     db.delete(chunks).where(eq(chunks.documentId, documentId)).run()
   }
 
+  async indexContent(
+    documentId: string,
+    notebookId: string,
+    content: string,
+    chunkOptions?: ChunkOptions,
+    structure?: ChunkStructureContext,
+    onProgress?: IndexProgressCallback
+  ): Promise<void> {
+    if (isEmbeddingRebuildActive(notebookId)) {
+      throw new Error('Embedding index rebuild in progress; retry the import when it finishes')
+    }
+
+    beginIndexing(notebookId)
+    try {
+      await this.indexContentUnlocked(
+        documentId,
+        notebookId,
+        content,
+        chunkOptions,
+        structure,
+        onProgress
+      )
+    } finally {
+      endIndexing(notebookId)
+    }
+  }
+
   /**
    * Shared indexing pipeline: chunk content, persist chunks and sections,
    * embed, write embeddings and vector rows, then finalize document status.
    */
-  async indexContent(
+  private async indexContentUnlocked(
     documentId: string,
     notebookId: string,
     content: string,
@@ -281,7 +316,9 @@ export class KnowledgeDocumentIndexer {
         id: embeddingId,
         chunkId: chunkIds[i],
         notebookId,
-        model: embResult.model,
+        // The `model` column stores the model + endpoint signature so a
+        // later endpoint change is detectable without a schema migration.
+        model: embResult.signature ?? embResult.model,
         dimensions: embResult.dimensions,
         createdAt: now
       }
@@ -343,6 +380,9 @@ export class KnowledgeDocumentIndexer {
     const db = getDatabase()
     const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()
     if (!doc || !doc.content) throw new Error(`Document ${documentId} not found or has no content`)
+    if (isEmbeddingRebuildActive(doc.notebookId)) {
+      throw new Error('Embedding index rebuild in progress; retry the reindex when it finishes')
+    }
 
     const localFile =
       doc.localFilePath && this.deps.fileStore.isManagedPath(doc.localFilePath)
@@ -420,13 +460,40 @@ export class KnowledgeDocumentIndexer {
     )
   }
 
+  async reindexDocumentIncremental(
+    documentId: string,
+    notebookId: string,
+    content: string,
+    chunkOptions?: ChunkOptions,
+    structure?: ChunkStructureContext,
+    onProgress?: IndexProgressCallback
+  ): Promise<IncrementalReindexResult> {
+    if (isEmbeddingRebuildActive(notebookId)) {
+      throw new Error('Embedding index rebuild in progress; retry the reindex when it finishes')
+    }
+
+    beginIndexing(notebookId)
+    try {
+      return await this.reindexDocumentIncrementalUnlocked(
+        documentId,
+        notebookId,
+        content,
+        chunkOptions,
+        structure,
+        onProgress
+      )
+    } finally {
+      endIndexing(notebookId)
+    }
+  }
+
   /**
    * Incremental reindex: diff new chunks by contentHash against old chunks.
    *  - Matching hash: keep id/embedding, update index/offsets
    *  - New chunk: embed and insert
    *  - Removed chunk: delete from chunks + embeddings + vec + FTS
    */
-  async reindexDocumentIncremental(
+  private async reindexDocumentIncrementalUnlocked(
     documentId: string,
     notebookId: string,
     content: string,
@@ -613,7 +680,7 @@ export class KnowledgeDocumentIndexer {
             id: embeddingId,
             chunkId: chunkRow.id,
             notebookId,
-            model: embResult.model,
+            model: embResult.signature ?? embResult.model,
             dimensions: embResult.dimensions,
             createdAt: now
           })
@@ -623,7 +690,7 @@ export class KnowledgeDocumentIndexer {
           id: embeddingId,
           chunkId: chunkRow.id,
           vector: embResult.embedding,
-          metadata: { model: embResult.model, documentId }
+          metadata: { model: embResult.signature ?? embResult.model, documentId }
         })
       }
 

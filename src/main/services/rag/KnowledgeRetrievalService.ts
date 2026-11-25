@@ -199,8 +199,10 @@ export class KnowledgeRetrievalService {
     query: string,
     options: SearchOptions = {}
   ): Promise<SearchResult[]> {
+    // Do not probe dimensions with a separate embedding request here: the
+    // query embedding below is validated instead. A probe added one full
+    // embedding round-trip to the first search after every app start.
     await this.deps.embeddingRuntime.ensureReady()
-    await this.deps.embeddingRuntime.assertDimensions()
     const startedAt = Date.now()
     const { topK = 5, threshold = 0.5, includeContent = true, metadataFilter, rerank } = options
     const rerankEnabled = rerank?.enabled ?? false

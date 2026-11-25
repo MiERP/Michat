@@ -43,12 +43,6 @@ importers:
       '@dnd-kit/sortable':
         specifier: ^10.0.0
         version: 10.0.0(@dnd-kit/core@6.3.1(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(react@19.2.1)
-      '@dnd-kit/utilities':
-        specifier: ^3.2.2
-        version: 3.2.2(react@19.2.1)
-      '@electron-toolkit/preload':
-        specifier: ^3.0.2
-        version: 3.0.2(electron@42.11.18)
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@42.11.18)
@@ -148,9 +142,6 @@ importers:
       i18next:
         specifier: ^26.7.2
         version: 26.7.2(typescript@5.9.3)
-      i18next-browser-languagedetector:
-        specifier: ^8.2.0
-        version: 8.2.0
       ipaddr.js:
         specifier: ^2.5.0
         version: 2.5.0
@@ -160,15 +151,9 @@ importers:
       katex:
         specifier: ^0.19.1
         version: 0.19.1
-      lodash:
-        specifier: ^4.18.1
-        version: 4.18.1
       lucide-react:
         specifier: ^0.556.0
         version: 0.556.0(react@19.2.1)
-      mammoth:
-        specifier: ^1.12.0
-        version: 1.12.0
       ms:
         specifier: 2.1.3
         version: 2.1.3
@@ -214,9 +199,6 @@ importers:
       remark-math:
         specifier: ^6.0.0
         version: 6.0.0
-      remark-parse:
-        specifier: ^11.0.0
-        version: 11.0.0
       sqlite-vec:
         specifier: 0.1.7-alpha.2
         version: 0.1.7-alpha.2
@@ -232,9 +214,6 @@ importers:
       undici:
         specifier: ^7.30.1
         version: 7.30.2
-      unified:
-        specifier: ^11.0.5
-        version: 11.0.5
       unist-util-visit:
         specifier: ^5.0.0
         version: 5.0.0
@@ -278,9 +257,6 @@ importers:
       '@types/jsdom':
         specifier: ^27.0.0
         version: 27.0.0
-      '@types/lodash':
-        specifier: ^4.17.23
-        version: 4.17.23
       '@types/node':
         specifier: ^22.19.1
         version: 22.19.2
@@ -588,11 +564,6 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
-
-  '@electron-toolkit/preload@3.0.2':
-    resolution: {integrity: sha512-TWWPToXd8qPRfSXwzf5KVhpXMfONaUuRAZJHsKthKgZR/+LqX1dZVSSClQ8OTAEduvLGdecljCsoT2jSshfoUg==}
-    peerDependencies:
-      electron: '>=13.0.0'
 
   '@electron-toolkit/tsconfig@2.0.0':
     resolution: {integrity: sha512-AdPsP770WhW7b260h13SHMdmjEEHJL6xFtgi3jwgdsSQbJOkJLeNnnpZW9qxTPCvmRI6vmdzWz5K3gibFS6SNg==}
@@ -2148,9 +2119,6 @@ packages:
   '@types/linkify-it@5.0.0':
     resolution: {integrity: sha512-sVDA58zAw4eWAffKOaQH5/5j3XeayukzDk+ewSsnv3p4yJEZHCCzMDiZM8e0OUrRvmpGZ85jf4yDHkHsgBNr9Q==}
 
-  '@types/lodash@4.17.23':
-    resolution: {integrity: sha512-RDvF6wTulMPjrNdCoYRC8gNR880JNGT8uB+REUpC2Ns4pRqQJhGz90wh7rgdXDPpCczF3VGktDuFGVnz8zP7HA==}
-
   '@types/markdown-it@13.0.9':
     resolution: {integrity: sha512-1XPwR0+MgXLWfTn9gCsZ55AHOKW1WN+P9vr0PaQh5aerR9LLQXUbjfEAFhjmEmyoYFWAyuN2Mqkn40MZ4ukjBw==}
 
@@ -2423,9 +2391,6 @@ packages:
   archiver@5.3.2:
     resolution: {integrity: sha512-+25nxyyznAXF7Nef3y0EbBeqmGZgeN/BxHX29Rs39djAfaFalmQ89SE6CWyDCHzGL0yt/ycBtNOmGTW0FyGWNw==}
     engines: {node: '>= 10'}
-
-  argparse@1.0.10:
-    resolution: {integrity: sha512-o5Roy6tNG4SL/FOkCAN6RzjiakZS25RLYFrcMttJqbdd8BWrnA+fGz57iN5Pb06pvBGvl5gQ0B48dJlslXvoTg==}
 
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
@@ -2887,9 +2852,6 @@ packages:
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
 
-  dingbat-to-unicode@1.0.1:
-    resolution: {integrity: sha512-98l0sW87ZT58pU4i61wa2OHwxbiYSbuxsCBozaVnYX2iCnr3bLM3fIes1/ej7h1YdOKuKt/MLs706TVnALA65w==}
-
   dir-compare@4.2.0:
     resolution: {integrity: sha512-2xMCmOoMrdQIPHdsTawECdNPwlVFB9zGcz3kuhmBO6U3oU+UQjsue0i8ayLKpgBcm+hcXPMVSGUN9d+pvJ6+VQ==}
 
@@ -3029,9 +2991,6 @@ packages:
         optional: true
       sqlite3:
         optional: true
-
-  duck@0.1.12:
-    resolution: {integrity: sha512-wkctla1O6VfP89gQ+J/yDesM0S7B7XLXjKGzXxMDVFg7uEn706niAtyYovKbyq1oT9YwDcly721/iUWoc8MVRg==}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -3633,9 +3592,6 @@ packages:
   humanize-ms@1.2.1:
     resolution: {integrity: sha512-Fl70vYtsAFb/C06PTS9dZBo7ihau+Tu/DNCk/OyHhea07S+aeMWpFFkUaXRa8fI+ScZbEI8dfSxwY7gxZ9SAVQ==}
 
-  i18next-browser-languagedetector@8.2.0:
-    resolution: {integrity: sha512-P+3zEKLnOF0qmiesW383vsLdtQVyKtCNA9cjSoKCppTKPQVfKd2W8hbVo5ZhNJKDqeM7BOcvNoKJOjpHh4Js9g==}
-
   i18next@26.7.2:
     resolution: {integrity: sha512-RsOY3BeaCDdkk52NeJSFAXELQ2rQXBO/tOub6L8ue2ICPfR/FRDWDOfEDg4xMPd1SqO5goVYQ6i72qWEUB/PPw==}
     peerDependencies:
@@ -4128,9 +4084,6 @@ packages:
     resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
     hasBin: true
 
-  lop@0.4.2:
-    resolution: {integrity: sha512-RefILVDQ4DKoRZsJ4Pj22TxE3omDO47yFpkIBoDKzkqPRISs5U1cnAdg/5583YPkWPaLIYHOKRMQSvjFsO26cw==}
-
   lowercase-keys@2.0.0:
     resolution: {integrity: sha512-tqNXrS78oMOE73NMxK4EMLQsQowWf8jKooH9g7xPavRT706R6bkQJ6DY2Te7QukaZsulxa30wQ7bk0pm4XiHmA==}
     engines: {node: '>=8'}
@@ -4174,11 +4127,6 @@ packages:
   make-fetch-happen@10.2.1:
     resolution: {integrity: sha512-NgOPbRiaQM10DYXvN3/hhGVI2M5MtITFryzBGxHM5p4wnFxsVCbxkrBrDsk+EZ5OB4jEOT7AjDxtdF+KVEFT7w==}
     engines: {node: ^12.13.0 || ^14.15.0 || >=16.0.0}
-
-  mammoth@1.12.0:
-    resolution: {integrity: sha512-cwnK1RIcRdDMi2HRx2EXGYlxqIEh0Oo3bLhorgnsVJi2UkbX1+jKxuBNR9PC5+JaX7EkmJxFPmo6mjLpqShI2w==}
-    engines: {node: '>=12.0.0'}
-    hasBin: true
 
   markdown-it-task-lists@2.1.1:
     resolution: {integrity: sha512-TxFAc76Jnhb2OUu+n3yz9RMu4CwGfaT788br6HhEDlvWfdeJcLUsxk1Hgw2yJio0OXsxv7pyIPmvECY7bMbluA==}
@@ -4563,9 +4511,6 @@ packages:
   opencollective-postinstall@2.0.3:
     resolution: {integrity: sha512-8AV/sCtuzUeTo8gQK5qDZzARrulB3egtLzFgteqB2tcT4Mw7B8Kt7JcDHmltjz6FOAHsvTevk70gZEbhM4ZS9Q==}
     hasBin: true
-
-  option@0.2.4:
-    resolution: {integrity: sha512-pkEqbDyl8ou5cpq+VsnQbe/WlEy5qS7xPzMS1U55OCG9KPvwFD46zDbxQIj3egJSFc3D+XhYOPUzz49zQAVy7A==}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -5167,9 +5112,6 @@ packages:
   space-separated-tokens@2.0.2:
     resolution: {integrity: sha512-PEGlAwrG8yXGXRjW32fGbg66JAlOAwbObuqVoJpv/mRgoWDQfgH1wDPvtzWyUSNAXBGSk8h755YDbbcEy3SH2Q==}
 
-  sprintf-js@1.0.3:
-    resolution: {integrity: sha512-D9cPgkvLlV3t3IzL0D0YLvGA9Ahk4PcvVwUbN0dSGr1aP0Nrt4AEnTUbuGvquEC0mA64Gqt1fzirlRs5ibXx8g==}
-
   sqlite-vec-darwin-arm64@0.1.7-alpha.2:
     resolution: {integrity: sha512-raIATOqFYkeCHhb/t3r7W7Cf2lVYdf4J3ogJ6GFc8PQEgHCPEsi+bYnm2JT84MzLfTlSTIdxr4/NKv+zF7oLPw==}
     cpu: [arm64]
@@ -5475,9 +5417,6 @@ packages:
     resolution: {integrity: sha512-nWJ91DjeOkej/TA8pXQ3myruKpKEYgqvpw9lz4OPHj/NWFNluYrjbz9j01CJ8yKQd2g4jFoOkINCTW2I5LEEyw==}
     engines: {node: '>= 0.4'}
 
-  underscore@1.13.8:
-    resolution: {integrity: sha512-DXtD3ZtEQzc7M8m4cXotyHR+FAS18C64asBYY5vqZexfYryNNnDc02W4hKg3rdQuqOYas1jkseX0+nZXjTXnvQ==}
-
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
@@ -5779,10 +5718,6 @@ packages:
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
-
-  xmlbuilder@10.1.1:
-    resolution: {integrity: sha512-OyzrcFLL/nb6fMGHbiRDuPup9ljBycsdCypwuyg5AAHvyWzGfChJpCXMG88AGTIMFhGZ9RccFN1e6lhg3hkwKg==}
-    engines: {node: '>=4.0'}
 
   xmlbuilder@15.1.1:
     resolution: {integrity: sha512-yMqGBqtXyeN1e3TGYvgNgDVZ3j84W4cwkOXQswghol6APgZWaff9lnbvN7MHYJOiXsvGPXtjTYJEiC9J2wv9Eg==}
@@ -6119,10 +6054,6 @@ snapshots:
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
-
-  '@electron-toolkit/preload@3.0.2(electron@42.11.18)':
-    dependencies:
-      electron: 42.11.18
 
   '@electron-toolkit/tsconfig@2.0.0(@types/node@22.19.2)':
     dependencies:
@@ -7517,8 +7448,6 @@ snapshots:
 
   '@types/linkify-it@5.0.0': {}
 
-  '@types/lodash@4.17.23': {}
-
   '@types/markdown-it@13.0.9':
     dependencies:
       '@types/linkify-it': 3.0.5
@@ -7892,10 +7821,6 @@ snapshots:
       readdir-glob: 1.1.3
       tar-stream: 2.2.0
       zip-stream: 4.1.1
-
-  argparse@1.0.10:
-    dependencies:
-      sprintf-js: 1.0.3
 
   argparse@2.0.1: {}
 
@@ -8428,8 +8353,6 @@ snapshots:
     dependencies:
       dequal: 2.0.3
 
-  dingbat-to-unicode@1.0.1: {}
-
   dir-compare@4.2.0:
     dependencies:
       minimatch: 3.1.5
@@ -8512,10 +8435,6 @@ snapshots:
       '@opentelemetry/api': 1.9.0
       '@types/better-sqlite3': 7.6.13
       better-sqlite3: 12.11.1
-
-  duck@0.1.12:
-    dependencies:
-      underscore: 1.13.8
 
   dunder-proto@1.0.1:
     dependencies:
@@ -9399,10 +9318,6 @@ snapshots:
     dependencies:
       ms: 2.1.3
 
-  i18next-browser-languagedetector@8.2.0:
-    dependencies:
-      '@babel/runtime': 7.28.4
-
   i18next@26.7.2(typescript@5.9.3):
     optionalDependencies:
       typescript: 5.9.3
@@ -9855,12 +9770,6 @@ snapshots:
     dependencies:
       js-tokens: 4.0.0
 
-  lop@0.4.2:
-    dependencies:
-      duck: 0.1.12
-      option: 0.2.4
-      underscore: 1.13.8
-
   lowercase-keys@2.0.0: {}
 
   lowlight@3.3.0:
@@ -9922,19 +9831,6 @@ snapshots:
     transitivePeerDependencies:
       - bluebird
       - supports-color
-
-  mammoth@1.12.0:
-    dependencies:
-      '@xmldom/xmldom': 0.9.12
-      argparse: 1.0.10
-      base64-js: 1.5.1
-      bluebird: 3.4.7
-      dingbat-to-unicode: 1.0.1
-      jszip: 3.10.1
-      lop: 0.4.2
-      path-is-absolute: 1.0.1
-      underscore: 1.13.8
-      xmlbuilder: 10.1.1
 
   markdown-it-task-lists@2.1.1: {}
 
@@ -10528,8 +10424,6 @@ snapshots:
       mimic-fn: 2.1.0
 
   opencollective-postinstall@2.0.3: {}
-
-  option@0.2.4: {}
 
   optionator@0.9.4:
     dependencies:
@@ -11259,8 +11153,6 @@ snapshots:
 
   space-separated-tokens@2.0.2: {}
 
-  sprintf-js@1.0.3: {}
-
   sqlite-vec-darwin-arm64@0.1.7-alpha.2:
     optional: true
 
@@ -11624,8 +11516,6 @@ snapshots:
       has-symbols: 1.1.0
       which-boxed-primitive: 1.1.1
 
-  underscore@1.13.8: {}
-
   undici-types@6.21.0: {}
 
   undici-types@7.24.6: {}
@@ -11917,8 +11807,6 @@ snapshots:
   ws@8.21.0: {}
 
   xml-name-validator@5.0.0: {}
-
-  xmlbuilder@10.1.1: {}
 
   xmlbuilder@15.1.1: {}
 

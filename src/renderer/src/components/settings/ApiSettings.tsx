@@ -26,6 +26,7 @@ export default function ApiSettings(): ReactElement {
   const [apiKey, setApiKey] = useState('')
   const [chatModel, setChatModel] = useState('')
   const [embeddingModel, setEmbeddingModel] = useState('')
+  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('')
   const [contextWindow, setContextWindow] = useState('8192')
   const [clearApiKey, setClearApiKey] = useState(false)
   const [encryptionAvailable, setEncryptionAvailable] = useState(true)
@@ -38,6 +39,7 @@ export default function ApiSettings(): ReactElement {
     setBaseUrl(value.baseUrl)
     setChatModel(value.chatModel)
     setEmbeddingModel(value.embeddingModel)
+    setEmbeddingBaseUrl(value.embeddingBaseUrl ?? '')
     setContextWindow(String(value.contextWindow))
     setApiKey('')
     setClearApiKey(false)
@@ -79,6 +81,7 @@ export default function ApiSettings(): ReactElement {
         baseUrl,
         chatModel,
         embeddingModel,
+        embeddingBaseUrl,
         contextWindow: Number(contextWindow) || 8192,
         apiKey: apiKey || undefined,
         clearApiKey
@@ -111,7 +114,7 @@ export default function ApiSettings(): ReactElement {
               setBaseUrl(event.target.value)
               setSaved(false)
             }}
-            placeholder="http://127.0.0.1:1234/v1"
+            placeholder="http://127.0.0.1:8080/v1"
             spellCheck={false}
           />
         </Field>
@@ -182,6 +185,23 @@ export default function ApiSettings(): ReactElement {
               setSaved(false)
             }}
             placeholder={t('apiModelPlaceholder')}
+            spellCheck={false}
+          />
+        </Field>
+
+        <Field>
+          <FieldContent>
+            <FieldLabel htmlFor="api-embedding-base-url">{t('apiEmbeddingBaseUrl')}</FieldLabel>
+            <FieldDescription>{t('apiEmbeddingBaseUrlDesc')}</FieldDescription>
+          </FieldContent>
+          <Input
+            id="api-embedding-base-url"
+            value={embeddingBaseUrl}
+            onChange={(event) => {
+              setEmbeddingBaseUrl(event.target.value)
+              setSaved(false)
+            }}
+            placeholder="http://127.0.0.1:8081/v1"
             spellCheck={false}
           />
         </Field>

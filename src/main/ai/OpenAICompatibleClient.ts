@@ -19,6 +19,8 @@ import type { APIMessage, StreamChunk } from '../../shared/types/chat'
 import Logger from '../../shared/utils/logger'
 import { assertLoopbackHttpUrl } from '../security/guards'
 
+const EMBEDDING_REQUEST_TIMEOUT_MS = 120_000
+
 const CONTROL_CHARS_PATTERN = new RegExp(
   '[' +
     String.fromCharCode(0) +
@@ -63,6 +65,9 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
   // Optional separate provider instance for embeddings (useful when embedding server runs on different baseUrl)
   private aiProviderEmbed: ReturnType<typeof createOpenAICompatible> | null = null
 
+  /** Captured with the provider so a config change cannot relabel old vectors. */
+  private configuredSignature: string | null = null
+
   constructor(descriptor: ChatClientDescriptor) {
     this.name = descriptor.name
     this.descriptor = descriptor
@@ -95,38 +100,34 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
     })
 
     // Optional separate base URL for embeddings.
-    const embedBaseUrl = (this.config.baseUrlembed || this.config.embeddingBaseUrl) as
-      | string
-      | undefined
+    const embedBaseUrl = this.config.embeddingBaseUrl
+    const effectiveEmbedBaseUrl =
+      embedBaseUrl && embedBaseUrl !== this.config.baseUrl
+        ? assertLoopbackHttpUrl(embedBaseUrl, 'Embedding API base URL')
+            .toString()
+            .replace(/\/$/, '')
+        : String(this.config.baseUrl || '').replace(/\/$/, '')
+
     if (embedBaseUrl && embedBaseUrl !== this.config.baseUrl) {
       this.aiProviderEmbed = createOpenAICompatible({
         name: `${this.name}-embed`,
-        baseURL: embedBaseUrl,
+        baseURL: effectiveEmbedBaseUrl,
         apiKey: config.apiKey || ''
       })
     } else {
       this.aiProviderEmbed = null
     }
 
+    const signatureModel = this.config.model || this.descriptor.defaultEmbeddingModel
+    this.configuredSignature =
+      signatureModel && effectiveEmbedBaseUrl ? `${signatureModel}@${effectiveEmbedBaseUrl}` : null
+
     Logger.debug('OpenAICompatibleClient', `Provider ${this.name} configured`)
   }
 
-  /**
-   * Validate that the configured endpoint answers /models.
-   */
-  async validateConfig(config: ClientConfig): Promise<boolean> {
-    try {
-      const baseUrl = assertLoopbackHttpUrl(config.baseUrl || '', 'API base URL')
-      const headers: Record<string, string> = {}
-      if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
-      const response = await fetch(`${baseUrl.toString().replace(/\/$/, '')}/models`, {
-        headers,
-        redirect: 'error'
-      })
-      return response.ok
-    } catch {
-      return false
-    }
+  /** Model + endpoint captured when this client was configured. */
+  getSignature(): string | null {
+    return this.configuredSignature
   }
 
   // ==================== Chat capability ====================
@@ -385,6 +386,9 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
       // Deterministic "input too large" errors must surface immediately so the
       // adaptive splitter can shrink the text instead of retrying the same call.
       maxRetries: 0,
+      // A local server that stops responding must not hang indexing/rebuild
+      // forever or block the shutdown barrier.
+      abortSignal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS),
       ...(providerOptions && { providerOptions }) // Add provider-specific options when available.
     })
 
@@ -434,6 +438,7 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
       model: embeddingModel,
       values: texts,
       maxRetries: 0,
+      abortSignal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS),
       ...(providerOptions && { providerOptions }) // Build providerOptions
     })
 
@@ -571,15 +576,5 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
     }
 
     return [String(error)]
-  }
-
-  // ==================== Backward-compatible methods (deprecated) ====================
-
-  /**
-   * @deprecated Use hasChatCapability() or hasEmbeddingCapability() instead
-   * Check whether embeddings are supported
-   */
-  supportsEmbedding(): boolean {
-    return this.hasEmbeddingCapability()
   }
 }

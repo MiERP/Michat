@@ -186,6 +186,25 @@ describe('KnowledgeService RAG regression', () => {
     expect(service.getDocumentChunks(failedDocument!.id)).toHaveLength(0)
   })
 
+  it('validates the query embedding directly with a single embedding call', async () => {
+    const { service, notebookId, providerManager } = context!
+
+    await service.addDocument(notebookId, {
+      title: 'Query dimension check',
+      type: 'text',
+      content: 'Local-first embeddings stay on the machine and are validated before search.'
+    })
+
+    providerManager.embeddingCalls = []
+    providerManager.embeddingDimensions = 768
+
+    await expect(service.search(notebookId, 'local-first embeddings')).rejects.toThrow(/768/)
+
+    // The old implementation issued a separate dimension probe plus the query
+    // embedding. Retrieval must now validate the query result itself.
+    expect(providerManager.embeddingCalls).toHaveLength(1)
+  })
+
   it('removes section records when indexing fails after structural parsing', async () => {
     const { service, notebookId, db, schema } = context!
     ;(service as unknown as KnowledgeServiceInternals).embeddingService.embedBatch = vi

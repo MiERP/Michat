@@ -31,6 +31,8 @@ import {
   installPermissionHandlers,
   installWebContentsGuards
 } from './security/appHardening'
+import { applyCompatMode, clearCompatMode } from './compatMode'
+import { beginShutdown } from './utils/shutdownState'
 
 let apiClient: ApiClient | null = null
 let sessionAutoSwitchService: SessionAutoSwitchService | null = null
@@ -39,6 +41,17 @@ let backgroundJobService: BackgroundJobService | null = null
 let updateService: UpdateService | null = null
 let shortcutManager: ShortcutManager | null = null
 let isQuitting = false // Flag to indicate if app is quitting
+let embeddingRecheckRunning = false
+let embeddingRecheckPending = false
+let embeddingRecheckRetryTimer: NodeJS.Timeout | null = null
+let embeddingRecheckRetryCount = 0
+let embeddingRecheckPromise: Promise<void> | null = null
+
+if (process.argv.includes('--reset-compat-mode')) {
+  clearCompatMode()
+}
+
+const compatModeActive = applyCompatMode()
 
 enforceSingleInstance(app)
 
@@ -100,6 +113,118 @@ function scheduleDailyLinkDecay(queue: BackgroundJobService): void {
   timer.unref()
 }
 
+/**
+ * When the configured embedding model changes, old vectors live in a
+ * different vector space even though they still have 1024 dimensions. Check
+ * every notebook and rebuild only the stale ones, one notebook at a time so
+ * the local embedding server is not flooded.
+ */
+function recheckEmbeddingIndexes(reason: string): void {
+  if (!knowledgeService || isQuitting) return
+  if (embeddingRecheckRunning) {
+    embeddingRecheckPending = true
+    return
+  }
+
+  if (embeddingRecheckRetryTimer) {
+    clearTimeout(embeddingRecheckRetryTimer)
+    embeddingRecheckRetryTimer = null
+  }
+  if (reason !== 'retry') embeddingRecheckRetryCount = 0
+
+  const service = knowledgeService
+  embeddingRecheckRunning = true
+
+  const run = (async () => {
+    const queue = backgroundJobService
+    let paused = false
+    let failed = false
+
+    try {
+      queue?.pause()
+      paused = true
+
+      // Wait for a reindex/rebuild job that was already writing before the
+      // rebuild started. Abortable enrich/summarize jobs were cancelled by
+      // pause(); these two job types finish their current batch first. A
+      // stuck job must not keep the idle queue paused forever.
+      const ready = (await queue?.waitForActiveJob(120_000)) ?? true
+      if (!ready) {
+        failed = true
+        Logger.warn('Main', 'Embedding rebuild skipped: active background job did not settle')
+        return
+      }
+
+      for (const notebook of getAllNotebooks()) {
+        if (isQuitting) break
+        try {
+          const result = await service.ensureEmbeddingModelConsistency(notebook.id)
+          if (!result.rebuilt) continue
+
+          Logger.info(
+            'Main',
+            `Rebuilt ${result.documents} document(s) for ${notebook.id} after embedding model change (${reason})`
+          )
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) {
+              win.webContents.send('knowledge:documents-changed', { notebookId: notebook.id })
+            }
+          }
+        } catch (error) {
+          failed = true
+          Logger.error(
+            'Main',
+            `Embedding consistency check failed for ${notebook.id} (${reason}):`,
+            error
+          )
+          // A chunk re-embed may have succeeded while the document/section
+          // tiers failed. The backfill scanner repairs those missing tiers.
+          backgroundJobService?.enqueueBackfill(notebook.id)
+        }
+      }
+    } finally {
+      if (paused) queue?.resume()
+      embeddingRecheckRunning = false
+      if (failed) {
+        scheduleEmbeddingRecheckRetry()
+      } else {
+        embeddingRecheckRetryCount = 0
+      }
+      if (embeddingRecheckPending) {
+        embeddingRecheckPending = false
+        recheckEmbeddingIndexes('queued')
+      }
+    }
+  })()
+
+  embeddingRecheckPromise = run
+  void run
+    .catch((error) => {
+      Logger.error('Main', 'Embedding consistency pass failed:', error)
+    })
+    .finally(() => {
+      if (embeddingRecheckPromise === run) embeddingRecheckPromise = null
+    })
+}
+
+/**
+ * The embedding server may still be starting when MiChat opens. Retry a few
+ * times with backoff so a temporarily unavailable server does not leave
+ * incompatible vectors in use for the whole session.
+ */
+function scheduleEmbeddingRecheckRetry(): void {
+  if (embeddingRecheckRetryTimer || embeddingRecheckRetryCount >= 3 || isQuitting) return
+
+  const delay = 30_000 * 2 ** embeddingRecheckRetryCount
+  embeddingRecheckRetryCount++
+  Logger.warn('Main', `Embedding rebuild retry scheduled in ${delay}ms`)
+  embeddingRecheckRetryTimer = setTimeout(() => {
+    embeddingRecheckRetryTimer = null
+    recheckEmbeddingIndexes('retry')
+  }, delay)
+  embeddingRecheckRetryTimer.unref()
+}
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -113,6 +238,10 @@ app.whenReady().then(async () => {
 
     installPermissionHandlers(session.defaultSession)
     installWebContentsGuards(app)
+
+    if (compatModeActive) {
+      Logger.warn('Main', 'Compatibility mode active: renderer sandbox is disabled')
+    }
 
     // Set app user model id for windows
     electronApp.setAppUserModelId('com.michat.app')
@@ -255,7 +384,11 @@ app.whenReady().then(async () => {
       shortcutManager,
       store,
       backgroundJobService,
-      notebookSummaryService
+      notebookSummaryService,
+      () => {
+        knowledgeService?.clearEmbeddingCache()
+        recheckEmbeddingIndexes('api-config')
+      }
     )
 
     // IPC test (development only)
@@ -291,6 +424,10 @@ app.whenReady().then(async () => {
     // Create the main window. The external API is only contacted on demand,
     // so first paint never waits for a model or server startup.
     const mainWindow = createMainWindow()
+
+    // Defer the embedding-consistency pass so startup and first paint stay
+    // fast; a changed embedding model triggers a full, guarded rebuild.
+    setTimeout(() => recheckEmbeddingIndexes('startup'), 3000).unref()
 
     // Start knowledge auto-sync (watcher + incremental reindex)
     knowledgeService.startAutoSync((payload) => {
@@ -364,6 +501,7 @@ app.on('before-quit', (event) => {
 
   event.preventDefault()
   isQuitting = true
+  beginShutdown()
   Logger.info('Main', 'before-quit: graceful shutdown started')
 
   // Unregister shortcuts
@@ -382,6 +520,7 @@ app.on('before-quit', (event) => {
       // A 10 second cap keeps a stuck component from blocking quit.
       const tasks: Promise<unknown>[] = []
       if (backgroundJobService) tasks.push(backgroundJobService.shutdown())
+      if (embeddingRecheckPromise) tasks.push(embeddingRecheckPromise)
       const cap = new Promise<void>((resolve) => setTimeout(resolve, 10000))
       await Promise.race([Promise.allSettled(tasks), cap])
       Logger.info('Main', 'Shutdown tasks settled, closing database...')
@@ -409,6 +548,7 @@ const handleShutdown = (signal: string) => {
 
   if (!isQuitting) {
     isQuitting = true
+    beginShutdown()
     closeDatabase()
   }
 

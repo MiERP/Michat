@@ -66,4 +66,117 @@ describe('ApiClient connection test', () => {
     expect(await client.getChatProvider()).toBeNull()
     expect(await client.getEmbeddingProvider()).toBeNull()
   })
+
+  it('includes the embedding endpoint in the cache identity', async () => {
+    let config: Record<string, unknown> = {
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      chatModel: 'chat-model',
+      embeddingModel: 'embed-model',
+      contextWindow: 8192
+    }
+    const manager = {
+      getConfig: async () => config,
+      getContextWindowSync: () => 8192
+    } as unknown as ApiConfigManager
+    const client = new ApiClient(manager)
+
+    const first = await client.getEmbeddingProvider()
+    const second = await client.getEmbeddingProvider()
+    expect(second).toBe(first)
+
+    config = { ...config, embeddingBaseUrl: 'http://127.0.0.1:8081/v1' }
+    const third = await client.getEmbeddingProvider()
+    expect(third).not.toBe(first)
+    expect(await client.getEmbeddingSignature()).toBe('embed-model@http://127.0.0.1:8081/v1')
+  })
+
+  it('fails closed for a legacy non-loopback embedding endpoint', async () => {
+    const client = new ApiClient(managerWith({ embeddingBaseUrl: 'https://example.com/v1' }))
+
+    await expect(client.getEmbeddingProvider()).rejects.toThrow(/loopback|localhost|127/i)
+    // A bad embedding endpoint must not prevent chat from working.
+    expect(await client.getChatProvider()).not.toBeNull()
+  })
+
+  it('rebuilds the chat provider when the API key changes', async () => {
+    let config: Record<string, unknown> = {
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      chatModel: 'chat-model',
+      embeddingModel: 'embed-model',
+      contextWindow: 8192,
+      apiKey: 'key-a'
+    }
+    const manager = {
+      getConfig: async () => config,
+      getContextWindowSync: () => 8192
+    } as unknown as ApiConfigManager
+    const client = new ApiClient(manager)
+
+    const first = await client.getChatProvider()
+    expect(await client.getChatProvider()).toBe(first)
+
+    config = { ...config, apiKey: 'key-b' }
+    const rotated = await client.getChatProvider()
+    expect(rotated).not.toBe(first)
+  })
+
+  it('rebuilds the embedding provider when the embedding model changes', async () => {
+    let config: Record<string, unknown> = {
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      chatModel: 'chat-model',
+      embeddingModel: 'embed-model-a',
+      contextWindow: 8192
+    }
+    const manager = {
+      getConfig: async () => config,
+      getContextWindowSync: () => 8192
+    } as unknown as ApiConfigManager
+    const client = new ApiClient(manager)
+
+    const first = await client.getEmbeddingProvider()
+    expect(await client.getEmbeddingProvider()).toBe(first)
+
+    config = { ...config, embeddingModel: 'embed-model-b' }
+    const second = await client.getEmbeddingProvider()
+    expect(second).not.toBe(first)
+    expect(await client.getEmbeddingSignature()).toBe('embed-model-b@http://127.0.0.1:8080/v1')
+  })
+
+  it('clearCache drops both cached providers', async () => {
+    const client = new ApiClient(managerWith())
+
+    const chat = await client.getChatProvider()
+    const embedding = await client.getEmbeddingProvider()
+    client.clearCache()
+
+    expect(await client.getChatProvider()).not.toBe(chat)
+    expect(await client.getEmbeddingProvider()).not.toBe(embedding)
+  })
+
+  it('reuses a provider until the saved configuration changes', async () => {
+    let config = {
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      chatModel: 'chat-model',
+      embeddingModel: 'embed-model',
+      contextWindow: 8192
+    }
+    const manager = {
+      getConfig: async () => config,
+      getContextWindowSync: () => 8192
+    } as unknown as ApiConfigManager
+    const client = new ApiClient(manager)
+
+    const first = await client.getChatProvider()
+    const second = await client.getChatProvider()
+    expect(first).not.toBeNull()
+    expect(second).toBe(first)
+
+    config = { ...config, chatModel: 'chat-model-2' }
+    const third = await client.getChatProvider()
+    expect(third).not.toBe(first)
+
+    client.clearCache()
+    const fourth = await client.getChatProvider()
+    expect(fourth).not.toBe(third)
+  })
 })

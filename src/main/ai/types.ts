@@ -20,7 +20,6 @@ export interface ClientConfig {
   model?: string
   temperature?: number
   maxTokens?: number
-  [key: string]: unknown
 }
 
 export interface GenerationOptions {
@@ -48,6 +47,8 @@ export interface EmbeddingConfig {
 export interface EmbeddingResult {
   embedding: Float32Array
   model: string
+  /** Model + effective endpoint used for this vector. */
+  signature?: string
   dimensions: number
   tokensUsed: number
 }
@@ -57,6 +58,8 @@ export interface EmbeddingProvider {
   createEmbedding(text: string, config?: EmbeddingConfig): Promise<EmbeddingResult>
   createEmbeddings(texts: string[], config?: EmbeddingConfig): Promise<EmbeddingResult[]>
   getDefaultEmbeddingModel(): string
+  /** Model + endpoint snapshot captured when this provider was configured. */
+  getSignature?(): string | null
 }
 
 /** API configuration as stored on disk (apiKey may be encrypted). */

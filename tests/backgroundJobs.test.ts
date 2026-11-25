@@ -181,6 +181,82 @@ describe('BackgroundJobService durability', () => {
     expect(rows.some((row) => row.id === 'job_recent_done')).toBe(true)
   })
 
+  it('pause stops new jobs until resumed', async () => {
+    const { createService, notebookId } = context!
+    const service = createService()
+
+    service.enqueueDecayLinks(notebookId)
+    service.pause()
+    await service.tick()
+    expect(service.getPendingCount()).toBe(1)
+
+    service.resume()
+    await service.tick()
+    expect(service.getPendingCount()).toBe(0)
+  })
+
+  it('waitForActiveJob resolves only after the active job settles', async () => {
+    const { createService, notebookId } = context!
+    let resolveRun: (() => void) | null = null
+    const service = createService({
+      generateLinksForDocument: () =>
+        new Promise<void>((resolve) => {
+          resolveRun = resolve
+        }),
+      decayLinks: () => 0
+    })
+
+    service.enqueue({
+      jobType: 'generate-links',
+      documentId: 'doc_wait',
+      notebookId,
+      maxAttempts: 2
+    })
+
+    const tickPromise = service.tick()
+    await new Promise((resolve) => setTimeout(resolve, 20)) // job đã vào running
+
+    let settled = false
+    const waitPromise = service.waitForActiveJob().then(() => {
+      settled = true
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(settled).toBe(false)
+
+    resolveRun!()
+    await Promise.all([tickPromise, waitPromise])
+    expect(settled).toBe(true)
+  })
+
+  it('waitForActiveJob reports a timeout while the job is still running', async () => {
+    const { createService, notebookId } = context!
+    let resolveRun: (() => void) | null = null
+    const service = createService({
+      generateLinksForDocument: () =>
+        new Promise<void>((resolve) => {
+          resolveRun = resolve
+        }),
+      decayLinks: () => 0
+    })
+
+    service.enqueue({
+      jobType: 'generate-links',
+      documentId: 'doc_timeout',
+      notebookId,
+      maxAttempts: 2
+    })
+
+    const tickPromise = service.tick()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(await service.waitForActiveJob(10)).toBe(false)
+
+    resolveRun!()
+    await tickPromise
+    expect(await service.waitForActiveJob()).toBe(true)
+  })
+
   it('shutdown waits for the active job to settle', async () => {
     const { createService, notebookId } = context!
     let resolveRun: (() => void) | null = null

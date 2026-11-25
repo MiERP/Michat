@@ -95,9 +95,9 @@ export class EmbeddingService {
     return text.trim().replace(/\s+/g, ' ')
   }
 
-  private buildCacheKey(providerName: string, model: string, dims: string, text: string): string {
+  private buildCacheKey(scope: string, model: string, dims: string, text: string): string {
     const hash = createHash('md5').update(this.normalizeText(text)).digest('hex')
-    return `${providerName}|${model}|${dims}|${hash}`
+    return `${scope}|${model}|${dims}|${hash}`
   }
 
   private cacheGet(key: string): EmbeddingResult | undefined {
@@ -139,7 +139,8 @@ export class EmbeddingService {
 
     const model = provider.getDefaultEmbeddingModel()
     const dims = String(config?.dimensions ?? '*')
-    const cacheKey = this.buildCacheKey(provider.name, model, dims, text)
+    const scope = provider.getSignature?.() ?? (await this.getSignature()) ?? provider.name
+    const cacheKey = this.buildCacheKey(scope, model, dims, text)
     const cached = this.cacheGet(cacheKey)
     if (cached) {
       Logger.debug('EmbeddingService', `Cache hit for query text (${text.length} chars)`)
@@ -148,8 +149,9 @@ export class EmbeddingService {
     this.cacheMisses++
 
     const result = await this.withRetry(() => provider.createEmbedding(text, config))
-    this.cacheSet(cacheKey, result)
-    return this.copyResult(result)
+    const scoped = { ...result, signature: scope }
+    this.cacheSet(cacheKey, scoped)
+    return this.copyResult(scoped)
   }
 
   /**
@@ -174,11 +176,12 @@ export class EmbeddingService {
     // 1. Kiểm tra cache cho từng text
     const model = provider.getDefaultEmbeddingModel()
     const dims = String(config?.dimensions ?? '*')
+    const scope = provider.getSignature?.() ?? (await this.getSignature()) ?? provider.name
     const results: (EmbeddingResult | undefined)[] = new Array(texts.length).fill(undefined)
     const missIndexes: number[] = []
 
     for (let i = 0; i < texts.length; i++) {
-      const cacheKey = this.buildCacheKey(provider.name, model, dims, texts[i])
+      const cacheKey = this.buildCacheKey(scope, model, dims, texts[i])
       const cached = this.cacheGet(cacheKey)
       if (cached) {
         results[i] = cached
@@ -212,11 +215,9 @@ export class EmbeddingService {
 
     for (let i = 0; i < missIndexes.length; i++) {
       const originalIndex = missIndexes[i]
-      results[originalIndex] = missResults[i]
-      this.cacheSet(
-        this.buildCacheKey(provider.name, model, dims, texts[originalIndex]),
-        missResults[i]
-      )
+      const scoped = { ...missResults[i], signature: scope }
+      results[originalIndex] = scoped
+      this.cacheSet(this.buildCacheKey(scope, model, dims, texts[originalIndex]), scoped)
     }
 
     return results.map((r) => this.copyResult(r!))
@@ -268,6 +269,12 @@ export class EmbeddingService {
   async getDefaultModel(): Promise<string | undefined> {
     const provider = await this.apiClient.getEmbeddingProvider()
     return provider?.getDefaultEmbeddingModel()
+  }
+
+  /** Model + endpoint identity used for cache keys and stale-vector checks. */
+  async getSignature(): Promise<string | null> {
+    const provider = await this.apiClient.getEmbeddingProvider()
+    return provider?.getSignature?.() ?? (await this.apiClient.getEmbeddingSignature?.()) ?? null
   }
 
   /**

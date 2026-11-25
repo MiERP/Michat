@@ -119,7 +119,8 @@ export class KnowledgeService {
     this.indexMaintenance = new KnowledgeIndexMaintenance({
       embeddingService: this.embeddingService,
       embeddingRuntime: this.embeddingRuntime,
-      documentIndexer: this.documentIndexer
+      documentIndexer: this.documentIndexer,
+      sectionIndex
     })
 
     this.retrievalService = new KnowledgeRetrievalService({
@@ -151,6 +152,15 @@ export class KnowledgeService {
    */
   async probeEmbeddingDimensions(): Promise<number> {
     return this.embeddingRuntime.probeDimensions()
+  }
+
+  /**
+   * Drop cached query embeddings and the memoized dimension probe. Must be
+   * called after an API configuration change so the next rebuild validates
+   * the new model/endpoint instead of trusting the old probe.
+   */
+  clearEmbeddingCache(): void {
+    this.embeddingService.clearCache()
   }
 
   isManagedLocalFilePath(filePath: string): boolean {
@@ -198,6 +208,21 @@ export class KnowledgeService {
    */
   detectMetadataFilter(notebookId: string, query: string): Record<string, string> | undefined {
     return this.retrievalService.detectMetadataFilter(notebookId, query)
+  }
+
+  /**
+   * Rebuild the notebook when its stored vectors were produced by a different
+   * embedding model than the one currently configured.
+   */
+  async ensureEmbeddingModelConsistency(
+    notebookId: string
+  ): Promise<{ rebuilt: boolean; documents: number }> {
+    return this.indexMaintenance.ensureEmbeddingModelConsistency(notebookId)
+  }
+
+  /** True when stored vectors belong to a model other than the current one. */
+  async hasStaleEmbeddingModel(notebookId: string): Promise<boolean> {
+    return this.indexMaintenance.hasStaleEmbeddingModel(notebookId)
   }
 
   /**

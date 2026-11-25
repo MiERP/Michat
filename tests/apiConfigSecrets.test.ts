@@ -84,4 +84,19 @@ describe('ApiConfigManager secret handling', () => {
     const { manager } = createManager()
     await expect(manager.saveConfig({ baseUrl: 'https://example.com/v1' })).rejects.toThrow()
   })
+
+  it('rejects non-loopback embedding URLs', async () => {
+    const { manager } = createManager()
+    await expect(
+      manager.saveConfig({ embeddingBaseUrl: 'https://example.com/v1' })
+    ).rejects.toThrow()
+  })
+
+  it('normalizes a loopback embedding URL', async () => {
+    const { manager } = createManager()
+    await manager.saveConfig({ embeddingBaseUrl: 'http://127.0.0.1:8081/v1/' })
+
+    const internal = await manager.getConfig()
+    expect(internal.embeddingBaseUrl).toBe('http://127.0.0.1:8081/v1')
+  })
 })

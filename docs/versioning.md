@@ -19,8 +19,8 @@ for the current version.
 | New user-facing feature, architecture replacement | `minor` |
 | Bug fix, docs, build, dependency patch | `patch` |
 
-The API-only release removed the bundled llama runtime and model management, so
-it is `2.0.0`.
+The API-only release replaced the bundled model runtime and model management
+with one external OpenAI-compatible API, so it is `2.0.0`.
 
 ## Commands
 

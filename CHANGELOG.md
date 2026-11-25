@@ -2,6 +2,40 @@
 
 All notable changes to MiChat are documented in this file.
 
+## [2.2.1] - 2026-11-25
+
+### Fixed
+
+- If Chromium's renderer exits before the first paint because security software blocks the
+  Electron sandbox (observed with Kaspersky 21.27), MiChat asks for confirmation, writes a
+  compatibility marker, relaunches with `--no-sandbox`, and opens normally. Machines where the
+  sandbox works keep it enabled; the fallback is local to the affected user profile.
+- Pre-paint renderer exits with reasons such as `killed` or `abnormal-exit` are handled too.
+- If compatibility mode also fails, MiChat closes the hidden window and exits cleanly instead of
+  leaving a silent background process holding the database.
+- `MiChat.exe --reset-compat-mode` clears the compatibility marker after security-software
+  exclusions are configured.
+
+### Changed
+
+- MiChat is now explicitly a client for an external `llama-server` (or any OpenAI-compatible
+  server). It does not start, stop, bundle, or manage the model runtime. The default API address
+  is `http://127.0.0.1:8080/v1`, llama-server's default port.
+- Settings → API exposes an optional embedding base URL, so chat and embedding models can run on
+  separate `llama-server` ports. The embedding URL is validated as loopback-only, including
+  values loaded from older configuration files.
+- Retrieval validates the query embedding directly instead of issuing a separate dimension-probe
+  request on the first search after startup.
+- Chat and embedding providers are cached until the saved API configuration changes, avoiding
+  repeated provider construction for every message and embedding batch.
+- Changing the embedding model or embedding endpoint is now detected at startup and after saving
+  the API configuration. Each vector stores a `model@endpoint` signature; a mismatch or a missing
+  chunk vector triggers an in-place re-embed instead of searching incompatible embedding spaces,
+  and a failed re-embed leaves the old metadata so the next pass retries. Chunk IDs, FTS rows,
+  sections, and existing citations are preserved.
+- Removed stale model-runtime documentation and unused direct dependencies; the system map now
+  describes the current API-only architecture.
+
 ## [2.2.0] - 2026-11-25
 
 ### Added
@@ -19,8 +53,8 @@ All notable changes to MiChat are documented in this file.
 ### Changed
 
 - Merge persona, long-term memory, and RAG context into a single leading system message. This
-  fixes empty answers and HTTP 500 responses from llama.cpp/Qwen chat templates that reject
-  multiple system messages.
+  fixes empty answers and HTTP 500 responses from chat templates that reject multiple system
+  messages.
 - Default RAG settings: `ragTopK=5`, `ragThreshold=0.5`, heuristic rerank disabled.
 - RAG context budget: 4,000 tokens total, 1,400 tokens per document.
 - Chat generation: temperature `0.2`, output cap `1,400` tokens, and instructions for concise
@@ -29,8 +63,8 @@ All notable changes to MiChat are documented in this file.
 
 ### Fixed
 
-- Assistant messages no longer stay empty when the llama.cpp/Qwen chat template rejects the
-  request because it contains multiple system messages.
+- Assistant messages no longer stay empty when the chat template rejects the request because it
+  contains multiple system messages.
 - Long answers (more than five minutes) no longer fail during generation.
 
 ## [2.1.0] - 2026-11-25

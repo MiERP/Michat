@@ -79,7 +79,7 @@ export default defineConfig({
       // otherwise the CJS output will contain require("remark") which fails at runtime
       // because these packages only provide ESM exports.
       externalizeDeps: {
-        exclude: ['remark', 'remark-gfm', 'remark-parse', 'unified', 'unist-util-visit']
+        exclude: ['remark', 'remark-gfm', 'unist-util-visit']
       }
     }
   },

@@ -32,14 +32,15 @@ export function registerAllHandlers(
   shortcutManager: ShortcutManager,
   store: Store<StoreSchema>,
   backgroundJobService: BackgroundJobService,
-  notebookSummaryService: NotebookSummaryService
+  notebookSummaryService: NotebookSummaryService,
+  onApiConfigSaved?: () => void
 ) {
   const quizService = new QuizService(apiClient, knowledgeService, () =>
     apiConfigManager.getContextWindowSync()
   )
 
   registerChatHandlers(apiClient, sessionAutoSwitchService, knowledgeService)
-  registerApiHandlers(apiClient, apiConfigManager)
+  registerApiHandlers(apiClient, apiConfigManager, onApiConfigSaved)
   registerSettingsHandlers()
   registerNotebookHandlers()
   registerNoteHandlers(apiClient, knowledgeService)

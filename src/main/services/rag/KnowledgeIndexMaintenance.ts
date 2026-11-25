@@ -8,10 +8,20 @@ import { randomUUID } from 'crypto'
 import { and, eq, inArray } from 'drizzle-orm'
 import { executeCheckpoint, getDatabase, getSqlite } from '../../db'
 import { chunks, documents, embeddings, sections } from '../../db/schema'
-import { vectorStoreManager } from '../../vectorstore'
+import { documentVectorStore, sectionVectorStore, vectorStoreManager } from '../../vectorstore'
+import { markActive } from '../../utils/activityTracker'
+import { isShuttingDown } from '../../utils/shutdownState'
+import {
+  beginEmbeddingRebuild,
+  endEmbeddingRebuild,
+  isEmbeddingRebuildActive,
+  isIndexingActive,
+  waitForIndexingToFinish
+} from './embeddingRebuildState'
 import type { EmbeddingService } from '../EmbeddingService'
 import type { KnowledgeDocumentIndexer } from './KnowledgeDocumentIndexer'
 import type { KnowledgeEmbeddingRuntime } from './KnowledgeEmbeddingRuntime'
+import type { SectionIndexService } from './SectionIndexService'
 import {
   extractLegalMetadata,
   extractRetrievalMetadata,
@@ -28,10 +38,169 @@ export interface KnowledgeIndexMaintenanceDeps {
   embeddingService: EmbeddingService
   embeddingRuntime: KnowledgeEmbeddingRuntime
   documentIndexer: KnowledgeDocumentIndexer
+  sectionIndex: SectionIndexService
 }
 
 export class KnowledgeIndexMaintenance {
   constructor(private readonly deps: KnowledgeIndexMaintenanceDeps) {}
+
+  /**
+   * True when at least one stored vector was produced by an embedding model
+   * other than the one currently configured. Vectors from different models
+   * share the same 1024 dimensions but not the same space, so searching them
+   * together silently returns irrelevant chunks.
+   */
+  async hasStaleEmbeddingModel(notebookId: string): Promise<boolean> {
+    const [currentModel, currentSignature] = await Promise.all([
+      this.deps.embeddingService.getDefaultModel(),
+      this.deps.embeddingService.getSignature()
+    ])
+    if (!currentModel) return false
+
+    const sqlite = getSqlite()
+    if (!sqlite) return false
+
+    // A chunk without a vector means an earlier upsert was interrupted. The
+    // metadata may still look current, so check completeness explicitly.
+    // While a document index is active its chunks are temporarily incomplete;
+    // skip only this check, never the model/signature comparison above.
+    if (!isIndexingActive(notebookId)) {
+      const missingVector = sqlite
+        .prepare(
+          `SELECT id FROM chunks WHERE notebook_id = ?
+           EXCEPT
+           SELECT chunk_id FROM vec_embeddings WHERE notebook_id = ?
+           LIMIT 1`
+        )
+        .get(notebookId, notebookId)
+      if (missingVector) return true
+    }
+
+    const rows = sqlite
+      .prepare('SELECT model, dimensions FROM embeddings WHERE notebook_id = ?')
+      .all(notebookId) as Array<{ model: string; dimensions: number }>
+
+    if (rows.length === 0) return false
+
+    // The `model` column stores `model@endpoint` when the provider exposes a
+    // signature. Legacy rows contain only the model name, which intentionally
+    // does not match a signature and triggers one rebuild.
+    const expected = currentSignature ?? currentModel
+    return rows.some((row) => row.model !== expected || row.dimensions !== 1024)
+  }
+
+  /**
+   * Re-embed every vector tier in place when the embedding model changes.
+   * Chunks, FTS rows, sections, and chunk IDs stay intact, so existing
+   * citations keep working; only vectors from the incompatible model space
+   * are replaced.
+   */
+  async rebuildAllEmbeddings(notebookId: string): Promise<number> {
+    if (isEmbeddingRebuildActive(notebookId)) return 0
+    beginEmbeddingRebuild(notebookId)
+
+    try {
+      if (isShuttingDown()) return 0
+
+      // Drain an import/auto-sync reindex that was already writing before this
+      // rebuild clears the vector tiers. New writes are rejected by the gate.
+      const settled = await waitForIndexingToFinish(notebookId, 120_000)
+      if (!settled) {
+        throw new Error('Document indexing did not settle before the embedding rebuild')
+      }
+      if (!(await this.hasStaleEmbeddingModel(notebookId))) return 0
+
+      await this.deps.embeddingRuntime.ensureReady()
+      await this.deps.embeddingRuntime.assertDimensions()
+
+      const db = getDatabase()
+      const sqlite = getSqlite()
+      if (!sqlite) return 0
+
+      const docs = db
+        .select({ id: documents.id, title: documents.title })
+        .from(documents)
+        .where(and(eq(documents.notebookId, notebookId), eq(documents.status, 'indexed')))
+        .all()
+
+      // Drop only the vector tiers and their metadata. The relational index
+      // (chunks, FTS, sections) is preserved so citations remain valid. While
+      // the rebuild runs, hierarchical retrieval skips the empty document and
+      // section tiers instead of mixing them with the new model space.
+      const allDocumentIds = db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(eq(documents.notebookId, notebookId))
+        .all()
+        .map((doc) => doc.id)
+
+      const vectorStore = await vectorStoreManager.getStore(notebookId, undefined, 1024)
+      await vectorStore.clear()
+      documentVectorStore.deleteByDocumentIds(allDocumentIds)
+      sectionVectorStore.deleteByDocumentIds(allDocumentIds)
+
+      // Reuse the tested batch/adaptive-split path. Keep marking activity so
+      // the idle-only background queue does not touch the same rows.
+      let rebuiltChunks = 0
+      let remaining = 1
+      while (remaining > 0) {
+        if (isShuttingDown()) throw new Error('Application is shutting down')
+        markActive()
+        const result = await this.rebuildMissingVectors(notebookId, 200)
+        rebuiltChunks += result.rebuilt
+        remaining = result.remaining
+        if (result.rebuilt === 0 && remaining > 0) {
+          throw new Error(`Could not rebuild ${remaining} chunk vector(s)`)
+        }
+      }
+
+      let rebuiltDocuments = 0
+      for (const doc of docs) {
+        if (isShuttingDown()) throw new Error('Application is shutting down')
+        try {
+          markActive()
+          await this.deps.documentIndexer.refreshDocumentVector(doc.id, true)
+          await this.deps.sectionIndex.refreshDocumentVectors(notebookId, doc.id)
+          rebuiltDocuments++
+        } catch (error) {
+          Logger.error(
+            'KnowledgeService',
+            `Failed to rebuild document/section vectors for ${doc.title} (${doc.id}):`,
+            error
+          )
+        }
+      }
+
+      Logger.info(
+        'KnowledgeService',
+        `Rebuilt ${rebuiltChunks} chunk vector(s) and ${rebuiltDocuments}/${docs.length} document/section index(es) in notebook ${notebookId}`
+      )
+      if (rebuiltDocuments < docs.length) {
+        throw new Error(
+          `Document/section vector rebuild incomplete: ${rebuiltDocuments}/${docs.length}`
+        )
+      }
+      return rebuiltDocuments
+    } finally {
+      endEmbeddingRebuild(notebookId)
+    }
+  }
+
+  /** Rebuild only when the stored vectors belong to another model. */
+  async ensureEmbeddingModelConsistency(
+    notebookId: string
+  ): Promise<{ rebuilt: boolean; documents: number }> {
+    if (!(await this.hasStaleEmbeddingModel(notebookId))) {
+      return { rebuilt: false, documents: 0 }
+    }
+
+    Logger.warn(
+      'KnowledgeService',
+      `Embedding model changed for notebook ${notebookId}; rebuilding all document indexes`
+    )
+    const documents = await this.rebuildAllEmbeddings(notebookId)
+    return { rebuilt: true, documents }
+  }
 
   /**
    * Re-embed chunks that do not have a vector yet. Runs in batches so a
@@ -41,6 +210,7 @@ export class KnowledgeIndexMaintenance {
     notebookId: string,
     limit = 200
   ): Promise<{ rebuilt: number; remaining: number; ftsRebuilt: number }> {
+    if (isShuttingDown()) throw new Error('Application is shutting down')
     await this.deps.embeddingRuntime.ensureReady()
 
     const db = getDatabase()
@@ -80,6 +250,7 @@ export class KnowledgeIndexMaintenance {
       batchRows.map((row) => row.content),
       { dimensions: 1024 }
     )
+    if (isShuttingDown()) throw new Error('Application is shutting down')
 
     const now = new Date()
     const vectorItems: Array<{
@@ -92,10 +263,18 @@ export class KnowledgeIndexMaintenance {
     for (let i = 0; i < batchRows.length; i++) {
       const row = batchRows[i]
       const embResult = embeddingResults[i]
-      if (!embResult || embResult.dimensions !== 1024) continue
+      if (!embResult || embResult.dimensions !== 1024) {
+        throw new Error(
+          `Embedding model returned ${embResult?.dimensions ?? 0}-dimensional vectors; ` +
+            'MiChat requires 1024. No vectors were written for this batch.'
+        )
+      }
+      const vectorModel = embResult.signature ?? embResult.model
 
       // The `embeddings` table may still hold a metadata row from before, so
-      // reuse its id to keep the 1-1 relation with the vector.
+      // reuse its id to keep the 1-1 relation with the vector. Updating the
+      // model/dimensions in place is what makes an interrupted model switch
+      // detectable and retryable.
       const metaRow = db
         .select({ id: embeddings.id })
         .from(embeddings)
@@ -110,10 +289,15 @@ export class KnowledgeIndexMaintenance {
             id: embeddingId,
             chunkId: row.id,
             notebookId,
-            model: embResult.model,
+            model: vectorModel,
             dimensions: embResult.dimensions,
             createdAt: now
           })
+          .run()
+      } else {
+        db.update(embeddings)
+          .set({ model: vectorModel, dimensions: embResult.dimensions })
+          .where(eq(embeddings.id, metaRow.id))
           .run()
       }
 
@@ -169,6 +353,15 @@ export class KnowledgeIndexMaintenance {
         .all()
         .map((row) => row.documentId)
     )
+    const documentIdsWithSectionVectors = new Set<string>(
+      sqlite
+        ? (
+            sqlite
+              .prepare('SELECT DISTINCT document_id FROM vec_sections WHERE notebook_id = ?')
+              .all(notebookId) as Array<{ document_id: string }>
+          ).map((row) => row.document_id)
+        : []
+    )
 
     const rows = db
       .select({ id: documents.id, content: documents.content, metadata: documents.metadata })
@@ -197,8 +390,12 @@ export class KnowledgeIndexMaintenance {
       }
 
       // Sections exist but no section records (indexed before the section
-      // index) → reindex to build the tier for hierarchical retrieval.
-      if (hasSections && !documentIdsWithSections.has(row.id)) {
+      // index) or no section vectors (for example an interrupted re-embed)
+      // → rebuild the tier for hierarchical retrieval.
+      if (
+        hasSections &&
+        (!documentIdsWithSections.has(row.id) || !documentIdsWithSectionVectors.has(row.id))
+      ) {
         needs.push(row.id)
       }
     }

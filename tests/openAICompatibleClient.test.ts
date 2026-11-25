@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { streamText } from 'ai'
+import { embed, embedMany, streamText } from 'ai'
 import { OpenAICompatibleClient } from '../src/main/ai/OpenAICompatibleClient'
 import type { ChatClientDescriptor, ClientConfig, GenerationOptions } from '../src/main/ai/types'
 import type { APIMessage } from '../src/shared/types/chat'
@@ -11,7 +11,11 @@ vi.mock('ai', () => ({
 }))
 
 vi.mock('@ai-sdk/openai-compatible', () => ({
-  createOpenAICompatible: vi.fn(() => (modelId: string) => ({ modelId }))
+  createOpenAICompatible: vi.fn(() =>
+    Object.assign((modelId: string) => ({ modelId }), {
+      textEmbeddingModel: (modelId: string) => ({ modelId })
+    })
+  )
 }))
 
 class InspectableClient extends OpenAICompatibleClient {
@@ -87,6 +91,42 @@ describe('OpenAICompatibleClient generation defaults', () => {
 
     expect(client.generationDefaults.temperature).toBe(0.2)
     expect(client.generationDefaults.maxTokens).toBe(2048)
+  })
+})
+
+describe('OpenAICompatibleClient embedding timeouts', () => {
+  beforeEach(() => {
+    vi.mocked(embed).mockReset()
+    vi.mocked(embedMany).mockReset()
+  })
+
+  it('bounds single and batch embedding requests with an abort signal', async () => {
+    vi.mocked(embed).mockResolvedValue({
+      embedding: new Array(1024).fill(0),
+      usage: { tokens: 1 }
+    } as never)
+    vi.mocked(embedMany).mockResolvedValue({
+      embeddings: [new Array(1024).fill(0)],
+      usage: { tokens: 1 }
+    } as never)
+
+    const client = new InspectableClient(DESCRIPTOR)
+    client.configure({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'embed-model' })
+
+    await client.createEmbedding('one text')
+    await client.createEmbeddings(['one text'])
+
+    const singleCall = vi.mocked(embed).mock.calls.at(-1)?.[0] as unknown as {
+      abortSignal?: AbortSignal
+    }
+    const batchCall = vi.mocked(embedMany).mock.calls.at(-1)?.[0] as unknown as {
+      abortSignal?: AbortSignal
+    }
+
+    // A local server that stops responding must not hang indexing or the
+    // shutdown barrier forever.
+    expect(singleCall.abortSignal).toBeInstanceOf(AbortSignal)
+    expect(batchCall.abortSignal).toBeInstanceOf(AbortSignal)
   })
 })
 

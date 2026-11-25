@@ -55,12 +55,32 @@ You configure an API once and MiChat uses it for chat and embeddings.
 - **More reliable citations:** article-number boost for questions that name `Điều N`, plus
   definition-question handling for `khoản 10b`/`10c`-style definitions.
 - **No more empty answers:** persona, memory, and RAG context are merged into one system message
-  that llama.cpp/Qwen chat templates accept.
+  that OpenAI-compatible chat templates accept.
 - **Faster replies:** tighter RAG budget, `temperature=0.2`, 1,400-token output cap, and shorter
   grounded answers.
 
 > Upgrading from 2.1.x: re-index each legal PDF once (source panel → **Trích xuất lại**) so the
 > new section index is built. Chat answers improve only after the document is re-indexed.
+
+### What's new in 2.2.1
+
+- **llama-server-first setup:** the default API address is now `http://127.0.0.1:8080/v1`
+  (llama-server's default). MiChat remains a pure client: it does not start, stop, bundle, or
+  manage the model server.
+- **Separate embedding server:** Settings → API now exposes an optional embedding base URL, so a
+  chat `llama-server` on 8080 and a `bge-m3` embedding server on 8081 can be used together.
+- **Faster first answer:** retrieval validates the query vector instead of making a separate
+  embedding probe, and chat/embedding providers are cached until the saved configuration changes.
+- **Safe embedding changes:** if the embedding model or endpoint changes, MiChat detects the
+  stale vectors and re-embeds the affected notebooks in place instead of searching incompatible
+  vectors. Chunk IDs and citations are preserved.
+- **Stricter privacy:** a legacy or hand-edited `embeddingBaseUrl` must also be loopback-only.
+- **Compatibility mode:** if security software (for example Kaspersky) blocks Electron's renderer
+  sandbox, MiChat detects the renderer exit before the first paint, asks for confirmation, writes
+  a local marker, and relaunches once with `--no-sandbox`. Other machines keep the sandbox
+  enabled. After adding MiChat to the security software exclusions, run
+  `MiChat.exe --reset-compat-mode` (or delete `%APPDATA%\michat\compat-no-sandbox`) to return to
+  the default sandbox.
 
 ---
 
@@ -71,9 +91,6 @@ Get the latest build from
 
 - Windows installer: `michat-<version>-setup.exe`
 - Source archives for every tag
-- Legacy **1.1.1** builds with the old bundled llama.cpp runtime are still
-  available under [releases/tag/v1.1.1](https://github.com/MiERP/Michat/releases/tag/v1.1.1).
-  They are superseded by the API-only 2.x line.
 
 Local builds are unsigned, so Windows SmartScreen may show a warning.
 
@@ -81,14 +98,26 @@ Local builds are unsigned, so Windows SmartScreen may show a warning.
 
 ## Quick start
 
-1. Install MiChat and start your local model application.
-2. Open **Settings → API**.
+1. Start your own `llama-server` (MiChat does not launch it):
+
+   ```bash
+   # Chat model
+   llama-server -m models/Qwen3.5-4B-Q4_K_M.gguf \
+     --host 127.0.0.1 --port 8080 --ctx-size 8192 --alias qwen-local
+
+   # Embedding model (1024-dimensional, for example bge-m3)
+   llama-server -m models/bge-m3-q4_k_m.gguf \
+     --host 127.0.0.1 --port 8081 --embeddings --alias bge-m3
+   ```
+
+2. Install and open MiChat, then go to **Settings → API**.
 3. Enter:
-   - **Base URL** — loopback address ending in `/v1`, e.g.
-     `http://127.0.0.1:1234/v1`
+   - **Base URL** — `http://127.0.0.1:8080/v1` (llama-server default)
    - **API key** — optional; encrypted with the OS keystore when available
-   - **Chat model** — exact model id advertised by `/v1/models`
-   - **Embedding model** — must return **1024-dimensional** vectors
+   - **Chat model** — exact model id advertised by `/v1/models` (for example `qwen-local`)
+   - **Embedding model** — must return **1024-dimensional** vectors (for example `bge-m3`)
+   - **Embedding API base URL** — `http://127.0.0.1:8081/v1` when embeddings run separately;
+     leave blank when chat and embeddings share one server
    - **Context window** — used for automatic session switching
 4. Click **Test Connection**, then **Save**.
 5. Import documents or create notes and start chatting.
@@ -128,7 +157,7 @@ The API must expose OpenAI-compatible:
 ### ⚡ Lightweight
 
 - No Docker, no bundled model runtime, no multi-gigabyte model downloads
-- Installer stays around 160 MB
+- Installer stays under 200 MB
 - Source builds for Windows, macOS, and Linux
 
 ---
@@ -165,8 +194,9 @@ See [`docs/versioning.md`](docs/versioning.md) for the full release flow.
 
 ## Project status
 
-MiChat is early-stage. The API-only 2.x line is the current direction; the old
-bundled llama.cpp runtime was removed so the app stays small and composable.
+MiChat is early-stage. The API-only 2.x line is the current direction: MiChat
+owns the notebook, retrieval, and chat experience, while a separate local server
+owns model execution.
 
 ### Current limitations
 
@@ -209,8 +239,7 @@ More ideas are in the pipeline — feel free to open an issue.
 
 - [API-only architecture](docs/api-only-architecture.md)
 - [Versioning and releases](docs/versioning.md)
-- [System map](docs/system-map.md) (historical snapshot; API-only changes are
-  noted at the top)
+- [System map](docs/system-map.md)
 - [Dependency exceptions](docs/security/dependency-exceptions.md)
 
 ---

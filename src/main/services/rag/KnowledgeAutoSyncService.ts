@@ -211,6 +211,24 @@ export class KnowledgeAutoSyncService {
 
       this.emit({ documentId, documentTitle: doc.title, reason: 'file-changed' })
     } catch (error) {
+      if ((error as Error).message.includes('Embedding index rebuild in progress')) {
+        // A file changed while the model rebuild owned the notebook. Keep the
+        // change pending instead of losing it until the next filesystem event.
+        const existing = this.syncTimers.get(documentId)
+        if (existing) clearTimeout(existing)
+        const timer = setTimeout(() => {
+          this.syncTimers.delete(documentId)
+          void this.autoSyncDocument(documentId)
+        }, 30_000)
+        timer.unref()
+        this.syncTimers.set(documentId, timer)
+        Logger.info(
+          'KnowledgeService',
+          `Auto-sync for ${documentId} deferred until the embedding rebuild finishes`
+        )
+        return
+      }
+
       Logger.error('KnowledgeService', `Auto-sync failed for document ${documentId}:`, error)
       this.emit({
         documentId,

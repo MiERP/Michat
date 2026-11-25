@@ -81,6 +81,7 @@ export class BackgroundJobService {
   private notebookSummaryService?: NotebookSummaryService
   private timer: NodeJS.Timeout | null = null
   private running = false
+  private paused = false
   private idleMs: number
   private heavyCooldownMs: number
   private lastHeavyJobAt = 0
@@ -198,6 +199,36 @@ export class BackgroundJobService {
       .where(eq(backgroundJobs.status, 'pending'))
       .get()
     return row?.count ?? 0
+  }
+
+  /**
+   * Stop the idle queue from starting new work while a model-level rebuild
+   * owns the notebook. An in-flight enrich/summarize job is aborted; a
+   * reindex/rebuild job is not abortable mid-write, so callers should also
+   * await `waitForActiveJob()` before touching the same rows.
+   */
+  pause(): void {
+    this.paused = true
+    if (this.running) this.cancelActiveJob('embedding-rebuild')
+  }
+
+  resume(): void {
+    this.paused = false
+  }
+
+  async waitForActiveJob(timeoutMs = 120_000): Promise<boolean> {
+    if (!this.activeRun) return true
+
+    const activeRun = this.activeRun
+    const settled = activeRun.then(
+      () => true,
+      () => true
+    )
+    const timeout = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), Math.max(timeoutMs, 1))
+      timer.unref?.()
+    })
+    return Promise.race([settled, timeout])
   }
 
   /**
@@ -354,6 +385,7 @@ export class BackgroundJobService {
    * Job làm giàu tài liệu còn cooldown thì bị bỏ qua để nhường cho job khác.
    */
   async tick(): Promise<void> {
+    if (this.paused) return
     if (this.running) {
       // User quay lại → nhường CPU ngay, job sẽ chạy lại khi app rảnh
       if (!isIdle(this.idleMs)) this.cancelActiveJob('user-active')

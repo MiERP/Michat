@@ -1,13 +1,22 @@
-import { BrowserWindow, shell, session } from 'electron'
+import { app, BrowserWindow, dialog, shell, session } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { settingsManager } from '../config'
 import { getSecureWebPreferences } from '../security/appHardening'
 import { buildContentSecurityPolicy } from '../security/csp'
 import { isAllowedExternalOpenUrl } from '../security/guards'
+import {
+  buildRelaunchArgs,
+  isCompatModeRequested,
+  requestCompatMode,
+  shouldAttemptCompatFallback,
+  shouldReportRendererExit
+} from '../compatMode'
+import Logger from '../../shared/utils/logger'
 
 let mainWindow: BrowserWindow | null = null
 let cspApplied = false
+let relaunchingForCompatMode = false
 
 /**
  * Apply the Content-Security-Policy as a response header. The same policy is
@@ -53,8 +62,83 @@ export function createMainWindow(): BrowserWindow {
     webPreferences: getSecureWebPreferences(join(__dirname, '../preload/index.js'))
   })
 
+  let windowShown = false
   mainWindow.on('ready-to-show', () => {
+    windowShown = true
     mainWindow?.show()
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    Logger.error('MainWindow', 'Renderer process gone', details)
+    if (windowShown || relaunchingForCompatMode) return
+
+    const reason = details.reason
+    if (!shouldReportRendererExit(reason)) return
+
+    const alreadyCompat = isCompatModeRequested()
+    const noSandboxSwitch =
+      app.commandLine.hasSwitch('no-sandbox') ||
+      process.argv.some((arg) => arg === '--no-sandbox' || arg.startsWith('--no-sandbox='))
+
+    if (
+      shouldAttemptCompatFallback({
+        reason,
+        windowShown,
+        alreadyCompat,
+        noSandboxSwitch
+      })
+    ) {
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        title: 'MiChat - Compatibility mode',
+        message: 'The embedded renderer closed before the window could open.',
+        detail:
+          "Your security software may be blocking Electron's renderer sandbox (for example Kaspersky).\n\n" +
+          'Run MiChat once in compatibility mode? This disables the renderer sandbox for this Windows user ' +
+          'and writes a marker so the app can open. Add MiChat to your security software exclusions and run ' +
+          '"MiChat.exe --reset-compat-mode" to return to the default sandbox.',
+        buttons: ['Run in compatibility mode', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      })
+
+      if (choice !== 0) {
+        mainWindow?.destroy()
+        app.quit()
+        return
+      }
+
+      if (!requestCompatMode()) {
+        dialog.showErrorBox(
+          'MiChat - Renderer error',
+          `The embedded renderer exited before the window could open (${reason}), and MiChat could not save the compatibility flag.\n\n` +
+            'Add MiChat to your security software exclusions and restart the app.'
+        )
+        mainWindow?.destroy()
+        app.quit()
+        return
+      }
+
+      relaunchingForCompatMode = true
+      Logger.warn(
+        'MainWindow',
+        `Renderer exited before first paint (${reason}); relaunching in compatibility mode`
+      )
+      app.relaunch({ args: buildRelaunchArgs(process.argv) })
+      app.quit()
+      return
+    }
+
+    dialog.showErrorBox(
+      'MiChat - Renderer error',
+      `The embedded renderer exited before the window could open (${reason}).\n\n` +
+        (alreadyCompat
+          ? 'Compatibility mode is already active; check the security software exclusions and logs.'
+          : 'The renderer could not start with the current sandbox settings. Add MiChat to your security software exclusions and restart the app.')
+    )
+    mainWindow?.destroy()
+    app.quit()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

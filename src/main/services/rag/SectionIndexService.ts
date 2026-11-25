@@ -128,7 +128,8 @@ export class SectionIndexService {
   async updateVectors(
     notebookId: string,
     documentId: string,
-    records: NewSection[]
+    records: NewSection[],
+    options: { throwOnError?: boolean } = {}
   ): Promise<void> {
     if (records.length === 0) {
       // Document no longer has sections — drop the vectors it left behind so the
@@ -162,7 +163,14 @@ export class SectionIndexService {
 
       for (let i = 0; i < results.length; i++) {
         const result = results[i]
-        if (!result || result.dimensions !== 1024) continue
+        if (!result || result.dimensions !== 1024) {
+          if (options.throwOnError) {
+            throw new Error(
+              `Section vector for ${records[i].id} has ${result?.dimensions ?? 0} dimensions; 1024 required`
+            )
+          }
+          continue
+        }
         items.push({
           id: `secvec_${records[i].id}`,
           sectionId: records[i].id,
@@ -175,7 +183,30 @@ export class SectionIndexService {
       sectionVectorStore.upsert(notebookId, items)
     } catch (error) {
       Logger.warn('KnowledgeService', `Failed to update section vectors for ${documentId}:`, error)
+      if (options.throwOnError) throw error
     }
+  }
+
+  /**
+   * Re-embed all existing section rows for a document. Used when the
+   * embedding model changes and section vectors must move to the new space
+   * without rebuilding the relational index.
+   */
+  async refreshDocumentVectors(notebookId: string, documentId: string): Promise<void> {
+    const rows = getDatabase()
+      .select()
+      .from(sections)
+      .where(eq(sections.documentId, documentId))
+      .all()
+
+    if (rows.length === 0) {
+      sectionVectorStore.deleteByDocumentIds([documentId])
+      return
+    }
+
+    await this.updateVectors(notebookId, documentId, rows as NewSection[], {
+      throwOnError: true
+    })
   }
 
   /**

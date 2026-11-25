@@ -15,11 +15,22 @@ type BackfillContext = {
   notebookId: string
   knowledgeService: KnowledgeService
   jobService: BackgroundJobService
+  providerManager: FakeProviderManager
 }
 
 type DocumentStructureMetadata = {
   structure?: {
     sections?: unknown[]
+  }
+}
+
+type KnowledgeServiceInternals = {
+  embeddingService: {
+    embedBatch: (
+      texts: string[],
+      config?: { dimensions?: number },
+      onProgress?: (completed: number, total: number) => void
+    ) => Promise<EmbeddingResult[]>
   }
 }
 
@@ -44,6 +55,12 @@ function embedding(text: string): EmbeddingResult {
 }
 
 class FakeProviderManager {
+  public signature: string | null = null
+
+  async getEmbeddingSignature(): Promise<string | null> {
+    return this.signature
+  }
+
   async getEmbeddingProvider() {
     return {
       createEmbedding: async (text: string) => embedding(text),
@@ -150,7 +167,8 @@ describe('vector rebuild and knowledge backfill', () => {
       })
       .run()
 
-    const knowledgeService = new KnowledgeService(new FakeProviderManager() as never)
+    const providerManager = new FakeProviderManager()
+    const knowledgeService = new KnowledgeService(providerManager as never)
     const jobService = new BackgroundJobService(
       knowledgeService,
       { generateLinksForDocument: async () => 0, decayLinks: () => 0 } as never,
@@ -159,7 +177,15 @@ describe('vector rebuild and knowledge backfill', () => {
       0
     )
 
-    context = { dbModule, schema, db, notebookId, knowledgeService, jobService }
+    context = {
+      dbModule,
+      schema,
+      db,
+      notebookId,
+      knowledgeService,
+      jobService,
+      providerManager
+    }
   })
 
   afterEach(async () => {
@@ -220,8 +246,10 @@ describe('vector rebuild and knowledge backfill', () => {
 
     // Mô phỏng hậu quả của việc tạo lại bảng vector: vector mất, chunk còn nguyên
     dbModule.getSqlite().prepare('DELETE FROM vec_embeddings WHERE notebook_id = ?').run(notebookId)
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(true)
 
     const result = await knowledgeService.rebuildMissingVectors(notebookId, 500)
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(false)
 
     expect(result.rebuilt).toBe(chunkCount)
     expect(result.remaining).toBe(0)
@@ -245,6 +273,282 @@ describe('vector rebuild and knowledge backfill', () => {
       threshold: 0
     })
     expect(results.length).toBeGreaterThan(0)
+  })
+
+  it('detects and rebuilds vectors created by a different embedding model', async () => {
+    const { knowledgeService, notebookId, dbModule } = context!
+    const documentId = await seedDocument()
+    const chunkIdsBefore = knowledgeService
+      .getDocumentChunks(documentId)
+      .map((chunk) => chunk.id)
+      .sort()
+
+    // Simulate vectors produced by the previous embedding server. Content and
+    // dimensions still match, but the vector space does not.
+    dbModule
+      .getSqlite()
+      .prepare('UPDATE embeddings SET model = ? WHERE notebook_id = ?')
+      .run('legacy-embedding-model', notebookId)
+
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(true)
+
+    const result = await knowledgeService.ensureEmbeddingModelConsistency(notebookId)
+
+    expect(result.rebuilt).toBe(true)
+    expect(result.documents).toBe(1)
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(false)
+
+    const chunksAfter = knowledgeService.getDocumentChunks(documentId)
+    expect(chunksAfter.map((chunk) => chunk.id).sort()).toEqual(chunkIdsBefore)
+
+    const currentModel = (
+      dbModule
+        .getSqlite()
+        .prepare('SELECT DISTINCT model FROM embeddings WHERE notebook_id = ?')
+        .all(notebookId) as Array<{ model: string }>
+    ).map((row) => row.model)
+    expect(currentModel).toEqual(['fake-local-embedding'])
+  })
+
+  it('detects an embedding endpoint change stored on each vector row', async () => {
+    const { knowledgeService, notebookId, dbModule, providerManager } = context!
+    await seedDocument()
+
+    providerManager.signature = 'fake-local-embedding@http://127.0.0.1:8081/v1'
+    dbModule
+      .getSqlite()
+      .prepare('UPDATE embeddings SET model = ? WHERE notebook_id = ?')
+      .run('fake-local-embedding@http://old-endpoint/v1', notebookId)
+
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(true)
+
+    const result = await knowledgeService.ensureEmbeddingModelConsistency(notebookId)
+    expect(result.rebuilt).toBe(true)
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(false)
+
+    const models = (
+      dbModule
+        .getSqlite()
+        .prepare('SELECT DISTINCT model FROM embeddings WHERE notebook_id = ?')
+        .all(notebookId) as Array<{ model: string }>
+    ).map((row) => row.model)
+    expect(models).toEqual(['fake-local-embedding@http://127.0.0.1:8081/v1'])
+  })
+
+  it('keeps the model@endpoint signature on chunks created by an incremental reindex', async () => {
+    const { knowledgeService, notebookId, db, schema, dbModule, providerManager } = context!
+    const { eq } = await import('drizzle-orm')
+
+    providerManager.signature = 'fake-local-embedding@http://127.0.0.1:8080/v1'
+    const documentId = await seedDocument()
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(false)
+
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, documentId)).get()
+    db.update(schema.documents)
+      .set({
+        content: `${row!.content}\n\n## Mới\n\nNội dung mới được thêm vào để reindex sinh chunk.`
+      })
+      .where(eq(schema.documents.id, documentId))
+      .run()
+
+    await knowledgeService.reindexDocument(documentId)
+
+    // A chunk created by an incremental reindex must carry the same identity
+    // as the vectors written by a full index; otherwise the next startup
+    // treats the whole notebook as stale and re-embeds every chunk.
+    const models = dbModule
+      .getSqlite()
+      .prepare('SELECT DISTINCT model FROM embeddings WHERE notebook_id = ?')
+      .all(notebookId)
+    expect(models).toEqual([{ model: 'fake-local-embedding@http://127.0.0.1:8080/v1' }])
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(false)
+  })
+
+  it('detects vectors stored with a non-1024 dimension and rebuilds them', async () => {
+    const { knowledgeService, notebookId, dbModule } = context!
+    await seedDocument()
+
+    dbModule
+      .getSqlite()
+      .prepare('UPDATE embeddings SET dimensions = 512 WHERE notebook_id = ?')
+      .run(notebookId)
+
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(true)
+
+    const result = await knowledgeService.ensureEmbeddingModelConsistency(notebookId)
+    expect(result.rebuilt).toBe(true)
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(false)
+
+    const dimensions = (
+      dbModule
+        .getSqlite()
+        .prepare('SELECT DISTINCT dimensions FROM embeddings WHERE notebook_id = ?')
+        .all(notebookId) as Array<{ dimensions: number }>
+    ).map((row) => row.dimensions)
+    expect(dimensions).toEqual([1024])
+  })
+
+  it('rebuilds vectors in place while preserving chunk ids, FTS rows, and sections', async () => {
+    const { knowledgeService, notebookId, dbModule, db, schema } = context!
+    const { eq } = await import('drizzle-orm')
+    const documentId = await seedDocument()
+    const sqlite = dbModule.getSqlite()
+
+    const chunkIdsBefore = knowledgeService
+      .getDocumentChunks(documentId)
+      .map((chunk) => chunk.id)
+      .sort()
+    const sectionIdsBefore = db
+      .select({ id: schema.sections.id })
+      .from(schema.sections)
+      .where(eq(schema.sections.documentId, documentId))
+      .all()
+      .map((row) => row.id)
+      .sort()
+
+    expect(sectionIdsBefore.length).toBeGreaterThan(0)
+
+    const ftsBefore = sqlite
+      .prepare('SELECT chunk_id, content FROM fts_chunks WHERE notebook_id = ? ORDER BY chunk_id')
+      .all(notebookId)
+
+    sqlite
+      .prepare('UPDATE embeddings SET model = ? WHERE notebook_id = ?')
+      .run('legacy-embedding-model', notebookId)
+    await knowledgeService.ensureEmbeddingModelConsistency(notebookId)
+
+    expect(
+      knowledgeService
+        .getDocumentChunks(documentId)
+        .map((chunk) => chunk.id)
+        .sort()
+    ).toEqual(chunkIdsBefore)
+    expect(
+      db
+        .select({ id: schema.sections.id })
+        .from(schema.sections)
+        .where(eq(schema.sections.documentId, documentId))
+        .all()
+        .map((row) => row.id)
+        .sort()
+    ).toEqual(sectionIdsBefore)
+    expect(
+      sqlite
+        .prepare('SELECT chunk_id, content FROM fts_chunks WHERE notebook_id = ? ORDER BY chunk_id')
+        .all(notebookId)
+    ).toEqual(ftsBefore)
+
+    // Every vector tier was repopulated, not just the chunk tier.
+    expect(
+      sqlite
+        .prepare('SELECT count(*) as c FROM vec_embeddings WHERE notebook_id = ?')
+        .get(notebookId)
+    ).toMatchObject({ c: chunkIdsBefore.length })
+    expect(
+      sqlite.prepare('SELECT count(*) as c FROM vec_sections WHERE notebook_id = ?').get(notebookId)
+    ).toMatchObject({ c: sectionIdsBefore.length })
+    expect(
+      sqlite
+        .prepare('SELECT count(*) as c FROM vec_documents WHERE document_id = ?')
+        .get(documentId)
+    ).toMatchObject({ c: 1 })
+  })
+
+  it('still reports a stale model while a document index is active', async () => {
+    const { knowledgeService, notebookId, dbModule } = context!
+    await seedDocument()
+    dbModule
+      .getSqlite()
+      .prepare('UPDATE embeddings SET model = ? WHERE notebook_id = ?')
+      .run('legacy-embedding-model', notebookId)
+
+    const { beginIndexing, endIndexing } =
+      await import('../../src/main/services/rag/embeddingRebuildState')
+    beginIndexing(notebookId)
+    try {
+      // The missing-vector check is skipped for an in-progress index, but the
+      // model/signature mismatch must still trigger a rebuild.
+      expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(true)
+    } finally {
+      endIndexing(notebookId)
+    }
+  })
+
+  it('keeps the old model metadata and recovers after a failed re-embed', async () => {
+    const { knowledgeService, notebookId, dbModule } = context!
+    const documentId = await seedDocument()
+    const chunkIdsBefore = knowledgeService
+      .getDocumentChunks(documentId)
+      .map((chunk) => chunk.id)
+      .sort()
+
+    dbModule
+      .getSqlite()
+      .prepare('UPDATE embeddings SET model = ? WHERE notebook_id = ?')
+      .run('legacy-embedding-model', notebookId)
+
+    const internals = knowledgeService as unknown as KnowledgeServiceInternals
+    const originalEmbedBatch = internals.embeddingService.embedBatch.bind(
+      internals.embeddingService
+    )
+    internals.embeddingService.embedBatch = async () => {
+      throw new Error('embedding server unavailable')
+    }
+
+    await expect(knowledgeService.ensureEmbeddingModelConsistency(notebookId)).rejects.toThrow(
+      /unavailable/
+    )
+
+    // The failure must not erase the old metadata: it is what makes the next
+    // startup/save retry instead of silently accepting missing vectors.
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(true)
+    expect(
+      knowledgeService
+        .getDocumentChunks(documentId)
+        .map((chunk) => chunk.id)
+        .sort()
+    ).toEqual(chunkIdsBefore)
+
+    internals.embeddingService.embedBatch = originalEmbedBatch
+
+    const result = await knowledgeService.ensureEmbeddingModelConsistency(notebookId)
+    expect(result.rebuilt).toBe(true)
+    expect(await knowledgeService.hasStaleEmbeddingModel(notebookId)).toBe(false)
+    expect(
+      knowledgeService
+        .getDocumentChunks(documentId)
+        .map((chunk) => chunk.id)
+        .sort()
+    ).toEqual(chunkIdsBefore)
+  })
+
+  it('blocks document indexing while an embedding rebuild owns the notebook', async () => {
+    const { knowledgeService, notebookId } = context!
+    // Import after vitest's per-test module reset so this is the same module
+    // instance the service graph uses.
+    const { beginEmbeddingRebuild, endEmbeddingRebuild } =
+      await import('../../src/main/services/rag/embeddingRebuildState')
+
+    beginEmbeddingRebuild(notebookId)
+    try {
+      await expect(
+        knowledgeService.addDocument(notebookId, {
+          title: 'Blocked during rebuild',
+          type: 'text',
+          content: 'This import must not interleave with an embedding rebuild.'
+        })
+      ).rejects.toThrow(/rebuild in progress/i)
+    } finally {
+      endEmbeddingRebuild(notebookId)
+    }
+
+    await expect(
+      knowledgeService.addDocument(notebookId, {
+        title: 'Allowed after rebuild',
+        type: 'text',
+        content: 'This import runs after the rebuild released the notebook.'
+      })
+    ).resolves.toBeTruthy()
   })
 
   it('backfills FTS rows that are missing while vectors are intact', async () => {
@@ -304,5 +608,18 @@ describe('vector rebuild and knowledge backfill', () => {
     ).toMatchObject({ c: 1 })
 
     expect(knowledgeService.findDocumentsNeedingBackfill(notebookId, 5)).toEqual([])
+  })
+
+  it('detects documents whose section rows exist but section vectors are missing', async () => {
+    const { knowledgeService, notebookId, dbModule } = context!
+    const documentId = await seedDocument()
+
+    expect(knowledgeService.findDocumentsNeedingBackfill(notebookId, 5)).toEqual([])
+
+    // Interrupted re-embed: section rows and chunk vectors survive, but the
+    // section-vector tier is empty, so hierarchical retrieval would skip it.
+    dbModule.getSqlite().prepare('DELETE FROM vec_sections WHERE notebook_id = ?').run(notebookId)
+
+    expect(knowledgeService.findDocumentsNeedingBackfill(notebookId, 5)).toEqual([documentId])
   })
 })
