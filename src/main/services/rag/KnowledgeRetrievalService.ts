@@ -153,6 +153,20 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** "07_2022_QH15_luật sở hữu trí tuệ.pdf" -> "luat so huu tri tue". */
+function lawNameKey(title: string): string {
+  const subject = normalizeLegalText(title)
+    .replace(/\b(?:pdf|docx|luat|qh\d*|\d+)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return `luat ${subject}`.replace(/\s+/g, ' ').trim()
+}
+
+function queryMentionsLaw(queryNorm: string, title: string): boolean {
+  const key = lawNameKey(title)
+  return key.length >= 10 && queryNorm.includes(key)
+}
+
 export class KnowledgeRetrievalService {
   constructor(private readonly deps: KnowledgeRetrievalServiceDeps) {}
 
@@ -270,6 +284,7 @@ export class KnowledgeRetrievalService {
     if (articleRefs.length === 0 || !query.trim()) return []
 
     const db = getDatabase()
+    const queryNorm = normalizeLegalText(query)
     const wanted = articleRefs.map((ref) => `dieu ${normalizeLegalText(ref)}`)
     const sectionRows = db
       .select({
@@ -288,7 +303,17 @@ export class KnowledgeRetrievalService {
       .where(eq(sections.notebookId, notebookId))
       .all()
 
-    const matchingSections = sectionRows.filter((section) => {
+    const scopedDocumentIds = new Set(
+      sectionRows
+        .filter((section) => queryMentionsLaw(queryNorm, section.documentTitle))
+        .map((section) => section.documentId)
+    )
+    const scopedSections =
+      scopedDocumentIds.size > 0
+        ? sectionRows.filter((section) => scopedDocumentIds.has(section.documentId))
+        : sectionRows
+
+    const matchingSections = scopedSections.filter((section) => {
       const title = normalizeLegalText(section.title)
       return wanted.some((prefix) => new RegExp(`^${escapeRegExp(prefix)}(?![0-9a-z])`).test(title))
     })
@@ -365,27 +390,38 @@ export class KnowledgeRetrievalService {
     const ranked = candidates.sort((left, right) => right.lexical - left.lexical)
 
     // Legal enumerations are often split across adjacent chunks (for example
-    // "a) Chín tháng..." then "b) Bốn tháng... c) Năm tháng..."). Include the
-    // successor of the best candidates so the clause that actually answers a
-    // time-limit question is not clipped out.
-    const expanded = [...ranked]
-    for (const candidate of ranked.slice(0, 2)) {
-      const next = ranked.find(
-        (entry) =>
-          entry.result.documentId === candidate.result.documentId &&
-          entry.result.chunkIndex === candidate.result.chunkIndex + 1
-      )
-      if (next && !expanded.includes(next)) expanded.push(next)
-    }
+    // "a) Chín tháng..." then "b) Bốn tháng... c) Năm tháng..."). The
+    // successor often has no lexical overlap with the question, so fetch it
+    // directly and attach it to the top candidates.
+    const selected = ranked.slice(0, Math.max(1, limit)).map((candidate, index) => {
+      if (index >= 2) return candidate
+      const next = db
+        .select({ content: chunks.content })
+        .from(chunks)
+        .where(
+          and(
+            eq(chunks.documentId, candidate.result.documentId),
+            eq(chunks.chunkIndex, candidate.result.chunkIndex + 1)
+          )
+        )
+        .get()
+      if (!next) return candidate
+      return {
+        ...candidate,
+        result: {
+          ...candidate.result,
+          content: `${candidate.result.content}\n${next.content}`
+        }
+      }
+    })
 
     const seen = new Set<string>()
-    return expanded
+    return selected
       .filter((candidate) => {
         if (seen.has(candidate.result.chunkId)) return false
         seen.add(candidate.result.chunkId)
         return true
       })
-      .slice(0, Math.max(1, limit))
       .map((candidate, index) => ({
         ...candidate.result,
         // Article-scoped chunks must survive the later score-based merge.
@@ -418,17 +454,10 @@ export class KnowledgeRetrievalService {
     if (documentRows.length === 0) return []
 
     const queryNorm = normalizeLegalText(query)
-    const mentioned = documentRows.filter((document) => {
-      const subject = normalizeLegalText(document.title)
-        .replace(/\b(?:pdf|docx|luat|qh\d*|\d+)\b/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-      // Require an explicit "luật <subject>" mention. A query containing
-      // "dữ liệu thử nghiệm" must not pull in the Data Law when it actually
-      // names the IP Law.
-      const lawKey = `luat ${subject}`.replace(/\s+/g, ' ').trim()
-      return lawKey.length >= 10 && queryNorm.includes(lawKey)
-    })
+    // Require an explicit "luật <subject>" mention. A query containing
+    // "dữ liệu thử nghiệm" must not pull in the Data Law when it actually
+    // names the IP Law.
+    const mentioned = documentRows.filter((document) => queryMentionsLaw(queryNorm, document.title))
     const scopedDocuments = mentioned.length > 0 ? mentioned : documentRows
     const scopedIds = scopedDocuments.map((document) => document.id)
     const documentMap = new Map(scopedDocuments.map((document) => [document.id, document]))
@@ -455,7 +484,8 @@ export class KnowledgeRetrievalService {
       .where(inArray(chunks.documentId, scopedIds))
       .all()
 
-    const results: SearchResult[] = []
+    const queryTokens = tokenizeLegalText(query)
+    const results: Array<{ result: SearchResult; score: number }> = []
     const seen = new Set<string>()
 
     for (const row of rows) {
@@ -483,26 +513,37 @@ export class KnowledgeRetrievalService {
       const headingPath = Array.isArray(metadata?.headingPath)
         ? (metadata?.headingPath as string[])
         : undefined
+      const lexical = this.lexicalOverlap(queryTokens, new Set(tokenizeLegalText(row.content)))
+      const mainClauseBoost =
+        wantsEffectiveDate && /1\.\s*Luật này có hiệu lực/i.test(row.content) ? 0.5 : 0
 
       seen.add(row.id)
       results.push({
-        chunkId: row.id,
-        documentId: row.documentId,
-        documentTitle: document.title,
-        documentType: document.type,
-        sourceUri: document.sourceUri || undefined,
-        sectionPath: headingPath,
-        content: row.content,
-        matchedContent: row.content,
-        // Direct evidence must be merged ahead of normal semantic hits.
-        score: 2,
-        chunkIndex: row.chunkIndex,
-        metadata
+        score: lexical + mainClauseBoost,
+        result: {
+          chunkId: row.id,
+          documentId: row.documentId,
+          documentTitle: document.title,
+          documentType: document.type,
+          sourceUri: document.sourceUri || undefined,
+          sectionPath: headingPath,
+          content: row.content,
+          matchedContent: row.content,
+          score: 0,
+          chunkIndex: row.chunkIndex,
+          metadata
+        }
       })
-      if (results.length >= Math.max(1, limit)) break
     }
 
     return results
+      .sort((left, right) => right.score - left.score)
+      .slice(0, Math.max(1, limit))
+      .map((entry, index) => ({
+        ...entry.result,
+        // Direct evidence must be merged ahead of normal semantic hits.
+        score: 2 - index * 0.01
+      }))
   }
 
   private lexicalOverlap(queryTokens: string[], documentTokens: Set<string>): number {

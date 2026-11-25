@@ -190,40 +190,54 @@ describe('KnowledgeService RAG regression', () => {
     const { service, notebookId } = context!
 
     await service.addDocument(notebookId, {
-      title: 'IP amendment',
+      title: '07_2022_QH15_luật sở hữu trí tuệ.pdf',
       type: 'text',
       content: [
-        '# IP amendment',
+        '# 07_2022_QH15_luật sở hữu trí tuệ',
         '',
         '### Điều 112a. Phản đối đơn đăng ký sở hữu công nghiệp',
         '',
-        '1. Trước ngày ra quyết định cấp văn bằng bảo hộ, người thứ ba có quyền phản đối.',
+        '1. Trước ngày ra quyết định cấp văn bằng bảo hộ, trong các thời hạn sau đây, bất kỳ người thứ ba nào cũng có quyền phản đối việc cấp văn bằng bảo hộ:',
+        'a) Chín tháng kể từ ngày đơn đăng ký sáng chế được công bố;',
+        'b) Bốn tháng kể từ ngày đơn đăng ký kiểu dáng công nghiệp được công bố;',
+        'c) Năm tháng kể từ ngày đơn đăng ký nhãn hiệu được công bố;',
+        'd) Ba tháng kể từ ngày đơn đăng ký chỉ dẫn địa lý được công bố.'
+      ].join('\n'),
+      chunkOptions: { chunkSize: 60, chunkOverlap: 0, minChunkSize: 10 }
+    })
+    await service.addDocument(notebookId, {
+      title: '60_2024_QH15_luật dữ liệu.pdf',
+      type: 'text',
+      content: [
+        '# 60_2024_QH15_luật dữ liệu',
         '',
-        '2. Thời hạn phản đối đơn đăng ký nhãn hiệu là năm tháng kể từ ngày công bố.',
+        '### Điều 112a. Quy định dữ liệu',
         '',
-        '### Điều 113. Nội dung khác',
-        '',
-        'Nội dung không liên quan đến câu hỏi.'
+        'Nội dung giả lập: thời hạn xử lý dữ liệu là năm tháng.'
       ].join('\n')
     })
 
-    const results = service.searchArticleChunks(
+    const firstClause = service.searchArticleChunks(
       notebookId,
       ['112a'],
-      'Điều 112a thời hạn phản đối nhãn hiệu là bao lâu',
+      'Điều 112a Luật Sở hữu trí tuệ Chín tháng sáng chế',
       2
     )
-
-    expect(results.length).toBeGreaterThan(0)
-    expect(results[0].sectionPath?.join(' ')).toContain('112a')
-    expect(results.some((result) => result.content.includes('năm tháng'))).toBe(true)
+    expect(firstClause.length).toBeGreaterThan(1)
+    expect(firstClause[0].sectionPath?.join(' ')).toContain('112a')
+    expect(firstClause.every((result) => result.documentTitle.includes('sở hữu trí tuệ'))).toBe(
+      true
+    )
+    expect(firstClause.some((result) => result.content.includes('Chín tháng'))).toBe(true)
+    // The successor clause must be attached even when it is not the top hit.
+    expect(firstClause.some((result) => /Bốn tháng|Năm tháng/.test(result.content))).toBe(true)
 
     const direct = service.searchDirectEvidence(
       notebookId,
       'Điều 112a thời hạn phản đối nhãn hiệu là bao lâu',
       2
     )
-    expect(direct.some((result) => result.content.includes('năm tháng'))).toBe(true)
+    expect(direct.some((result) => /năm tháng/i.test(result.content))).toBe(true)
   })
 
   it('extracts the main effective-date clause instead of a neighbour date', async () => {

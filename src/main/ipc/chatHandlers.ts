@@ -560,15 +560,43 @@ export function registerChatHandlers(
                   })
                 : Promise.resolve(null)
             ])
+            const inExplicitScope = (item: {
+              documentId: string
+              sectionPath?: string[]
+              pageNumber?: number
+            }): boolean => {
+              if (!explicitScope) return true
+              if (
+                explicitScope.documentIds?.length &&
+                !explicitScope.documentIds.includes(item.documentId)
+              ) {
+                return false
+              }
+              if (explicitScope.sectionPath?.length) {
+                const path = (item.sectionPath ?? []).join(' > ').toLowerCase()
+                if (!explicitScope.sectionPath.every((part) => path.includes(part.toLowerCase()))) {
+                  return false
+                }
+              }
+              if (explicitScope.pageRange && typeof item.pageNumber === 'number') {
+                if (
+                  item.pageNumber < explicitScope.pageRange.from ||
+                  item.pageNumber > explicitScope.pageRange.to
+                ) {
+                  return false
+                }
+              }
+              return true
+            }
             const articleChunks =
               articleRefs.length > 0
-                ? knowledgeService.searchArticleChunks(session.notebookId, articleRefs, content, 4)
+                ? knowledgeService
+                    .searchArticleChunks(session.notebookId, articleRefs, content, 4)
+                    .filter(inExplicitScope)
                 : []
-            const directEvidence = knowledgeService.searchDirectEvidence(
-              session.notebookId,
-              content,
-              4
-            )
+            const directEvidence = knowledgeService
+              .searchDirectEvidence(session.notebookId, content, 4)
+              .filter(inExplicitScope)
             const mergedResults = mergeSearchResults(
               directEvidence,
               mergeSearchResults(
