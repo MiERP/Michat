@@ -2,6 +2,30 @@
 
 All notable changes to MiChat are documented in this file.
 
+## [2.2.2] - 2026-11-25
+
+### Fixed
+
+- Questions that explicitly name an article now retrieve chunks inside that article by
+  query-term overlap, not just the globally highest-ranked chunk. This fixes large amended
+  articles such as Điều 112a of the 2022 IP Law, where the time-limit clause was split from
+  the article heading and missed by normal semantic search.
+- Adjacent clauses from the same large article are kept in the prompt context, so a list split
+  across chunks (for example “Chín tháng … / Năm tháng …”) is not truncated after the first
+  item.
+- Questions asking for an effective date now extract the verbatim “có hiệu lực thi hành từ
+  ngày …” clause and place it ahead of unrelated dates such as the promulgation date.
+- Questions asking for a time limit extract the relevant month/day clause for the named object
+  (for example the five-month deadline for trademark opposition).
+- Definition questions run a wider rerank pool so the actual defining clause is not lost under
+  articles that merely mention or classify the term.
+
+### Changed
+
+- The bundled benchmark configuration now uses `Qwen3.5-4B` for chat because the previously
+  selected `gemma4-2B` produced Korean analysis and incomplete legal answers. The app remains
+  model-agnostic; this only affects the test machine.
+
 ## [2.2.1] - 2026-11-25
 
 ### Fixed

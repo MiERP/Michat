@@ -186,6 +186,87 @@ describe('KnowledgeService RAG regression', () => {
     expect(service.getDocumentChunks(failedDocument!.id)).toHaveLength(0)
   })
 
+  it('retrieves the requested article chunk by query terms', async () => {
+    const { service, notebookId } = context!
+
+    await service.addDocument(notebookId, {
+      title: 'IP amendment',
+      type: 'text',
+      content: [
+        '# IP amendment',
+        '',
+        '### Điều 112a. Phản đối đơn đăng ký sở hữu công nghiệp',
+        '',
+        '1. Trước ngày ra quyết định cấp văn bằng bảo hộ, người thứ ba có quyền phản đối.',
+        '',
+        '2. Thời hạn phản đối đơn đăng ký nhãn hiệu là năm tháng kể từ ngày công bố.',
+        '',
+        '### Điều 113. Nội dung khác',
+        '',
+        'Nội dung không liên quan đến câu hỏi.'
+      ].join('\n')
+    })
+
+    const results = service.searchArticleChunks(
+      notebookId,
+      ['112a'],
+      'Điều 112a thời hạn phản đối nhãn hiệu là bao lâu',
+      2
+    )
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results[0].sectionPath?.join(' ')).toContain('112a')
+    expect(results.some((result) => result.content.includes('năm tháng'))).toBe(true)
+
+    const direct = service.searchDirectEvidence(
+      notebookId,
+      'Điều 112a thời hạn phản đối nhãn hiệu là bao lâu',
+      2
+    )
+    expect(direct.some((result) => result.content.includes('năm tháng'))).toBe(true)
+  })
+
+  it('extracts the main effective-date clause instead of a neighbour date', async () => {
+    const { service, notebookId } = context!
+
+    await service.addDocument(notebookId, {
+      title: '07_2022_QH15_luật sở hữu trí tuệ.pdf',
+      type: 'text',
+      content: [
+        '# 07_2022_QH15_luật sở hữu trí tuệ',
+        '',
+        '### Điều 3. Hiệu lực thi hành',
+        '',
+        '1. Luật này có hiệu lực thi hành từ ngày 01 tháng 01 năm 2023, trừ trường hợp quy định tại khoản 2 và khoản 3 Điều này.',
+        '2. Quy định về nhãn hiệu là dấu hiệu âm thanh có hiệu lực thi hành từ ngày 14 tháng 01 năm 2022.',
+        '3. Quy định về bảo hộ dữ liệu thử nghiệm dùng cho nông hóa phẩm có hiệu lực thi hành từ ngày 14 tháng 01 năm 2024.'
+      ].join('\n')
+    })
+    await service.addDocument(notebookId, {
+      title: '60_2024_QH15_luật dữ liệu.pdf',
+      type: 'text',
+      content: [
+        '# 60_2024_QH15_luật dữ liệu',
+        '',
+        '### Điều 45. Hiệu lực thi hành',
+        '',
+        'Luật này có hiệu lực thi hành từ ngày 01 tháng 7 năm 2025.'
+      ].join('\n')
+    })
+
+    const direct = service.searchDirectEvidence(
+      notebookId,
+      'Luật Sở hữu trí tuệ số 07/2022/QH15 có hiệu lực từ ngày nào? Quy định về bảo hộ dữ liệu thử nghiệm dùng cho nông hóa phẩm có hiệu lực từ ngày nào?',
+      3
+    )
+
+    expect(direct.length).toBeGreaterThan(0)
+    expect(direct.every((result) => result.documentTitle.includes('sở hữu trí tuệ'))).toBe(true)
+    expect(direct[0].content).toContain('01 tháng 01 năm 2023')
+    expect(direct.some((result) => result.content.includes('14 tháng 01 năm 2024'))).toBe(true)
+    expect(direct.some((result) => result.content.includes('01 tháng 7 năm 2025'))).toBe(false)
+  })
+
   it('validates the query embedding directly with a single embedding call', async () => {
     const { service, notebookId, providerManager } = context!
 

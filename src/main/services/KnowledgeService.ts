@@ -357,6 +357,24 @@ export class KnowledgeService {
     return this.retrievalService.search(notebookId, query, options)
   }
 
+  /**
+   * Chunks inside articles explicitly named in the question, ranked by query
+   * term overlap. Used to recover clauses from very large amended articles.
+   */
+  searchArticleChunks(
+    notebookId: string,
+    articleRefs: string[],
+    query: string,
+    limit = 4
+  ): SearchResult[] {
+    return this.retrievalService.searchArticleChunks(notebookId, articleRefs, query, limit)
+  }
+
+  /** Exact effective-date / time-limit clauses for the scoped documents. */
+  searchDirectEvidence(notebookId: string, query: string, limit = 4): SearchResult[] {
+    return this.retrievalService.searchDirectEvidence(notebookId, query, limit)
+  }
+
   getDocuments(notebookId: string): Document[] {
     return this.documentService.getDocuments(notebookId)
   }

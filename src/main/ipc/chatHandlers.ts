@@ -232,7 +232,10 @@ Instructions:
 8. When the question asks for an article/clause, use the exact article and clause numbers that appear in the context.
 9. If the question asks to list groups/items, reproduce every item in source order with its original clause label (for example 1.a, 1.b, 2). Do not merge or renumber clauses.
 10. For definition questions, quote the definition verbatim and cite the article that defines the term (for example "Điều 2. Giải thích từ ngữ"), not an article that only mentions it.
-11. If the context says "sửa đổi ... Điều N" and defines a term in the amended article, cite the amended article (Điều N), not the amending article.`,
+11. If the context says "sửa đổi ... Điều N" and defines a term in the amended article, cite the amended article (Điều N), not the amending article.
+12. For questions asking when a law takes effect, the answer is the date in the "Hiệu lực thi hành" article, normally clause 1. Never use the promulgation/signing date (for example "ban hành ngày...") as the effective date. If there are separate dates for specific provisions, state the main effective date first, then list the exceptions.
+13. If the context contains the requested fact, never say the document lacks it; quote the fact and cite the clause.
+14. For definition questions, quote the defining clause even when another article only classifies or mentions the term.`,
     includedChunkIds,
     marker
   }
@@ -506,6 +509,11 @@ export function registerChatHandlers(
             const definitionQuery = isDefinitionQuery(content)
             const needsWidePool = articleRefs.length > 0 || definitionQuery
             const requestedTopK = needsWidePool ? 16 : ragTopK
+            // Definitions are often a single short clause buried under many
+            // generic chunks. Widen the rerank pool for this query type so
+            // the defining clause survives the final top-K cut.
+            const effectiveRerankEnabled = rerankEnabled || definitionQuery
+            const effectiveRerankTopN = definitionQuery ? Math.max(rerankTopN, 50) : rerankTopN
 
             const retrievalOptions = {
               topK: requestedTopK,
@@ -515,8 +523,8 @@ export function registerChatHandlers(
                 docTopK: hierarchicalDocTopK
               },
               rerank: {
-                enabled: rerankEnabled,
-                topN: rerankTopN,
+                enabled: effectiveRerankEnabled,
+                topN: effectiveRerankTopN,
                 heuristicFallback: rerankUseHeuristicFallback
               }
             }
@@ -552,9 +560,21 @@ export function registerChatHandlers(
                   })
                 : Promise.resolve(null)
             ])
+            const articleChunks =
+              articleRefs.length > 0
+                ? knowledgeService.searchArticleChunks(session.notebookId, articleRefs, content, 4)
+                : []
+            const directEvidence = knowledgeService.searchDirectEvidence(
+              session.notebookId,
+              content,
+              4
+            )
             const mergedResults = mergeSearchResults(
-              metadataOutcome.results,
-              flatOutcome?.results ?? []
+              directEvidence,
+              mergeSearchResults(
+                articleChunks,
+                mergeSearchResults(metadataOutcome.results, flatOutcome?.results ?? [])
+              )
             )
             const searchResults = prioritizeArticleMatches(articleRefs, mergedResults).slice(
               0,
@@ -569,7 +589,10 @@ export function registerChatHandlers(
 
             if (searchResults.length > 0) {
               const ragContextResult = buildRAGContext(searchResults, {
-                dedupeSections: !definitionQuery
+                // Article-scoped retrievals deliberately return adjacent
+                // clauses from the same large article (for example a time-limit
+                // list split across chunks), so keep both.
+                dedupeSections: !definitionQuery && articleRefs.length === 0
               })
               ragContext = ragContextResult.context
               citationMetadata = buildCitations(
