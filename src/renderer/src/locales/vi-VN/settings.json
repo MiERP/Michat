@@ -36,12 +36,12 @@
   "officialWebsite": "Trang web chính thức",
   "feedback": "Phản hồi",
   "checkUpdates": "Kiểm tra cập nhật",
-  "latestVersion": "Đã là phiên bản mới nhất",
+  "latestVersion": "Phiên bản mới nhất",
   "version": "Phiên bản",
   "checking": "Đang kiểm tra...",
   "updateAvailable": "Phát hiện phiên bản mới {{version}}",
   "downloadAndInstall": "Tải xuống và cài đặt {{version}}",
-  "downloading": "Đang tải {{percent}}%",
+  "downloading": "Đang tải…",
   "installing": "Đang cài đặt bản cập nhật...",
   "installUpdate": "Cài đặt cập nhật và khởi động lại",
   "checkUpdateError": "Kiểm tra cập nhật thất bại, nhấn để thử lại",
@@ -119,7 +119,7 @@
   "openLogFolder": "Mở thư mục nhật ký",
   "reportIssue": "Báo lỗi",
   "currentVersion": "Phiên bản hiện tại",
-  "upToDate": "Đã cập nhật",
+  "upToDate": "Bạn đang dùng phiên bản mới nhất",
   "downloadUpdate": "Tải bản cập nhật",
   "resetShortcuts": "Đặt lại phím tắt",
   "experimental": "Tính năng thử nghiệm",
@@ -142,5 +142,8 @@
   "saveApiConfig": "Lưu cấu hình API",
   "saving": "Đang lưu...",
   "apiSaved": "Đã lưu",
-  "availableModels": "Mô hình khả dụng"
+  "availableModels": "Mô hình khả dụng",
+  "updates": "Cập nhật",
+  "readyToInstall": "Bản cập nhật đã sẵn sàng cài đặt",
+  "confirmInstall": "Cài bản cập nhật đã tải xuống ngay? MiChat sẽ khởi động lại."
 }

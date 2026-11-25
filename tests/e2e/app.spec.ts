@@ -1,8 +1,11 @@
 import { createServer, type Server } from 'http'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { _electron as electron, expect, test } from '@playwright/test'
+
+const appVersion = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
+  .version as string
 
 async function startFakeApi(): Promise<{ server: Server; baseUrl: string }> {
   const server = createServer((request, response) => {
@@ -55,6 +58,12 @@ test('boots into onboarding, then saves and tests an API configuration', async (
     expect(saved.chatModel).toBe('test-chat')
     expect(saved.embeddingModel).toBe('test-embed')
     expect(saved.hasApiKey).toBe(false)
+
+    await window.getByRole('button', { name: /about|giới thiệu/i }).click()
+    await expect(window.getByText(`v${appVersion}`)).toBeVisible()
+    await expect(
+      window.getByRole('button', { name: /check updates|kiểm tra cập nhật/i })
+    ).toBeVisible()
   } finally {
     await app.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))

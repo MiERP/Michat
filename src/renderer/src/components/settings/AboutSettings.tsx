@@ -49,73 +49,92 @@ export default function AboutSettings(): ReactElement {
   }
 
   const handleInstallUpdate = async (): Promise<void> => {
-    if (!confirm('Install the downloaded update now? MiChat will restart.')) return
+    if (!confirm(t('confirmInstall'))) return
     const result = await window.api.update.install()
     if (!result.success && result.error) alert(result.error)
   }
 
-  const handleOpenWebsite = async () => {
-    await window.api.openExternalUrl('https://github.com/HAVS/MiChat')
+  const handleOpenWebsite = async (): Promise<void> => {
+    await window.api.openExternalUrl('https://github.com/MiERP/Michat')
   }
 
-  const handleFeedback = async () => {
-    await window.api.openExternalUrl('https://github.com/HAVS/MiChat/issues')
+  const handleFeedback = async (): Promise<void> => {
+    await window.api.openExternalUrl('https://github.com/MiERP/Michat/issues')
   }
 
-  const handleOpenLicense = async () => {
+  const handleOpenLicense = async (): Promise<void> => {
     await window.api.openExternalUrl('https://github.com/MiERP/Michat/blob/main/LICENSE')
   }
+
+  const latestVersion = updateState.info?.version
+  const statusText = (() => {
+    switch (updateState.status) {
+      case UpdateStatus.CHECKING:
+        return t('checking')
+      case UpdateStatus.AVAILABLE:
+        return latestVersion ? t('updateAvailable', { version: latestVersion }) : ''
+      case UpdateStatus.NOT_AVAILABLE:
+        return t('upToDate')
+      case UpdateStatus.DOWNLOADING:
+        return `${t('downloading')} ${Math.round(updateState.progress?.percent ?? 0)}%`
+      case UpdateStatus.DOWNLOADED:
+        return t('readyToInstall')
+      case UpdateStatus.ERROR:
+        return updateState.error || t('checkUpdateError')
+      default:
+        return ''
+    }
+  })()
 
   return (
     <div className="space-y-6">
       <div className="text-center py-8 flex flex-col items-center gap-4">
         <img src={logoImg} alt="MiChat" className="w-16 h-16 rounded-xl" />
-        <div className="flex flex-col gap-2">
-          <h2 className="text-h1 text-foreground">MiChat</h2>
-          <p className="text-sm text-muted-foreground">
-            {t('version')} {appVersion}
-          </p>
-        </div>
+        <h2 className="text-h1 text-foreground">MiChat</h2>
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2">
           <RefreshCw className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-medium text-foreground">Updates</span>
+          <span className="text-sm font-medium text-foreground">{t('updates')}</span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Status: {updateState.status}
-          {updateState.info?.version ? ` · v${updateState.info.version}` : ''}
-        </p>
-        <div className="flex flex-wrap gap-2">
+        {statusText && <p className="text-xs text-muted-foreground">{statusText}</p>}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant="outline"
             onClick={handleCheckUpdate}
             disabled={updateBusy || updateState.status === UpdateStatus.CHECKING}
           >
-            Check for updates
+            {updateState.status === UpdateStatus.CHECKING ? t('checking') : t('checkUpdates')}
           </Button>
           {updateState.status === UpdateStatus.AVAILABLE && (
             <Button size="sm" onClick={handleDownloadUpdate} disabled={updateBusy}>
               <Download className="w-3.5 h-3.5 mr-1" />
-              Download
+              {t('downloadUpdate')}
             </Button>
           )}
           {updateState.status === UpdateStatus.DOWNLOADED && (
             <Button size="sm" onClick={handleInstallUpdate}>
-              Install and restart
+              {t('installUpdate')}
             </Button>
           )}
+          <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              {t('currentVersion')}{' '}
+              <span className="font-medium text-foreground">v{appVersion || '—'}</span>
+            </span>
+            {latestVersion && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {t('latestVersion')}{' '}
+                  <span className="font-medium text-foreground">v{latestVersion}</span>
+                </span>
+              </>
+            )}
+          </span>
         </div>
-        {updateState.status === UpdateStatus.DOWNLOADING && (
-          <p className="text-xs text-muted-foreground">
-            Downloading… {Math.round(updateState.progress?.percent ?? 0)}%
-          </p>
-        )}
-        {updateState.status === UpdateStatus.ERROR && updateState.error && (
-          <p className="text-xs text-destructive">{updateState.error}</p>
-        )}
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-2">

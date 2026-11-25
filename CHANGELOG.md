@@ -2,6 +2,12 @@
 
 All notable changes to MiChat are documented in this file.
 
+## [2.1.0] - 2026-11-25
+
+### Changed
+
+- Show the installed version and the latest release version beside the update-check button; localize update status and point project links at MiERP/Michat.
+
 ## [2.0.1] - 2026-11-24
 
 ### Changed

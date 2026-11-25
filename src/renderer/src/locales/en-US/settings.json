@@ -35,7 +35,7 @@
   "checkUpdates": "Check Updates",
   "currentVersion": "Current Version",
   "latestVersion": "Latest version",
-  "upToDate": "Up to Date",
+  "upToDate": "You are on the latest version",
   "updateAvailable": "New version {{version}} available",
   "downloadUpdate": "Download Update",
   "shortcuts": "Shortcuts",
@@ -78,7 +78,7 @@
   "version": "Version",
   "checking": "Checking...",
   "downloadAndInstall": "Download & Install {{version}}",
-  "downloading": "Downloading {{percent}}%",
+  "downloading": "Downloading…",
   "installing": "Installing update...",
   "installUpdate": "Install Update & Restart",
   "checkUpdateError": "Update check failed, click to retry",
@@ -142,5 +142,8 @@
   "saveApiConfig": "Save API settings",
   "saving": "Saving...",
   "apiSaved": "Saved",
-  "availableModels": "Available models"
+  "availableModels": "Available models",
+  "updates": "Updates",
+  "readyToInstall": "Update ready to install",
+  "confirmInstall": "Install the downloaded update now? MiChat will restart."
 }
