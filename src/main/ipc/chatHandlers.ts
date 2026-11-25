@@ -578,7 +578,8 @@ export function registerChatHandlers(
                   return false
                 }
               }
-              if (explicitScope.pageRange && typeof item.pageNumber === 'number') {
+              if (explicitScope.pageRange) {
+                if (typeof item.pageNumber !== 'number') return false
                 if (
                   item.pageNumber < explicitScope.pageRange.from ||
                   item.pageNumber > explicitScope.pageRange.to

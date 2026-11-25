@@ -296,7 +296,8 @@ export class KnowledgeRetrievalService {
         endOffset: sections.endOffset,
         documentTitle: documents.title,
         documentType: documents.type,
-        sourceUri: documents.sourceUri
+        sourceUri: documents.sourceUri,
+        documentMetadata: documents.metadata
       })
       .from(sections)
       .innerJoin(documents, eq(sections.documentId, documents.id))
@@ -332,7 +333,9 @@ export class KnowledgeRetrievalService {
           id: chunks.id,
           content: chunks.content,
           metadata: chunks.metadata,
-          chunkIndex: chunks.chunkIndex
+          chunkIndex: chunks.chunkIndex,
+          startOffset: chunks.startOffset,
+          endOffset: chunks.endOffset
         })
         .from(chunks)
         .where(
@@ -350,7 +353,9 @@ export class KnowledgeRetrievalService {
             id: chunks.id,
             content: chunks.content,
             metadata: chunks.metadata,
-            chunkIndex: chunks.chunkIndex
+            chunkIndex: chunks.chunkIndex,
+            startOffset: chunks.startOffset,
+            endOffset: chunks.endOffset
           })
           .from(chunks)
           .where(eq(chunks.sectionId, section.id))
@@ -373,6 +378,12 @@ export class KnowledgeRetrievalService {
             documentTitle: section.documentTitle,
             documentType: section.documentType,
             sourceUri: section.sourceUri || undefined,
+            pageNumber: this.resolveChunkPageNumber(
+              (section.documentMetadata as Record<string, unknown> | null) || undefined,
+              (chunk.metadata as Record<string, unknown> | null) || undefined,
+              chunk.startOffset,
+              chunk.endOffset
+            ),
             sectionPath:
               Array.isArray(section.headingPath) && section.headingPath.length > 0
                 ? section.headingPath
@@ -396,7 +407,12 @@ export class KnowledgeRetrievalService {
     const selected = ranked.slice(0, Math.max(1, limit)).map((candidate, index) => {
       if (index >= 2) return candidate
       const next = db
-        .select({ content: chunks.content })
+        .select({
+          content: chunks.content,
+          metadata: chunks.metadata,
+          startOffset: chunks.startOffset,
+          endOffset: chunks.endOffset
+        })
         .from(chunks)
         .where(
           and(
@@ -406,6 +422,20 @@ export class KnowledgeRetrievalService {
         )
         .get()
       if (!next) return candidate
+
+      // Do not leak a next-page clause into a page-scoped result.
+      if (typeof candidate.result.pageNumber === 'number') {
+        const nextPage = this.resolveChunkPageNumber(
+          undefined,
+          (next.metadata as Record<string, unknown> | null) || undefined,
+          next.startOffset,
+          next.endOffset
+        )
+        if (typeof nextPage === 'number' && nextPage !== candidate.result.pageNumber) {
+          return candidate
+        }
+      }
+
       return {
         ...candidate,
         result: {
@@ -446,7 +476,8 @@ export class KnowledgeRetrievalService {
         id: documents.id,
         title: documents.title,
         type: documents.type,
-        sourceUri: documents.sourceUri
+        sourceUri: documents.sourceUri,
+        metadata: documents.metadata
       })
       .from(documents)
       .where(eq(documents.notebookId, notebookId))
@@ -478,7 +509,9 @@ export class KnowledgeRetrievalService {
         documentId: chunks.documentId,
         content: chunks.content,
         metadata: chunks.metadata,
-        chunkIndex: chunks.chunkIndex
+        chunkIndex: chunks.chunkIndex,
+        startOffset: chunks.startOffset,
+        endOffset: chunks.endOffset
       })
       .from(chunks)
       .where(inArray(chunks.documentId, scopedIds))
@@ -526,6 +559,12 @@ export class KnowledgeRetrievalService {
           documentTitle: document.title,
           documentType: document.type,
           sourceUri: document.sourceUri || undefined,
+          pageNumber: this.resolveChunkPageNumber(
+            (document.metadata as Record<string, unknown> | null) || undefined,
+            (row.metadata as Record<string, unknown> | null) || undefined,
+            row.startOffset,
+            row.endOffset
+          ),
           sectionPath: headingPath,
           content: row.content,
           matchedContent: row.content,
