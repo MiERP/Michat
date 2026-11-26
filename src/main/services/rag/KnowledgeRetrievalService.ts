@@ -31,6 +31,7 @@ import {
   mergePreferredAndBroadResults,
   type ExplicitRetrievalScope
 } from '../RetrievalPlanner'
+import { extractDefinitionTerm, mergeOverlappingChunks, namesSpecificLaw } from './legalContext'
 import Logger from '../../../shared/utils/logger'
 
 /** Maximum section-expansion chunks (small-to-big) so context stays bounded. */
@@ -153,18 +154,61 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** "07_2022_QH15_luật sở hữu trí tuệ.pdf" -> "luat so huu tri tue". */
-function lawNameKey(title: string): string {
-  const subject = normalizeLegalText(title)
-    .replace(/\b(?:pdf|docx|luat|qh\d*|\d+)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return `luat ${subject}`.replace(/\s+/g, ' ').trim()
+function hasOffsets<T extends { startOffset: number | null; endOffset: number | null }>(
+  row: T
+): row is T & { startOffset: number; endOffset: number } {
+  return typeof row.startOffset === 'number' && typeof row.endOffset === 'number'
 }
 
-function queryMentionsLaw(queryNorm: string, title: string): boolean {
+/** "07_2022_QH15_luật sở hữu trí tuệ.pdf" -> "luat so huu tri tue". */
+function lawNameKey(title: string): string {
+  const normalized = normalizeLegalText(title)
+  const hasBoLuat = /\bbo\s+luat\b/.test(normalized)
+  const subject = normalized
+    .replace(/\b(?:pdf|docx|bo|luat|qh\d*|\d+)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return `${hasBoLuat ? 'bo luat' : 'luat'} ${subject}`.replace(/\s+/g, ' ').trim()
+}
+
+function documentNumberKey(metadata: Record<string, unknown> | null | undefined): string | null {
+  const documentMetadata = metadata?.documentMetadata as Record<string, unknown> | undefined
+  const number = documentMetadata?.documentNumber ?? metadata?.documentNumber
+  if (typeof number !== 'string' || !number.trim()) return null
+  return normalizeLegalText(number)
+}
+
+function acronymForTitle(title: string): string {
+  const subject = lawNameKey(title)
+    .replace(/^(?:bo\s+)?luat\s+/, '')
+    .split(' ')
+    .filter(Boolean)
+  if (subject.length < 2) return ''
+  return subject.map((word) => word[0]).join('')
+}
+
+function queryMatchesDocument(
+  queryNorm: string,
+  title: string,
+  metadata?: Record<string, unknown> | null
+): boolean {
   const key = lawNameKey(title)
-  return key.length >= 10 && queryNorm.includes(key)
+  if (key.length >= 10 && queryNorm.includes(key)) return true
+
+  // "Bộ luật Dân sự" can be written as "luật Dân sự" in the query.
+  if (key.startsWith('bo luat ')) {
+    const withoutBo = key.replace(/^bo /, '')
+    if (queryNorm.includes(withoutBo)) return true
+  }
+
+  const number = documentNumberKey(metadata)
+  if (number && new RegExp(`\\b${escapeRegExp(number)}\\b`, 'u').test(queryNorm)) return true
+
+  // Common abbreviation, e.g. "Luật SHTT" for "luật sở hữu trí tuệ".
+  const acronym = acronymForTitle(title)
+  if (acronym.length >= 2 && new RegExp(`\\b${acronym}\\b`, 'u').test(queryNorm)) return true
+
+  return false
 }
 
 export class KnowledgeRetrievalService {
@@ -306,7 +350,13 @@ export class KnowledgeRetrievalService {
 
     const scopedDocumentIds = new Set(
       sectionRows
-        .filter((section) => queryMentionsLaw(queryNorm, section.documentTitle))
+        .filter((section) =>
+          queryMatchesDocument(
+            queryNorm,
+            section.documentTitle,
+            (section.documentMetadata as Record<string, unknown> | null) || undefined
+          )
+        )
         .map((section) => section.documentId)
     )
     const scopedSections =
@@ -460,12 +510,359 @@ export class KnowledgeRetrievalService {
   }
 
   /**
+   * Return one complete, source-ordered block for each requested article.
+   *
+   * List questions need the whole article, not the best-ranked five chunks:
+   * a long enumeration can span ten chunks and the last chunk often contains
+   * the clause that completes the final item. Chunks are merged by source
+   * offset so overlapping text is not repeated in the prompt.
+   */
+  getArticleContext(
+    notebookId: string,
+    articleRefs: string[],
+    options: {
+      query?: string
+      documentIds?: string[]
+      maxArticles?: number
+      maxChars?: number
+    } = {}
+  ): SearchResult[] {
+    if (articleRefs.length === 0) return []
+
+    const db = getDatabase()
+    const wanted = articleRefs.map((ref) => `dieu ${normalizeLegalText(ref)}`)
+    const documentFilter = new Set(options.documentIds ?? [])
+    const maxArticles = Math.min(Math.max(options.maxArticles ?? 2, 1), 8)
+    const maxChars = Math.min(Math.max(options.maxChars ?? 12_000, 500), 24_000)
+
+    const sectionRows = db
+      .select({
+        id: sections.id,
+        documentId: sections.documentId,
+        headingPath: sections.headingPath,
+        title: sections.title,
+        startOffset: sections.startOffset,
+        endOffset: sections.endOffset,
+        documentTitle: documents.title,
+        documentType: documents.type,
+        sourceUri: documents.sourceUri,
+        documentMetadata: documents.metadata
+      })
+      .from(sections)
+      .innerJoin(documents, eq(sections.documentId, documents.id))
+      .where(eq(sections.notebookId, notebookId))
+      .all()
+
+    const queryNorm = options.query ? normalizeLegalText(options.query) : ''
+    const namesLaw = options.query ? namesSpecificLaw(options.query) : false
+    const lawScoped =
+      namesLaw && queryNorm
+        ? sectionRows.filter((section) =>
+            queryMatchesDocument(
+              queryNorm,
+              section.documentTitle,
+              (section.documentMetadata as Record<string, unknown> | null) || undefined
+            )
+          )
+        : []
+    // If the user names a specific law that is not in the notebook, do not
+    // fall back to the first article with the same number from another law.
+    // Generic phrases such as "luật này" still use the seed document.
+    if (namesLaw && lawScoped.length === 0) return []
+    // Narrow the pool only when the question really names a law. A loose
+    // number or acronym hit on a generic question must not scope the pool
+    // away from the document the seed already selected.
+    const pool = lawScoped.length > 0 ? lawScoped : sectionRows
+
+    const wantedPatterns = wanted.map(
+      (prefix) => new RegExp(`^${escapeRegExp(prefix)}(?![0-9a-z])`, 'u')
+    )
+    const matchingSections = pool
+      .filter((section) => {
+        if (documentFilter.size > 0 && !documentFilter.has(section.documentId)) return false
+        const title = normalizeLegalText(section.title)
+        return wantedPatterns.some((pattern) => pattern.test(title))
+      })
+      .slice(0, maxArticles)
+
+    const blocks: SearchResult[] = []
+    for (const section of matchingSections) {
+      let chunkRows = db
+        .select({
+          id: chunks.id,
+          content: chunks.content,
+          metadata: chunks.metadata,
+          chunkIndex: chunks.chunkIndex,
+          startOffset: chunks.startOffset,
+          endOffset: chunks.endOffset
+        })
+        .from(chunks)
+        .where(
+          and(
+            eq(chunks.documentId, section.documentId),
+            lt(chunks.startOffset, section.endOffset),
+            gt(chunks.endOffset, section.startOffset)
+          )
+        )
+        .all()
+
+      if (chunkRows.length === 0) {
+        chunkRows = db
+          .select({
+            id: chunks.id,
+            content: chunks.content,
+            metadata: chunks.metadata,
+            chunkIndex: chunks.chunkIndex,
+            startOffset: chunks.startOffset,
+            endOffset: chunks.endOffset
+          })
+          .from(chunks)
+          .where(eq(chunks.sectionId, section.id))
+          .all()
+      }
+
+      if (chunkRows.length === 0) continue
+
+      const ordered = chunkRows
+        .filter(hasOffsets)
+        .sort((left, right) => left.startOffset - right.startOffset)
+      if (ordered.length === 0) continue
+      const merged = mergeOverlappingChunks(ordered)
+      if (!merged.trim()) continue
+      const matchedContent =
+        merged.length > 6000 && options.query
+          ? this.selectRelevantWindow(merged, options.query, Math.min(maxChars, 4000))
+          : merged
+
+      const first = ordered[0]
+      blocks.push({
+        chunkId: first.id,
+        documentId: section.documentId,
+        documentTitle: section.documentTitle,
+        documentType: section.documentType,
+        sourceUri: section.sourceUri || undefined,
+        pageNumber: this.resolveChunkPageNumber(
+          (section.documentMetadata as Record<string, unknown> | null) || undefined,
+          (first.metadata as Record<string, unknown> | null) || undefined,
+          first.startOffset,
+          first.endOffset
+        ),
+        sectionPath:
+          Array.isArray(section.headingPath) && section.headingPath.length > 0
+            ? section.headingPath
+            : [section.title],
+        content: merged,
+        matchedContent,
+        score: 2 - blocks.length * 0.01,
+        chunkIndex: first.chunkIndex,
+        metadata: (first.metadata as Record<string, unknown> | null) || undefined
+      })
+    }
+
+    return blocks
+  }
+
+  /**
+   * Find the exact defining clause for a "X là gì / định nghĩa X" question.
+   *
+   * Semantic search often returns the chunk *after* the definition because the
+   * definition starts near a chunk boundary (for example clause 6 of Điều 3
+   * ends in the next chunk). This scan anchors on the definition phrase
+   * itself, then merges the following chunks without overlap.
+   */
+  searchDefinitionEvidence(
+    notebookId: string,
+    query: string,
+    limit = 2,
+    documentIds?: string[]
+  ): SearchResult[] {
+    const term = extractDefinitionTerm(query)
+    if (!term) return []
+    const termNorm = normalizeLegalText(term)
+    if (termNorm.length < 3) return []
+
+    const db = getDatabase()
+    const documentRows = db
+      .select({
+        id: documents.id,
+        title: documents.title,
+        type: documents.type,
+        sourceUri: documents.sourceUri,
+        metadata: documents.metadata
+      })
+      .from(documents)
+      .where(eq(documents.notebookId, notebookId))
+      .all()
+    if (documentRows.length === 0) return []
+
+    const queryNorm = normalizeLegalText(query)
+    const allowedDocuments = documentIds?.length ? new Set(documentIds) : null
+    const mentioned = documentRows.filter(
+      (document) =>
+        (!allowedDocuments || allowedDocuments.has(document.id)) &&
+        queryMatchesDocument(
+          queryNorm,
+          document.title,
+          (document.metadata as Record<string, unknown> | null) || undefined
+        )
+    )
+    if (namesSpecificLaw(query) && mentioned.length === 0 && !allowedDocuments) return []
+    const scopedDocuments = (mentioned.length > 0 ? mentioned : documentRows).filter(
+      (document) => !allowedDocuments || allowedDocuments.has(document.id)
+    )
+    if (scopedDocuments.length === 0) return []
+    const documentMap = new Map(scopedDocuments.map((document) => [document.id, document]))
+    const scopedIds = scopedDocuments.map((document) => document.id)
+
+    const rows = db
+      .select({
+        id: chunks.id,
+        documentId: chunks.documentId,
+        content: chunks.content,
+        metadata: chunks.metadata,
+        chunkIndex: chunks.chunkIndex,
+        startOffset: chunks.startOffset,
+        endOffset: chunks.endOffset
+      })
+      .from(chunks)
+      .where(inArray(chunks.documentId, scopedIds))
+      .all()
+
+    const termPattern = new RegExp(
+      term
+        .split(/\s+/u)
+        .map((part) => escapeRegExp(part))
+        .join('\\s+'),
+      'iu'
+    )
+    const termPatternGlobal = new RegExp(termPattern.source, 'giu')
+    const copulaNorm = [
+      `${termNorm} la `,
+      `${termNorm} duoc hieu la `,
+      `${termNorm} duoc dinh nghia la `
+    ]
+    const candidates: Array<{
+      row: (typeof rows)[number] & { startOffset: number; endOffset: number }
+      matchIndex: number
+      score: number
+    }> = []
+
+    for (const row of rows) {
+      if (!hasOffsets(row)) continue
+      const normalized = normalizeLegalText(row.content)
+      if (!copulaNorm.some((phrase) => normalized.includes(phrase))) continue
+
+      const matches = [...row.content.matchAll(termPatternGlobal)]
+      const match = matches.find((candidate) => {
+        const after = row.content.slice(candidate.index, candidate.index + term.length + 80)
+        return /(?:là|được hiểu là|được định nghĩa là)\s+/iu.test(after)
+      })
+      if (!match || match.index === undefined) continue
+
+      const metadata = (row.metadata as Record<string, unknown> | null) || undefined
+      const sectionTitle = normalizeLegalText(
+        typeof metadata?.sectionTitle === 'string'
+          ? metadata.sectionTitle
+          : Array.isArray(metadata?.headingPath)
+            ? (metadata.headingPath as string[]).slice(-1)[0] || ''
+            : ''
+      )
+      const clauseStart = row.content.slice(Math.max(0, match.index - 12), match.index)
+      let score = 2.5
+      if (sectionTitle.includes('giai thich tu ngu') || sectionTitle.includes('dinh nghia')) {
+        score += 0.5
+      }
+      if (/\d+\.\s*$/u.test(clauseStart)) score += 0.2
+      candidates.push({ row, matchIndex: match.index, score })
+    }
+
+    candidates.sort(
+      (left, right) => right.score - left.score || left.row.chunkIndex - right.row.chunkIndex
+    )
+
+    return candidates.slice(0, Math.max(1, limit)).map((candidate, index) => {
+      const { row, matchIndex } = candidate
+      const document = documentMap.get(row.documentId)
+      const metadata = (row.metadata as Record<string, unknown> | null) || undefined
+      const nextRows = db
+        .select({
+          content: chunks.content,
+          startOffset: chunks.startOffset,
+          endOffset: chunks.endOffset
+        })
+        .from(chunks)
+        .where(
+          and(
+            eq(chunks.documentId, row.documentId),
+            inArray(
+              chunks.chunkIndex,
+              Array.from({ length: 6 }, (_, offset) => row.chunkIndex + offset + 1)
+            )
+          )
+        )
+        .all()
+
+      // Include the numbered clause label ("6. ") in front of the term so the
+      // model can quote the definition with its source numbering intact.
+      const labelLookback = row.content.slice(Math.max(0, matchIndex - 16), matchIndex)
+      const labelMatch = /(?:^|\n)\s*\d+\.\s*$/.exec(labelLookback)
+      const contentStart = labelMatch
+        ? matchIndex - (labelLookback.length - labelMatch.index)
+        : matchIndex
+      const merged = mergeOverlappingChunks([
+        {
+          content: row.content.slice(contentStart),
+          startOffset: row.startOffset + contentStart,
+          endOffset: row.endOffset
+        },
+        ...nextRows.filter(hasOffsets)
+      ]).slice(0, 2400)
+      // Stop at the next numbered clause so the definition block does not
+      // carry the following definition into the prompt. Searching after the
+      // first character skips the clause label that was just included, which
+      // would otherwise match its own boundary.
+      const nextClauseIndex = merged.slice(1).search(/\n{1,2}\d+\.\s/u)
+      const nextClause = nextClauseIndex < 0 ? -1 : nextClauseIndex + 1
+      const content = nextClause > 80 ? merged.slice(0, nextClause) : merged
+
+      const headingPath = Array.isArray(metadata?.headingPath)
+        ? (metadata.headingPath as string[])
+        : undefined
+
+      return {
+        chunkId: row.id,
+        documentId: row.documentId,
+        documentTitle: document?.title || '',
+        documentType: document?.type || 'file',
+        sourceUri: document?.sourceUri || undefined,
+        pageNumber: this.resolveChunkPageNumber(
+          (document?.metadata as Record<string, unknown> | null) || undefined,
+          metadata,
+          row.startOffset,
+          row.endOffset
+        ),
+        sectionPath: headingPath,
+        content,
+        matchedContent: content,
+        score: 3 - index * 0.01,
+        chunkIndex: row.chunkIndex,
+        metadata
+      }
+    })
+  }
+
+  /**
    * Pull the exact clause that answers a date/time-limit question out of the
    * scoped documents. This is deliberately narrow: it only runs for "hiệu lực"
    * or "thời hạn/bao lâu" questions and only returns clauses matching those
    * patterns. It prevents a neighbouring clause from being the only context.
    */
-  searchDirectEvidence(notebookId: string, query: string, limit = 4): SearchResult[] {
+  searchDirectEvidence(
+    notebookId: string,
+    query: string,
+    limit = 4,
+    documentIds?: string[]
+  ): SearchResult[] {
     const wantsEffectiveDate = /hiệu lực/i.test(query)
     const wantsDuration = /(thời hạn|bao lâu)/i.test(query)
     if (!wantsEffectiveDate && !wantsDuration) return []
@@ -488,8 +885,21 @@ export class KnowledgeRetrievalService {
     // Require an explicit "luật <subject>" mention. A query containing
     // "dữ liệu thử nghiệm" must not pull in the Data Law when it actually
     // names the IP Law.
-    const mentioned = documentRows.filter((document) => queryMentionsLaw(queryNorm, document.title))
-    const scopedDocuments = mentioned.length > 0 ? mentioned : documentRows
+    const allowedDocuments = documentIds?.length ? new Set(documentIds) : null
+    const mentioned = documentRows.filter(
+      (document) =>
+        (!allowedDocuments || allowedDocuments.has(document.id)) &&
+        queryMatchesDocument(
+          queryNorm,
+          document.title,
+          (document.metadata as Record<string, unknown> | null) || undefined
+        )
+    )
+    if (namesSpecificLaw(query) && mentioned.length === 0 && !allowedDocuments) return []
+    const scopedDocuments = (mentioned.length > 0 ? mentioned : documentRows).filter(
+      (document) => !allowedDocuments || allowedDocuments.has(document.id)
+    )
+    if (scopedDocuments.length === 0) return []
     const scopedIds = scopedDocuments.map((document) => document.id)
     const documentMap = new Map(scopedDocuments.map((document) => [document.id, document]))
 
@@ -583,6 +993,60 @@ export class KnowledgeRetrievalService {
         // Direct evidence must be merged ahead of normal semantic hits.
         score: 2 - index * 0.01
       }))
+  }
+
+  /**
+   * Pick a query-relevant window from a very long article. The window becomes
+   * `matchedContent`, so the prompt clipper centres on the clause that answers
+   * the question instead of always taking the first N characters.
+   */
+  private selectRelevantWindow(content: string, query: string, maxChars: number): string {
+    const queryTokens = tokenizeLegalText(query)
+    if (queryTokens.length === 0) return content.slice(0, maxChars)
+
+    const paragraphs = content.split(/\n{2,}/u).filter((paragraph) => paragraph.trim())
+    if (paragraphs.length <= 1) return content.slice(0, maxChars)
+
+    let bestIndex = 0
+    let bestScore = -1
+    for (let index = 0; index < paragraphs.length; index += 1) {
+      const normalized = normalizeLegalText(paragraphs[index])
+      const lexical = this.lexicalOverlap(
+        queryTokens,
+        new Set(tokenizeLegalText(paragraphs[index]))
+      )
+      const phraseBoost = /thoi han|hieu luc|dinh nghia|bao lau|ngay/.test(normalized) ? 0.15 : 0
+      const score = lexical + phraseBoost
+      if (score > bestScore) {
+        bestScore = score
+        bestIndex = index
+      }
+    }
+
+    let start = bestIndex
+    let end = bestIndex + 1
+    let total = paragraphs[start].length
+
+    // Keep the window tight (the matching clause plus at most four
+    // neighbours). Expanding until the character budget is full would drag
+    // unrelated filler from the beginning/end of a long article back in.
+    while ((start > 0 || end < paragraphs.length) && end - start < 5) {
+      const previousLength = start > 0 ? paragraphs[start - 1].length : Number.POSITIVE_INFINITY
+      const nextLength = end < paragraphs.length ? paragraphs[end].length : Number.POSITIVE_INFINITY
+      if (Math.min(previousLength, nextLength) === Number.POSITIVE_INFINITY) break
+      if (total + Math.min(previousLength, nextLength) > maxChars) break
+      if (previousLength <= nextLength && start > 0) {
+        start -= 1
+        total += previousLength
+      } else if (end < paragraphs.length) {
+        total += nextLength
+        end += 1
+      } else {
+        break
+      }
+    }
+
+    return paragraphs.slice(start, end).join('\n\n').slice(0, maxChars)
   }
 
   private lexicalOverlap(queryTokens: string[], documentTokens: Set<string>): number {

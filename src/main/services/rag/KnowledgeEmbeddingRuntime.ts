@@ -38,8 +38,8 @@ export class KnowledgeEmbeddingRuntime {
     if (dimensions !== REQUIRED_EMBEDDING_DIMENSIONS) {
       throw new Error(
         `Embedding model returns ${dimensions}-dimensional vectors, but MiChat requires ` +
-          `${REQUIRED_EMBEDDING_DIMENSIONS}. Choose a ${REQUIRED_EMBEDDING_DIMENSIONS}-dimension ` +
-          'model (for example bge-m3).'
+          `${REQUIRED_EMBEDDING_DIMENSIONS}. Load a ${REQUIRED_EMBEDDING_DIMENSIONS}-dimension ` +
+          'embedding model in the external server (for example bge-m3).'
       )
     }
   }

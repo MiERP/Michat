@@ -370,9 +370,38 @@ export class KnowledgeService {
     return this.retrievalService.searchArticleChunks(notebookId, articleRefs, query, limit)
   }
 
+  /** One complete, source-ordered block per requested article. */
+  getArticleContext(
+    notebookId: string,
+    articleRefs: string[],
+    options: {
+      query?: string
+      documentIds?: string[]
+      maxArticles?: number
+      maxChars?: number
+    } = {}
+  ): SearchResult[] {
+    return this.retrievalService.getArticleContext(notebookId, articleRefs, options)
+  }
+
+  /** Exact defining clause for a definition question. */
+  searchDefinitionEvidence(
+    notebookId: string,
+    query: string,
+    limit = 2,
+    documentIds?: string[]
+  ): SearchResult[] {
+    return this.retrievalService.searchDefinitionEvidence(notebookId, query, limit, documentIds)
+  }
+
   /** Exact effective-date / time-limit clauses for the scoped documents. */
-  searchDirectEvidence(notebookId: string, query: string, limit = 4): SearchResult[] {
-    return this.retrievalService.searchDirectEvidence(notebookId, query, limit)
+  searchDirectEvidence(
+    notebookId: string,
+    query: string,
+    limit = 4,
+    documentIds?: string[]
+  ): SearchResult[] {
+    return this.retrievalService.searchDirectEvidence(notebookId, query, limit, documentIds)
   }
 
   getDocuments(notebookId: string): Document[] {

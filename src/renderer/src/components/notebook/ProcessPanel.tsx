@@ -80,7 +80,8 @@ export default function ProcessPanel({
   const checkApiConfig = async (): Promise<void> => {
     try {
       const config = await window.api.api.getConfig()
-      setApiReady(Boolean(config.baseUrl && config.chatModel))
+      // Only the endpoint is configuration; the external server owns the model.
+      setApiReady(Boolean(config.baseUrl))
     } catch (error) {
       console.error('Failed to read API configuration:', error)
       setApiReady(false)

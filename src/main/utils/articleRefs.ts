@@ -8,6 +8,7 @@
  */
 
 const ARTICLE_REF_REGEX = /Điều\s+(\d+[a-z]?)/giu
+const ARTICLE_HEADING_REGEX = /(?:^|\n)\s*#{1,4}\s*Điều\s+(\d+[a-z]?)\b/giu
 
 export interface ArticleMatchable {
   sectionPath?: string[]
@@ -20,6 +21,20 @@ export function extractArticleRefs(query: string): string[] {
   for (const match of query.matchAll(ARTICLE_REF_REGEX)) {
     refs.add(match[1].toLowerCase())
     if (refs.size >= 8) break
+  }
+  return [...refs]
+}
+
+/**
+ * Find article headings that begin a retrieved chunk. This lets MiChat expand
+ * an article whose section metadata was cut at the chapter boundary, without
+ * treating every "Điều N" reference inside body text as a new article.
+ */
+export function extractArticleRefsFromContent(content: string, max = 2): string[] {
+  const refs = new Set<string>()
+  for (const match of content.matchAll(ARTICLE_HEADING_REGEX)) {
+    refs.add(match[1].toLowerCase())
+    if (refs.size >= max) break
   }
   return [...refs]
 }

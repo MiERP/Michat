@@ -69,8 +69,6 @@ const settingKeySchema = z.enum(settingKeys)
 const apiConfigInputSchema = z
   .object({
     baseUrl: z.string().max(2048).optional(),
-    chatModel: z.string().max(256).optional(),
-    embeddingModel: z.string().max(256).optional(),
     embeddingBaseUrl: z.string().max(2048).optional(),
     contextWindow: z.number().int().min(2048).max(1_000_000).optional(),
     apiKey: z.string().max(4096).optional(),

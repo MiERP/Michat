@@ -41,4 +41,34 @@ describe('contextClip', () => {
 
     expect(clipSectionAroundPrimary(content, 'x \ny', 1000)).toBe(content)
   })
+
+  it('keeps a relevant window near the end of a long contiguous article', () => {
+    const primary = 'Thời hạn giải quyết hồ sơ là bảy ngày làm việc kể từ ngày nhận đủ hồ sơ.'
+    const content = `${'F'.repeat(20_000)}\n\n${primary}\n\n${'G'.repeat(20_000)}`
+
+    const clipped = clipSectionAroundPrimary(content, primary, 300)
+
+    expect(normalizeForMatch(clipped)).toContain('bảy ngày làm việc')
+    expect(clipped.length).toBeLessThan(content.length)
+  })
+
+  it('keeps the primary visible when it is longer than the token budget', () => {
+    const primary = `Thời hạn giải quyết hồ sơ là bảy ngày làm việc. ${'Nội dung bổ sung. '.repeat(30)}`
+    const content = `${'F'.repeat(5000)}\n${primary}\n${'G'.repeat(5000)}`
+
+    const clipped = clipSectionAroundPrimary(content, primary, 50)
+
+    expect(isPrimaryVisible(clipped, primary)).toBe(true)
+  })
+
+  it('finds a raw primary window inside sanitized long content', () => {
+    const primary = 'Thời hạn giải quyết hồ sơ là bảy ngày làm việc.'
+    const sanitized = `${'F'.repeat(20_000)}\n${primary}\n${'G'.repeat(20_000)}`
+    const rawPrimary = `Thời hạn giải quyết hồ sơ là bảy ngày làm việc.   \n\n\n`
+
+    const clipped = clipSectionAroundPrimary(sanitized, rawPrimary, 300)
+
+    expect(normalizeForMatch(clipped)).toContain('bảy ngày làm việc')
+    expect(isPrimaryVisible(clipped, rawPrimary)).toBe(true)
+  })
 })

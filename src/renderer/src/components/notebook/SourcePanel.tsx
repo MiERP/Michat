@@ -654,7 +654,9 @@ export default function SourcePanel(): ReactElement {
   useEffect(() => {
     const loadApiConfig = async () => {
       const config = await window.api.api.getConfig()
-      setHasEmbeddingApi(Boolean(config.baseUrl && config.embeddingModel))
+      // The chat endpoint is required; the embedding model is discovered there
+      // or on the optional separate embedding endpoint.
+      setHasEmbeddingApi(Boolean(config.baseUrl))
     }
     void loadApiConfig()
 

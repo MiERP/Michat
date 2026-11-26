@@ -435,7 +435,7 @@ export function registerKnowledgeHandlers(
           return {
             success: false,
             error:
-              'Chat API is not configured. Set the API base URL and chat model in Settings > API.'
+              'Chat API is not configured. Set the API base URL in Settings > API and load a chat model in the external server.'
           }
         }
 
@@ -484,7 +484,7 @@ export function registerKnowledgeHandlers(
           return {
             success: false,
             error:
-              'Chat API is not configured. Set the API base URL and chat model in Settings > API.'
+              'Chat API is not configured. Set the API base URL in Settings > API and load a chat model in the external server.'
           }
         }
 

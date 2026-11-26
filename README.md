@@ -114,11 +114,15 @@ Local builds are unsigned, so Windows SmartScreen may show a warning.
 3. Enter:
    - **Base URL** — `http://127.0.0.1:8080/v1` (llama-server default)
    - **API key** — optional; encrypted with the OS keystore when available
-   - **Chat model** — exact model id advertised by `/v1/models` (for example `qwen-local`)
-   - **Embedding model** — must return **1024-dimensional** vectors (for example `bge-m3`)
    - **Embedding API base URL** — `http://127.0.0.1:8081/v1` when embeddings run separately;
      leave blank when chat and embeddings share one server
    - **Context window** — used for automatic session switching
+
+   MiChat does not ask for model names. It uses the model advertised by each server at
+   `/v1/models`; choose or switch models in `llama-server` itself. If chat and embeddings
+   share one gateway, give the embedding model an id containing `embed`, `bge`, `e5`, or
+   `gte`, or set a separate embedding endpoint.
+
 4. Click **Test Connection**, then **Save**.
 5. Import documents or create notes and start chatting.
 

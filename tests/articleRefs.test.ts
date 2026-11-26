@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   extractArticleRefs,
+  extractArticleRefsFromContent,
   matchesArticleRef,
   mergeSearchResults,
   prioritizeArticleMatches
@@ -34,6 +35,46 @@ describe('articleRefs', () => {
       expect(new Set(refs).size).toBe(8)
       expect(refs[0]).toBe('1')
       expect(refs[7]).toBe('8')
+    })
+  })
+
+  describe('extractArticleRefsFromContent', () => {
+    it('finds an article heading even when chunk metadata points at the parent chapter', () => {
+      expect(
+        extractArticleRefsFromContent(
+          '### Điều 10. Hệ thống thông tin quan trọng về an ninh quốc gia\n\n1. Hệ thống thông tin...'
+        )
+      ).toEqual(['10'])
+      expect(
+        extractArticleRefsFromContent('Chương II\n\n## Điều 10. Hệ thống thông tin quan trọng')
+      ).toEqual(['10'])
+    })
+
+    it('returns headings in source order and respects the cap', () => {
+      const content = [
+        '### Điều 8. Hành vi bị cấm',
+        'Nội dung.',
+        '### Điều 9. Trách nhiệm',
+        '### Điều 10. Hệ thống thông tin'
+      ].join('\n')
+
+      expect(extractArticleRefsFromContent(content)).toEqual(['8', '9'])
+      expect(extractArticleRefsFromContent(content, 1)).toEqual(['8'])
+    })
+
+    it('ignores article numbers referenced in body text', () => {
+      expect(
+        extractArticleRefsFromContent(
+          [
+            'Theo quy định tại Điều 10 của Luật An ninh mạng, chủ quản hệ thống thông tin phải báo cáo.',
+            'Khoản 2 Điều 10 quy định trách nhiệm của chủ quản hệ thống.'
+          ].join('\n')
+        )
+      ).toEqual([])
+    })
+
+    it('does not treat a heading marker inside a sentence as an article heading', () => {
+      expect(extractArticleRefsFromContent('Xem mục ### Điều 10 để biết thêm')).toEqual([])
     })
   })
 

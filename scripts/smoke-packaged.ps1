@@ -132,10 +132,17 @@ try {
   $waitExpression = @"
 new Promise(resolve => {
   const started = Date.now();
+  const startButton = () => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    return buttons[buttons.length - 1];
+  };
   const tick = () => {
-    const button = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Get Started'));
-    if (window.api && window.electron && button) resolve({ ready: true, hasApi: true, hasElectron: true, url: location.href, text: document.body.innerText });
-    else if (Date.now() - started > 15000) resolve({ ready: false, hasApi: !!window.api, hasElectron: !!window.electron, url: location.href, text: document.body.innerText });
+    const button = startButton();
+    // The minimal preload exposes only window.api (no window.electron), and
+    // the start button label is locale-dependent, so identify the button by
+    // DOM position: the language selector is the only button before it.
+    if (window.api && button && button.innerText.trim().length > 0) resolve({ ready: true, hasApi: true, buttonLabel: button.innerText, url: location.href, text: document.body.innerText });
+    else if (Date.now() - started > 15000) resolve({ ready: false, hasApi: !!window.api, buttonCount: document.querySelectorAll('button').length, url: location.href, text: document.body.innerText });
     else setTimeout(tick, 250);
   };
   tick();
@@ -144,10 +151,10 @@ new Promise(resolve => {
 
   $ready = Send-Cdp 'Runtime.evaluate' @{ expression = $waitExpression; awaitPromise = $true; returnByValue = $true }
   if (-not $ready.result.result.value.ready) {
-    throw ("Packaged app did not expose preload API/onboarding in time: " + ($ready.result.result.value | ConvertTo-Json -Compress))
+    throw ("Packaged app did not expose the preload API/onboarding in time: " + ($ready.result.result.value | ConvertTo-Json -Compress))
   }
 
-  Send-Cdp 'Runtime.evaluate' @{ expression = "Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Get Started')).click(); 'clicked'"; returnByValue = $true } | Out-Null
+  Send-Cdp 'Runtime.evaluate' @{ expression = "Array.from(document.querySelectorAll('button')).pop().click(); 'clicked'"; returnByValue = $true } | Out-Null
   Start-Sleep -Seconds 3
 
   $after = Send-Cdp 'Runtime.evaluate' @{ expression = "({ url: location.href, text: document.body.innerText, hasApi: !!window.api })"; returnByValue = $true }

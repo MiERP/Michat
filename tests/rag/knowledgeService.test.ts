@@ -240,6 +240,308 @@ describe('KnowledgeService RAG regression', () => {
     expect(direct.some((result) => /năm tháng/i.test(result.content))).toBe(true)
   })
 
+  it('returns the complete article with overlapping chunks merged once', async () => {
+    const { service, notebookId } = context!
+
+    const documentId = await service.addDocument(notebookId, {
+      title: '24_2018_QH14_luật an ninh mạng.pdf',
+      type: 'text',
+      content: [
+        '# 24/2018/QH14 - Luật An ninh mạng',
+        '',
+        '### Điều 10. Hệ thống thông tin quan trọng về an ninh quốc gia',
+        '',
+        '1. Hệ thống thông tin quan trọng về an ninh quốc gia là hệ thống thông tin khi bị sự cố, xâm nhập, chiếm quyền điều khiển, làm sai lệch, gián đoạn, ngưng trệ, tê liệt, tấn công hoặc phá hoại sẽ xâm phạm nghiêm trọng an ninh mạng.',
+        '2. Hệ thống thông tin quan trọng về an ninh quốc gia bao gồm:',
+        'a) Hệ thống thông tin quân sự, an ninh, ngoại giao, cơ yếu;',
+        'b) Hệ thống thông tin lưu trữ, xử lý thông tin thuộc bí mật nhà nước;',
+        'c) Hệ thống thông tin phục vụ lưu giữ, bảo quản hiện vật, tài liệu có giá trị đặc biệt quan trọng;',
+        'd) Hệ thống thông tin phục vụ bảo quản vật liệu, chất đặc biệt nguy hiểm;',
+        'đ) Hệ thống thông tin phục vụ bảo quản, chế tạo, quản lý cơ sở vật chất đặc biệt quan trọng khác;',
+        'e) Hệ thống thông tin quan trọng phục vụ hoạt động của cơ quan, tổ chức ở trung ương;',
+        'g) Hệ thống thông tin quốc gia thuộc lĩnh vực năng lượng, tài chính, ngân hàng, viễn thông;',
+        'h) Hệ thống điều khiển và giám sát tự động tại công trình quan trọng liên quan đến an ninh quốc gia.'
+      ].join('\n'),
+      chunkOptions: { chunkSize: 90, chunkOverlap: 30, minChunkSize: 10 }
+    })
+
+    const blocks = service.getArticleContext(notebookId, ['10'], {
+      documentIds: [documentId],
+      maxArticles: 1
+    })
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].sectionPath?.join(' ')).toContain('Điều 10')
+    expect(blocks[0].content).toContain('a) Hệ thống thông tin quân sự')
+    expect(blocks[0].content).toContain('h) Hệ thống điều khiển')
+    expect(blocks[0].content.match(/Hệ thống thông tin quân sự/gu)).toHaveLength(1)
+  })
+
+  it('finds the exact definition clause when it starts in one chunk and ends in the next', async () => {
+    const { service, notebookId } = context!
+
+    const documentId = await service.addDocument(notebookId, {
+      title: '60_2024_QH15_luật dữ liệu.pdf',
+      type: 'text',
+      content: [
+        '# 60/2024/QH15 - Luật Dữ liệu',
+        '',
+        '### Điều 3. Giải thích từ ngữ',
+        '',
+        '5. Dữ liệu gốc là dữ liệu được tạo lập trong quá trình hoạt động của cơ quan, tổ chức, cá nhân.',
+        '6. Dữ liệu quan trọng là dữ liệu có thể tác động đến quốc phòng, an ninh, đối ngoại, kinh tế vĩ mô, ổn định xã hội, sức khỏe và an toàn cộng đồng thuộc danh mục do Thủ tướng Chính phủ ban hành.',
+        '7. Dữ liệu cốt lõi là dữ liệu quan trọng trực tiếp tác động đến quốc phòng, an ninh, đối ngoại.'
+      ].join('\n'),
+      chunkOptions: { chunkSize: 80, chunkOverlap: 30, minChunkSize: 10 }
+    })
+
+    // Guard the setup: the defining clause really must span two chunks,
+    // otherwise the merge across a chunk boundary is not exercised.
+    expect(
+      service
+        .getDocumentChunks(documentId)
+        .some(
+          (chunk) =>
+            chunk.content.includes('Dữ liệu quan trọng là') &&
+            chunk.content.includes('Thủ tướng Chính phủ ban hành')
+        )
+    ).toBe(false)
+
+    const evidence = service.searchDefinitionEvidence(
+      notebookId,
+      'Luật Dữ liệu định nghĩa dữ liệu quan trọng là gì?',
+      1
+    )
+
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0].sectionPath?.join(' ')).toContain('Điều 3')
+    expect(evidence[0].content).toContain('Dữ liệu quan trọng là dữ liệu có thể tác động')
+    expect(evidence[0].content).toContain('Thủ tướng Chính phủ ban hành')
+    expect(evidence[0].content.match(/Dữ liệu quan trọng là/gu)).toHaveLength(1)
+    // The defining clause keeps its source label so the model can quote the
+    // numbering it is told to preserve.
+    expect(evidence[0].content).toMatch(/\n?\s*6\.\s*Dữ liệu quan trọng là/u)
+    // The block stops at the next numbered clause instead of carrying the
+    // following definition into the prompt.
+    expect(evidence[0].content).not.toContain('Dữ liệu cốt lõi là')
+  })
+
+  it('matches the exact article number and stays inside the requested document', async () => {
+    const { service, notebookId } = context!
+
+    const cyberId = await service.addDocument(notebookId, {
+      title: '24_2018_QH14_luật an ninh mạng.pdf',
+      type: 'text',
+      content: [
+        '# Luật An ninh mạng',
+        '',
+        '### Điều 1. Phạm vi điều chỉnh',
+        '',
+        '1. Luật này quy định về an ninh mạng.',
+        '',
+        '### Điều 10. Hệ thống thông tin quan trọng về an ninh quốc gia',
+        '',
+        '1. Hệ thống thông tin quan trọng về an ninh quốc gia gồm:',
+        'a) Hệ thống thông tin quân sự.'
+      ].join('\n')
+    })
+    const dataId = await service.addDocument(notebookId, {
+      title: '60_2024_QH15_luật dữ liệu.pdf',
+      type: 'text',
+      content: [
+        '# Luật Dữ liệu',
+        '',
+        '### Điều 10. Quy định về dữ liệu',
+        '',
+        '1. Nội dung về dữ liệu.'
+      ].join('\n')
+    })
+
+    // "Điều 1" must not match "Điều 10".
+    const firstArticle = service.getArticleContext(notebookId, ['1'], {
+      documentIds: [cyberId],
+      maxArticles: 2
+    })
+    expect(firstArticle).toHaveLength(1)
+    expect(firstArticle[0].sectionPath?.join(' ')).toContain('Điều 1.')
+
+    // Implicit expansion stays in the seed document even when another law has
+    // an article with the same number.
+    const sameArticleOtherLaw = service.getArticleContext(notebookId, ['10'], {
+      documentIds: [dataId],
+      maxArticles: 2
+    })
+    expect(sameArticleOtherLaw).toHaveLength(1)
+    expect(sameArticleOtherLaw[0].documentId).toBe(dataId)
+  })
+
+  it('does not fall back to another law when the named law is not in the notebook', async () => {
+    const { service, notebookId } = context!
+
+    await service.addDocument(notebookId, {
+      title: '24_2018_QH14_luật an ninh mạng.pdf',
+      type: 'text',
+      content: [
+        '# Luật An ninh mạng',
+        '',
+        '### Điều 10. Hệ thống thông tin quan trọng',
+        '',
+        '1. Hệ thống thông tin quan trọng về an ninh quốc gia gồm:',
+        'a) Hệ thống thông tin quân sự.'
+      ].join('\n')
+    })
+
+    const blocks = service.getArticleContext(notebookId, ['10'], {
+      query: 'Theo Luật Không Tồn Tại, Điều 10 quy định gì?',
+      maxArticles: 1
+    })
+
+    expect(blocks).toEqual([])
+  })
+
+  it('resolves a law by its document number, not by an unrelated law', async () => {
+    const { service, notebookId } = context!
+
+    await service.addDocument(notebookId, {
+      title: '07_2022_QH15_luật sở hữu trí tuệ.pdf',
+      type: 'text',
+      content: [
+        '# 07/2022/QH15 - Luật Sở hữu trí tuệ',
+        '',
+        '### Điều 3. Hiệu lực thi hành',
+        '',
+        '1. Luật này có hiệu lực thi hành từ ngày 01 tháng 01 năm 2023.'
+      ].join('\n')
+    })
+    const dataDocumentId = await service.addDocument(notebookId, {
+      title: '60_2024_QH15_luật dữ liệu.pdf',
+      type: 'text',
+      content: [
+        '# 60/2024/QH15 - Luật Dữ liệu',
+        '',
+        '### Điều 3. Hiệu lực thi hành',
+        '',
+        '1. Luật này có hiệu lực thi hành từ ngày 01 tháng 7 năm 2025.'
+      ].join('\n')
+    })
+    service.updateDocumentMetadata(dataDocumentId, { documentNumber: '60/2024/QH15' })
+
+    const evidence = service.searchDirectEvidence(
+      notebookId,
+      'Theo 60/2024/QH15, luật có hiệu lực từ ngày nào?',
+      4
+    )
+
+    expect(evidence.map((result) => result.documentTitle)).toEqual([
+      expect.stringContaining('dữ liệu')
+    ])
+    expect(evidence[0]?.content).toContain('01 tháng 7 năm 2025')
+  })
+
+  it('resolves a law by its common abbreviation without a document number', async () => {
+    const { service, notebookId } = context!
+
+    await service.addDocument(notebookId, {
+      title: '07_2022_QH15_luật sở hữu trí tuệ.pdf',
+      type: 'text',
+      content: [
+        '# 07/2022/QH15 - Luật Sở hữu trí tuệ',
+        '',
+        '### Điều 3. Hiệu lực thi hành',
+        '',
+        '1. Luật này có hiệu lực thi hành từ ngày 01 tháng 01 năm 2023.'
+      ].join('\n')
+    })
+    await service.addDocument(notebookId, {
+      title: '60_2024_QH15_luật dữ liệu.pdf',
+      type: 'text',
+      content: [
+        '# 60/2024/QH15 - Luật Dữ liệu',
+        '',
+        '### Điều 3. Hiệu lực thi hành',
+        '',
+        '1. Luật này có hiệu lực thi hành từ ngày 01 tháng 7 năm 2025.'
+      ].join('\n')
+    })
+
+    const evidence = service.searchDirectEvidence(
+      notebookId,
+      'Luật SHTT có hiệu lực từ ngày nào?',
+      4
+    )
+
+    expect(evidence.map((result) => result.documentTitle)).toEqual([
+      expect.stringContaining('sở hữu trí tuệ')
+    ])
+    expect(evidence[0]?.content).toContain('01 tháng 01 năm 2023')
+  })
+
+  it('resolves a "Bộ luật" title and keeps its article block', async () => {
+    const { service, notebookId } = context!
+
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Bộ luật Dân sự',
+      type: 'text',
+      content: [
+        '# Bộ luật Dân sự',
+        '',
+        '### Điều 8. Nội dung thử',
+        '',
+        '1. Nội dung của Bộ luật Dân sự.'
+      ].join('\n')
+    })
+
+    const blocks = service.getArticleContext(notebookId, ['8'], {
+      query: 'Điều 8 Bộ luật Dân sự quy định gì?',
+      documentIds: [documentId],
+      maxArticles: 1
+    })
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].sectionPath?.join(' ')).toContain('Điều 8')
+  })
+
+  it('centres a long article block on the query-relevant clause', async () => {
+    const { service, notebookId } = context!
+
+    const filler = Array.from(
+      { length: 40 },
+      (_, index) =>
+        `Quy định chung số ${index + 1}: nội dung không liên quan đến câu hỏi và không chứa từ khóa tìm kiếm.`
+    ).join('\n\n')
+    const documentId = await service.addDocument(notebookId, {
+      title: 'Luật Dữ liệu',
+      type: 'text',
+      content: [
+        '# Luật Dữ liệu',
+        '',
+        '### Điều 12. Thời hạn xử lý',
+        '',
+        filler,
+        '',
+        'Thời hạn giải quyết hồ sơ là bảy ngày làm việc kể từ ngày nhận đủ hồ sơ.',
+        '',
+        filler,
+        '',
+        'Kết thúc điều.'
+      ].join('\n')
+    })
+
+    const blocks = service.getArticleContext(notebookId, ['12'], {
+      query: 'Thời hạn giải quyết hồ sơ là bao lâu?',
+      documentIds: [documentId],
+      maxArticles: 1,
+      maxChars: 1200
+    })
+
+    expect(blocks).toHaveLength(1)
+    // The full block survives; the prompt window is what gets centred.
+    expect(blocks[0].content).toContain('bảy ngày làm việc')
+    expect(blocks[0].matchedContent).toContain('bảy ngày làm việc')
+    expect(blocks[0].matchedContent).not.toContain('# Luật Dữ liệu')
+    expect(blocks[0].matchedContent!.length).toBeLessThanOrEqual(1200)
+  })
+
   it('extracts the main effective-date clause instead of a neighbour date', async () => {
     const { service, notebookId } = context!
 

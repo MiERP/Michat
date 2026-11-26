@@ -43,9 +43,7 @@ test('boots into onboarding, then saves and tests an API configuration', async (
     await window.getByRole('button', { name: /settings|cài đặt/i }).click()
     await window.getByRole('button', { name: /local api|api cục bộ/i }).click()
 
-    await window.getByLabel(/api base url|địa chỉ api/i).fill(baseUrl)
-    await window.getByLabel(/^chat model$|mô hình chat/i).fill('test-chat')
-    await window.getByLabel(/embedding model|mô hình embedding/i).fill('test-embed')
+    await window.getByRole('textbox', { name: /^(api base url|địa chỉ api)$/i }).fill(baseUrl)
 
     await window.getByRole('button', { name: /test connection|kiểm tra kết nối/i }).click()
     await expect(window.getByText(/connection successful|kết nối thành công/i)).toBeVisible()
@@ -55,8 +53,9 @@ test('boots into onboarding, then saves and tests an API configuration', async (
 
     const saved = await window.evaluate(() => window.api.api.getConfig())
     expect(saved.baseUrl).toBe(baseUrl)
-    expect(saved.chatModel).toBe('test-chat')
-    expect(saved.embeddingModel).toBe('test-embed')
+    // The external server owns model selection; MiChat must not expose it.
+    expect('chatModel' in saved).toBe(false)
+    expect('embeddingModel' in saved).toBe(false)
     expect(saved.hasApiKey).toBe(false)
 
     await window.getByRole('button', { name: /about|giới thiệu/i }).click()

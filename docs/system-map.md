@@ -7,31 +7,31 @@ run `llama-server` or another compatible server yourself.
 
 ## Processes
 
-| Process | Responsibility |
-| --- | --- |
+| Process       | Responsibility                                                                               |
+| ------------- | -------------------------------------------------------------------------------------------- |
 | Electron main | SQLite, migrations, document parsing, chunking, embeddings, retrieval, IPC, updates, windows |
-| Preload | Curated `window.api` bridge; no Node.js access in the renderer |
-| Renderer | React UI, notebook/chat state, settings, citations, quiz view |
-| Parser worker | Isolated `utilityProcess` that parses untrusted documents with a timeout |
-| External API | Chat completions, embeddings, and `GET /v1/models`; supplied by the user |
+| Preload       | Curated `window.api` bridge; no Node.js access in the renderer                               |
+| Renderer      | React UI, notebook/chat state, settings, citations, quiz view                                |
+| Parser worker | Isolated `utilityProcess` that parses untrusted documents with a timeout                     |
+| External API  | Chat completions, embeddings, and `GET /v1/models`; supplied by the user                     |
 
 There are no child model processes. The main process never spawns
 `llama-server`; it only sends HTTP requests to the configured loopback URL.
 
 ## Main-process modules
 
-| Path | Role |
-| --- | --- |
-| `src/main/index.ts` | Startup order: compatibility mode, database, services, IPC, window, shutdown barrier |
-| `src/main/ai/apiConfigManager.ts` | Persist the API URL, models, context window, and encrypted key |
-| `src/main/ai/apiClient.ts` | Build and cache chat/embedding providers from the saved configuration |
-| `src/main/ai/OpenAICompatibleClient.ts` | Streaming chat and embedding calls through the Vercel AI SDK |
-| `src/main/db/` | Drizzle schema, migrations, queries, SQLite and `sqlite-vec` setup |
-| `src/main/services/rag/` | Ingestion, chunking, embedding, vector/FTS retrieval, reranking, prompt context |
-| `src/main/services/BackgroundJobService.ts` | Idle-only queue for enrichment, links, backfill, and summaries |
-| `src/main/ipc/` | Validated IPC handlers grouped by domain |
-| `src/main/security/` | CSP, navigation guards, loopback URL validation, secure web preferences |
-| `src/main/compatMode.ts` | Per-user renderer-sandbox fallback for blocked environments |
+| Path                                        | Role                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `src/main/index.ts`                         | Startup order: compatibility mode, database, services, IPC, window, shutdown barrier |
+| `src/main/ai/apiConfigManager.ts`           | Persist the API URL, context window, and encrypted key                               |
+| `src/main/ai/apiClient.ts`                  | Discover the server's model, then build and cache chat/embedding providers           |
+| `src/main/ai/OpenAICompatibleClient.ts`     | Streaming chat and embedding calls through the Vercel AI SDK                         |
+| `src/main/db/`                              | Drizzle schema, migrations, queries, SQLite and `sqlite-vec` setup                   |
+| `src/main/services/rag/`                    | Ingestion, chunking, embedding, vector/FTS retrieval, reranking, prompt context      |
+| `src/main/services/BackgroundJobService.ts` | Idle-only queue for enrichment, links, backfill, and summaries                       |
+| `src/main/ipc/`                             | Validated IPC handlers grouped by domain                                             |
+| `src/main/security/`                        | CSP, navigation guards, loopback URL validation, secure web preferences              |
+| `src/main/compatMode.ts`                    | Per-user renderer-sandbox fallback for blocked environments                          |
 
 ## Data flow
 

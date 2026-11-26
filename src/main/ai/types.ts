@@ -67,8 +67,9 @@ export interface StoredApiConfig {
   baseUrl: string
   apiKey?: string
   __encrypted_apiKey?: boolean
-  chatModel: string
-  embeddingModel: string
+  /** Legacy fields kept only so old installs can be read; never used. */
+  chatModel?: string
+  embeddingModel?: string
   embeddingBaseUrl?: string
   contextWindow: number
   updatedAt?: number

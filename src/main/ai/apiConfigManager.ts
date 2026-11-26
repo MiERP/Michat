@@ -15,15 +15,11 @@ const SENSITIVE_FIELDS = ['apiKey']
 export const DEFAULT_API_CONFIG: StoredApiConfig = {
   // llama-server's default port. Existing installs keep their saved URL.
   baseUrl: 'http://127.0.0.1:8080/v1',
-  chatModel: '',
-  embeddingModel: '',
   contextWindow: 8192
 }
 
 export interface SaveApiConfigInput {
   baseUrl?: string
-  chatModel?: string
-  embeddingModel?: string
   embeddingBaseUrl?: string
   contextWindow?: number
   apiKey?: string
@@ -46,8 +42,6 @@ function toPublic(config: StoredApiConfig): PublicApiConfig {
   const hasApiKey = typeof config.apiKey === 'string' && config.apiKey.length > 0
   return {
     baseUrl: config.baseUrl,
-    chatModel: config.chatModel,
-    embeddingModel: config.embeddingModel,
     embeddingBaseUrl: config.embeddingBaseUrl,
     contextWindow: config.contextWindow,
     hasApiKey
@@ -73,11 +67,24 @@ export class ApiConfigManager {
   async getConfig(): Promise<StoredApiConfig> {
     const store = await this.getStore()
     const stored = store.get('api', DEFAULT_API_CONFIG)
+    const hadLegacyModels =
+      Object.prototype.hasOwnProperty.call(stored, 'chatModel') ||
+      Object.prototype.hasOwnProperty.call(stored, 'embeddingModel')
     const decrypted = decryptObjectFields(
       { ...DEFAULT_API_CONFIG, ...stored } as Record<string, unknown>,
       SENSITIVE_FIELDS
     ) as unknown as StoredApiConfig
     delete decrypted.__encrypted_apiKey
+    // Model ids from older installs are not part of MiChat's contract.
+    delete decrypted.chatModel
+    delete decrypted.embeddingModel
+    if (hadLegacyModels) {
+      // Persist the one-time cleanup without rewriting the encrypted key.
+      const migrated = { ...stored } as Record<string, unknown>
+      delete migrated.chatModel
+      delete migrated.embeddingModel
+      store.set('api', migrated as unknown as StoredApiConfig)
+    }
     this.cachedContextWindow = decrypted.contextWindow
     return decrypted
   }
@@ -94,9 +101,6 @@ export class ApiConfigManager {
     const next: StoredApiConfig = {
       ...existing,
       baseUrl: input.baseUrl === undefined ? existing.baseUrl : normalizeBaseUrl(input.baseUrl),
-      chatModel: input.chatModel === undefined ? existing.chatModel : input.chatModel.trim(),
-      embeddingModel:
-        input.embeddingModel === undefined ? existing.embeddingModel : input.embeddingModel.trim(),
       embeddingBaseUrl:
         input.embeddingBaseUrl === undefined
           ? existing.embeddingBaseUrl
@@ -107,6 +111,8 @@ export class ApiConfigManager {
           : Math.min(Math.max(Math.round(input.contextWindow), 2048), 1_000_000),
       updatedAt: Date.now()
     }
+    delete next.chatModel
+    delete next.embeddingModel
 
     if (input.clearApiKey) {
       delete next.apiKey

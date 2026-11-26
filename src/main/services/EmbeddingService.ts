@@ -59,7 +59,7 @@ export class EmbeddingService {
     const provider = await this.apiClient.getEmbeddingProvider()
     if (!provider) {
       throw new Error(
-        'Embedding API is not configured. Set the API base URL and embedding model in Settings > API.'
+        'Embedding API is not configured. Set the API base URL in Settings > API and load an embedding model in the external server.'
       )
     }
   }
@@ -133,7 +133,7 @@ export class EmbeddingService {
 
     if (!provider) {
       throw new Error(
-        'Embedding API is not configured. Set the API base URL and embedding model in Settings > API.'
+        'Embedding API is not configured. Set the API base URL in Settings > API and load an embedding model in the external server.'
       )
     }
 

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { embed, embedMany, streamText } from 'ai'
-import { OpenAICompatibleClient } from '../src/main/ai/OpenAICompatibleClient'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import {
+  OpenAICompatibleClient,
+  withDirectAnswerTemplate
+} from '../src/main/ai/OpenAICompatibleClient'
 import type { ChatClientDescriptor, ClientConfig, GenerationOptions } from '../src/main/ai/types'
 import type { APIMessage } from '../src/shared/types/chat'
 
@@ -91,6 +95,62 @@ describe('OpenAICompatibleClient generation defaults', () => {
 
     expect(client.generationDefaults.temperature).toBe(0.2)
     expect(client.generationDefaults.maxTokens).toBe(2048)
+  })
+})
+
+describe('OpenAICompatibleClient chat template', () => {
+  it('disables template thinking so models answer directly', () => {
+    expect(withDirectAnswerTemplate({ model: 'chat-model', messages: [] })).toEqual({
+      model: 'chat-model',
+      messages: [],
+      chat_template_kwargs: { enable_thinking: false }
+    })
+  })
+
+  it('keeps other template kwargs but forces thinking off', () => {
+    expect(
+      withDirectAnswerTemplate({
+        chat_template_kwargs: { enable_thinking: true, custom: 'value' }
+      })
+    ).toEqual({
+      chat_template_kwargs: { enable_thinking: false, custom: 'value' }
+    })
+  })
+
+  it('does not mutate the request body it receives', () => {
+    const input = { model: 'chat-model', chat_template_kwargs: { custom: 'value' } }
+
+    const result = withDirectAnswerTemplate(input)
+
+    expect(result).not.toBe(input)
+    expect(input.chat_template_kwargs).toEqual({ custom: 'value' })
+  })
+
+  it('wires the transform into the chat provider', () => {
+    configuredClient()
+
+    const calls = vi.mocked(createOpenAICompatible).mock.calls
+    const options = calls[calls.length - 1]?.[0] as
+      | { transformRequestBody?: typeof withDirectAnswerTemplate }
+      | undefined
+
+    expect(options?.transformRequestBody).toBe(withDirectAnswerTemplate)
+  })
+
+  it('does not apply the chat transform to the separate embedding provider', () => {
+    const client = new InspectableClient(DESCRIPTOR)
+    client.configure({
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      embeddingBaseUrl: 'http://127.0.0.1:8081/v1',
+      model: 'chat-model'
+    })
+
+    const calls = vi.mocked(createOpenAICompatible).mock.calls
+    const chatOptions = calls.at(-2)?.[0] as { transformRequestBody?: unknown } | undefined
+    const embeddingOptions = calls.at(-1)?.[0] as { transformRequestBody?: unknown } | undefined
+
+    expect(chatOptions?.transformRequestBody).toBe(withDirectAnswerTemplate)
+    expect(embeddingOptions?.transformRequestBody).toBeUndefined()
   })
 })
 

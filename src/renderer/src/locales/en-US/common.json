@@ -44,6 +44,6 @@
     "languageVi": "Vietnamese",
     "languageEn": "English",
     "apiHintTitle": "Connect your local API",
-    "apiHint": "After setup, open Settings → API to choose the base URL and models, then test the connection."
+    "apiHint": "After setup, open Settings → API to enter the base URL, then test the connection."
   }
 }

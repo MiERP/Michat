@@ -13,6 +13,7 @@ import { useItemStore } from '../../../store/itemStore'
 import { useNotebookStore } from '../../../store/notebookStore'
 import { useCitationStore } from '../../../store/citationStore'
 import { ensureInlineCitationPlacement } from './citationFormatting'
+import { preserveLegalLineBreaks } from './formatMarkdown'
 import { Button } from '../../ui/button'
 import { ScrollArea, ScrollBar } from '../../ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../ui/tooltip'
@@ -41,9 +42,11 @@ export default function MessageItem({ message }: MessageItemProps): ReactElement
   )
   const renderedContent = useMemo(
     () =>
-      linkifyCitationMarkers(
-        ensureInlineCitationPlacement(message.content, visibleCitations),
-        visibleCitations
+      preserveLegalLineBreaks(
+        linkifyCitationMarkers(
+          ensureInlineCitationPlacement(message.content, visibleCitations),
+          visibleCitations
+        )
       ),
     [message.content, visibleCitations]
   )

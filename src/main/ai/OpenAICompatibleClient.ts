@@ -51,6 +51,33 @@ function sanitizeMessageContent(content: string): string {
 }
 
 /**
+ * The loopback invariant must hold at the socket level: a compromised local
+ * gateway must not be able to 307/308 the conversation or embedding body to a
+ * remote host. Both provider transports therefore refuse redirects.
+ */
+const redirectRefusingFetch: typeof fetch = (input, init) =>
+  fetch(input, { ...init, redirect: 'error' })
+
+/**
+ * Some chat templates (for example Gemma 4 E2B on llama.cpp) emit their
+ * internal reasoning as ordinary content unless the template's thinking
+ * switch is explicitly disabled. The reasoning can appear in another
+ * language, so MiChat asks llama.cpp-compatible servers for a direct answer.
+ * Servers whose template does not define `enable_thinking` ignore the field.
+ */
+export function withDirectAnswerTemplate(args: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...args,
+    chat_template_kwargs: {
+      ...(typeof args.chat_template_kwargs === 'object' && args.chat_template_kwargs !== null
+        ? (args.chat_template_kwargs as Record<string, unknown>)
+        : {}),
+      enable_thinking: false
+    }
+  }
+}
+
+/**
  * OpenAICompatibleClient
  * Client backed by the Vercel AI SDK; model selection comes from ChatClientDescriptor.
  */
@@ -96,7 +123,9 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
     this.aiProvider = createOpenAICompatible({
       name: this.name,
       baseURL: this.config.baseUrl || '',
-      apiKey: config.apiKey || ''
+      apiKey: config.apiKey || '',
+      transformRequestBody: withDirectAnswerTemplate,
+      fetch: redirectRefusingFetch
     })
 
     // Optional separate base URL for embeddings.
@@ -112,7 +141,8 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
       this.aiProviderEmbed = createOpenAICompatible({
         name: `${this.name}-embed`,
         baseURL: effectiveEmbedBaseUrl,
-        apiKey: config.apiKey || ''
+        apiKey: config.apiKey || '',
+        fetch: redirectRefusingFetch
       })
     } else {
       this.aiProviderEmbed = null
@@ -164,7 +194,7 @@ export class OpenAICompatibleClient implements ChatProvider, EmbeddingProvider {
   ): Promise<AbortController> {
     if (!this.aiProvider) {
       const error = new Error(
-        `API client ${this.name} is not configured. Set the base URL and models in Settings > API.`
+        `API client ${this.name} is not configured. Set the API base URL in Settings > API and load a model in the external server.`
       )
       onError(error)
       const abortController = new AbortController()

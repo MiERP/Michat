@@ -2,10 +2,14 @@
 
 All notable changes to MiChat are documented in this file.
 
-## [2.2.2] - 2026-11-25
+## [2.2.2] - 2026-11-26
 
 ### Fixed
 
+- The packaged-app smoke test waited for `window.electron`, which the minimal preload no longer
+  exposes, and matched the start button by its English label — so the packaged smoke step failed
+  on every machine since the minimal-preload security fix. It now only requires `window.api` and
+  locates the onboarding start button by DOM position, which works in every UI language.
 - Questions that explicitly name an article now retrieve chunks inside that article by
   query-term overlap, not just the globally highest-ranked chunk. This fixes large amended
   articles such as Điều 112a of the 2022 IP Law, where the time-limit clause was split from
@@ -17,11 +21,46 @@ All notable changes to MiChat are documented in this file.
   ngày …” clause and place it ahead of unrelated dates such as the promulgation date.
 - Questions asking for a time limit extract the relevant month/day clause for the named object
   (for example the five-month deadline for trademark opposition).
-- Definition questions run a wider rerank pool so the actual defining clause is not lost under
-  articles that merely mention or classify the term.
+- Definition questions now scan for the exact defining clause (`<term> là ...`) and merge the
+  following chunks with source-offset overlap removal. This fixes cases where the definition
+  began at the end of one chunk and continued in the next (for example `dữ liệu quan trọng`
+  in Điều 3 of the Data Law).
+- Questions naming an article (and list questions whose seed chunk starts with an article
+  heading) now receive one complete, source-ordered article block instead of a handful of
+  ranked chunks. All clauses are present, and overlapping chunk text is removed exactly once.
+  This fixes truncated or duplicated lists such as Điều 8, Điều 10 and Điều 27.
+- Article selection is scoped to the document named/implied by the question. A question about
+  a law that is not in the notebook no longer receives an article with the same number from a
+  different law. Very long articles use a query-relevant window for prompt clipping, so a
+  clause near the end can still be cited.
+- Legal answer labels are preserved: parent clauses stay `1.`, `2.` and sub-items stay
+  `a)`, `b)`, … instead of being merged into `1.a)`. Markdown now keeps lettered sub-items on
+  separate lines.
+- Chat requests now disable the chat template's thinking channel
+  (`chat_template_kwargs.enable_thinking = false`). Gemma 4 E2B on llama.cpp was emitting its
+  internal reasoning as normal content, sometimes in Korean; with the switch off it answers
+  directly in Vietnamese. Templates that do not define the switch ignore it.
 
 ### Changed
 
+- Settings → API now asks only for the server endpoint (plus optional separate embedding
+  endpoint, API key, and context window). MiChat no longer requires model names; it uses the
+  first model advertised by the external server at `/v1/models`. Model choice and switching
+  remain entirely on the server side.
+- The connection check no longer lists advertised model ids. That list showed the server's
+  alias (for example `qwen3.5-4b`), which could differ from the loaded model file in the
+  external server manager and looked like MiChat had chosen the wrong model.
+- Removed model ids from MiChat's public API configuration and save payload. Legacy
+  `chatModel` / `embeddingModel` keys are deleted when read or saved; MiChat only keeps the
+  endpoint, optional API key, context window, and embedding endpoint.
+- On a multi-model gateway with no embedding-like model id, embeddings now fail fast with
+  "load an embedding model" instead of silently embedding with the chat model. A single-model
+  server keeps using its only advertised id.
+- Chat and embedding requests refuse HTTP redirects, so a compromised local gateway cannot
+  forward the conversation or embedding body to a remote host.
+- The prompt context budget now scales with whole-article/definition blocks and respects the
+  configured context window, so listing three or more articles keeps every article instead of
+  dropping the later ones.
 - The bundled benchmark configuration now uses `Qwen3.5-4B` for chat because the previously
   selected `gemma4-2B` produced Korean analysis and incomplete legal answers. The app remains
   model-agnostic; this only affects the test machine.

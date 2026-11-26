@@ -33,15 +33,14 @@ describe('ipc validation schemas', () => {
   })
 
   it('validates API configuration shape and rejects unknown fields', () => {
-    expect(
-      ApiSchemas.saveConfig.parse({
-        baseUrl: 'http://127.0.0.1:8000/v1',
-        chatModel: 'local-chat',
-        embeddingModel: 'local-embed',
-        contextWindow: 8192
-      }).chatModel
-    ).toBe('local-chat')
+    const parsed = ApiSchemas.saveConfig.parse({
+      baseUrl: 'http://127.0.0.1:8000/v1',
+      contextWindow: 8192
+    })
+    expect(parsed.baseUrl).toBe('http://127.0.0.1:8000/v1')
 
+    // Model selection belongs to the external server, not MiChat.
+    expect(() => ApiSchemas.saveConfig.parse({ chatModel: 'local-chat' })).toThrow()
     expect(() => ApiSchemas.saveConfig.parse({ unexpected: true })).toThrow()
     expect(() => ApiSchemas.saveConfig.parse({ contextWindow: 1024 })).toThrow()
   })

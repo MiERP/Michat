@@ -16,7 +16,6 @@ import {
 interface TestState {
   status: 'idle' | 'testing' | 'ok' | 'error'
   message?: string
-  models?: string[]
 }
 
 export default function ApiSettings(): ReactElement {
@@ -24,8 +23,6 @@ export default function ApiSettings(): ReactElement {
   const [config, setConfig] = useState<PublicApiConfig | null>(null)
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [chatModel, setChatModel] = useState('')
-  const [embeddingModel, setEmbeddingModel] = useState('')
   const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('')
   const [contextWindow, setContextWindow] = useState('8192')
   const [clearApiKey, setClearApiKey] = useState(false)
@@ -37,8 +34,6 @@ export default function ApiSettings(): ReactElement {
   const applyConfig = useCallback((value: PublicApiConfig) => {
     setConfig(value)
     setBaseUrl(value.baseUrl)
-    setChatModel(value.chatModel)
-    setEmbeddingModel(value.embeddingModel)
     setEmbeddingBaseUrl(value.embeddingBaseUrl ?? '')
     setContextWindow(String(value.contextWindow))
     setApiKey('')
@@ -62,8 +57,7 @@ export default function ApiSettings(): ReactElement {
       })
       setTestState({
         status: result.ok ? 'ok' : 'error',
-        message: result.message,
-        models: result.models
+        message: result.message
       })
     } catch (error) {
       setTestState({
@@ -79,8 +73,6 @@ export default function ApiSettings(): ReactElement {
     try {
       const next = await window.api.api.saveConfig({
         baseUrl,
-        chatModel,
-        embeddingModel,
         embeddingBaseUrl,
         contextWindow: Number(contextWindow) || 8192,
         apiKey: apiKey || undefined,
@@ -155,39 +147,7 @@ export default function ApiSettings(): ReactElement {
           )}
         </Field>
 
-        <Field>
-          <FieldContent>
-            <FieldLabel htmlFor="api-chat-model">{t('apiChatModel')}</FieldLabel>
-            <FieldDescription>{t('apiChatModelDesc')}</FieldDescription>
-          </FieldContent>
-          <Input
-            id="api-chat-model"
-            value={chatModel}
-            onChange={(event) => {
-              setChatModel(event.target.value)
-              setSaved(false)
-            }}
-            placeholder={t('apiModelPlaceholder')}
-            spellCheck={false}
-          />
-        </Field>
-
-        <Field>
-          <FieldContent>
-            <FieldLabel htmlFor="api-embedding-model">{t('apiEmbeddingModel')}</FieldLabel>
-            <FieldDescription>{t('apiEmbeddingModelDesc')}</FieldDescription>
-          </FieldContent>
-          <Input
-            id="api-embedding-model"
-            value={embeddingModel}
-            onChange={(event) => {
-              setEmbeddingModel(event.target.value)
-              setSaved(false)
-            }}
-            placeholder={t('apiModelPlaceholder')}
-            spellCheck={false}
-          />
-        </Field>
+        <p className="text-xs text-muted-foreground">{t('apiModelsAuto')}</p>
 
         <Field>
           <FieldContent>
@@ -264,15 +224,9 @@ export default function ApiSettings(): ReactElement {
               )}
               {testState.status === 'ok' ? t('connectionSuccessful') : t('connectionFailed')}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">{testState.message}</p>
-            {testState.models && testState.models.length > 0 && (
-              <div className="mt-2">
-                <p className="text-xs font-medium">{t('availableModels')}</p>
-                <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                  {testState.models.join(', ')}
-                </p>
-              </div>
-            )}
+            <p className="mt-1 text-xs text-muted-foreground">
+              {testState.status === 'ok' ? t('connectionReady') : testState.message}
+            </p>
           </div>
         )}
       </FieldGroup>

@@ -34,8 +34,6 @@ describe('ApiConfigManager secret handling', () => {
 
     await manager.saveConfig({
       baseUrl: 'http://127.0.0.1:1234/v1',
-      chatModel: 'chat-model',
-      embeddingModel: 'embed-model',
       apiKey: 'sk-test-secret'
     })
 
@@ -51,8 +49,6 @@ describe('ApiConfigManager secret handling', () => {
     const { manager } = createManager()
     await manager.saveConfig({
       baseUrl: 'http://127.0.0.1:1234/v1',
-      chatModel: 'chat-model',
-      embeddingModel: 'embed-model',
       apiKey: 'sk-test-secret'
     })
 
@@ -67,8 +63,6 @@ describe('ApiConfigManager secret handling', () => {
     const { manager } = createManager()
     await manager.saveConfig({
       baseUrl: 'http://127.0.0.1:1234/v1',
-      chatModel: 'chat-model',
-      embeddingModel: 'embed-model',
       apiKey: 'sk-test-secret'
     })
 
@@ -78,6 +72,23 @@ describe('ApiConfigManager secret handling', () => {
     expect(internal.apiKey).toBeUndefined()
     const publicConfig = await manager.getPublicConfig()
     expect(publicConfig.hasApiKey).toBe(false)
+  })
+
+  it('removes legacy model ids from the persisted store on read', async () => {
+    const { manager, data } = createManager()
+    data.api = {
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      chatModel: 'legacy-chat',
+      embeddingModel: 'legacy-embed',
+      contextWindow: 8192
+    }
+
+    const internal = await manager.getConfig()
+
+    expect(internal.chatModel).toBeUndefined()
+    expect(internal.embeddingModel).toBeUndefined()
+    expect('chatModel' in (data.api as Record<string, unknown>)).toBe(false)
+    expect('embeddingModel' in (data.api as Record<string, unknown>)).toBe(false)
   })
 
   it('rejects non-loopback API URLs', async () => {
@@ -98,5 +109,51 @@ describe('ApiConfigManager secret handling', () => {
 
     const internal = await manager.getConfig()
     expect(internal.embeddingBaseUrl).toBe('http://127.0.0.1:8081/v1')
+  })
+
+  it('hides legacy model fields read from an old config', async () => {
+    const { manager, data } = createManager()
+    data.api = {
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      contextWindow: 8192,
+      chatModel: 'legacy-chat',
+      embeddingModel: 'legacy-embed'
+    }
+
+    const internal = await manager.getConfig()
+    expect(internal).not.toHaveProperty('chatModel')
+    expect(internal).not.toHaveProperty('embeddingModel')
+
+    // Reading an old config persists the one-time cleanup.
+    const migrated = data.api as Record<string, unknown>
+    expect(migrated).not.toHaveProperty('chatModel')
+    expect(migrated).not.toHaveProperty('embeddingModel')
+    expect(migrated.baseUrl).toBe('http://127.0.0.1:1234/v1')
+
+    // The public view never exposes model selection either.
+    const publicConfig = await manager.getPublicConfig()
+    expect(publicConfig).not.toHaveProperty('chatModel')
+    expect(publicConfig).not.toHaveProperty('embeddingModel')
+  })
+
+  it('removes legacy model fields from the store when saving', async () => {
+    const { manager, data } = createManager()
+    data.api = {
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      contextWindow: 8192,
+      chatModel: 'legacy-chat',
+      embeddingModel: 'legacy-embed'
+    }
+
+    const saved = await manager.saveConfig({ contextWindow: 4096 })
+
+    expect(saved).not.toHaveProperty('chatModel')
+    expect(saved).not.toHaveProperty('embeddingModel')
+
+    const persisted = data.api as Record<string, unknown>
+    expect(persisted).not.toHaveProperty('chatModel')
+    expect(persisted).not.toHaveProperty('embeddingModel')
+    expect(persisted.contextWindow).toBe(4096)
+    expect(persisted.baseUrl).toBe('http://127.0.0.1:1234/v1')
   })
 })

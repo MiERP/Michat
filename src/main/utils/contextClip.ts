@@ -36,7 +36,39 @@ export function clipSectionAroundPrimary(
   const separator = '\n...\n'
   const parts = content.split(separator)
   const primaryIndex = parts.findIndex((part) => normalizeForMatch(part) === primaryText)
-  if (primaryIndex < 0) return clipTextToTokens(content, maxTokens)
+
+  // Article blocks are plain, contiguous source text (no "...") separators.
+  // Locate the relevant window by substring and keep it in the clipped slice
+  // instead of always taking the first N tokens of a long article.
+  if (primaryIndex < 0) {
+    let directIndex = content.indexOf(matchedContent ?? '')
+    if (directIndex < 0) {
+      // The caller passes sanitized content but the raw matched window. Find
+      // it by a whitespace-tolerant word match before falling back to the
+      // first N tokens.
+      const words = normalizeForMatch(matchedContent ?? '')
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 12)
+      if (words.length > 0) {
+        const pattern = new RegExp(
+          words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'),
+          'iu'
+        )
+        const match = pattern.exec(content)
+        if (match) directIndex = match.index
+      }
+    }
+    if (directIndex >= 0) {
+      const tokensPerChar = estimateTokens(content) / Math.max(1, content.length)
+      const maxChars = Math.max(500, Math.floor(maxTokens / Math.max(tokensPerChar, 0.01)))
+      const matchedLength = (matchedContent ?? '').length
+      const lead = Math.max(0, Math.floor((maxChars - matchedLength) / 3))
+      const start = Math.max(0, directIndex - lead)
+      return content.slice(start, Math.min(content.length, start + maxChars))
+    }
+    return clipTextToTokens(content, maxTokens)
+  }
 
   const selected = new Set<number>([primaryIndex])
   let tokens = estimateTokens(parts[primaryIndex])
