@@ -449,6 +449,8 @@ app.whenReady().then(async () => {
 
     // Set main window for update service
     updateService.setMainWindow(mainWindow)
+    // Silent 5-second startup check; failures do not surface in the UI.
+    void updateService.checkForUpdatesOnStartup()
 
     // Set main window for shortcut manager and register shortcuts
     shortcutManager.setMainWindow(mainWindow)

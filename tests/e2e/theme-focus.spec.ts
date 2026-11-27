@@ -14,6 +14,10 @@ const EVIDENCE_DIR =
   process.env.MICHAT_EVIDENCE_DIR ||
   join(process.cwd(), '.opencode', 'evidence', 'theme-focus-local')
 
+const appVersion = (
+  JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string }
+).version
+
 mkdirSync(EVIDENCE_DIR, { recursive: true })
 
 async function screenshot(page: Page, name: string): Promise<void> {
@@ -347,7 +351,7 @@ test('AC-03..AC-07/AC-09..AC-11 — chat focus, guards, actions, and version', a
       .getByRole('button', { name: /about|giới thiệu/i })
       .first()
       .click()
-    await expect(page.getByText('v2.2.3')).toBeVisible()
+    await expect(page.getByText(`v${appVersion}`)).toBeVisible()
     await screenshot(page, 'ac-07-about-version.png')
 
     await page.keyboard.press('Escape')
@@ -442,9 +446,9 @@ test('AC-03..AC-07/AC-09..AC-11 — chat focus, guards, actions, and version', a
       })
       .toBe('like')
 
-    await page.evaluate(() => window.api.copyToClipboard('MiChat-2.2.3'))
+    await page.evaluate((version) => window.api.copyToClipboard(`MiChat-${version}`), appVersion)
     expect(await launched.app.evaluate(({ clipboard }) => clipboard.readText())).toBe(
-      'MiChat-2.2.3'
+      `MiChat-${appVersion}`
     )
 
     const assistantContent = (await readChatState(page)).messages.find(

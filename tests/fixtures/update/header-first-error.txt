@@ -1,0 +1,2 @@
+Headers: { "set-cookie": [ "_gh_sess=fake-session-value; path=/; HttpOnly; secure; SameSite=Lax" ], "content-security-policy": "default-src 'none'", "cache-control": "no-cache" }
+Cannot find latest.yml in the latest release artifacts (https://github.com/MiERP/Michat/releases/download/v2.2.3/latest.yml): HttpError: 404

@@ -1,9 +1,11 @@
 import { UpdateService } from '../services/UpdateService'
 import Logger from '../../shared/utils/logger'
 import { registerNoArgHandler } from './handlerRegistry'
+import { classifyUpdateError } from '../utils/updateErrors'
 
 /**
- * Registers the update-related IPC handlers
+ * Registers the update-related IPC handlers. Every error string crossing IPC
+ * is sanitized; raw updater messages can contain response headers and cookies.
  */
 export function registerUpdateHandlers(updateService: UpdateService): void {
   registerNoArgHandler('update:check', async () => {
@@ -12,8 +14,9 @@ export function registerUpdateHandlers(updateService: UpdateService): void {
       const state = await updateService.checkForUpdates()
       return { success: true, state }
     } catch (error) {
-      Logger.error('UpdateHandlers', 'Failed to check for updates:', error)
-      return { success: false, error: (error as Error).message }
+      const classified = classifyUpdateError(error)
+      Logger.error('UpdateHandlers', 'Failed to check for updates:', classified.message)
+      return { success: false, error: 'update-failed' }
     }
   })
 
@@ -23,8 +26,9 @@ export function registerUpdateHandlers(updateService: UpdateService): void {
       await updateService.downloadUpdate()
       return { success: true }
     } catch (error) {
-      Logger.error('UpdateHandlers', 'Failed to download update:', error)
-      return { success: false, error: (error as Error).message }
+      const classified = classifyUpdateError(error)
+      Logger.error('UpdateHandlers', 'Failed to download update:', classified.message)
+      return { success: false, error: 'update-failed' }
     }
   })
 
@@ -34,8 +38,9 @@ export function registerUpdateHandlers(updateService: UpdateService): void {
       updateService.quitAndInstall()
       return { success: true }
     } catch (error) {
-      Logger.error('UpdateHandlers', 'Failed to install update:', error)
-      return { success: false, error: (error as Error).message }
+      const classified = classifyUpdateError(error)
+      Logger.error('UpdateHandlers', 'Failed to install update:', classified.message)
+      return { success: false, error: 'update-failed' }
     }
   })
 
@@ -43,8 +48,9 @@ export function registerUpdateHandlers(updateService: UpdateService): void {
     try {
       return { success: true, state: updateService.getState() }
     } catch (error) {
-      Logger.error('UpdateHandlers', 'Failed to get update state:', error)
-      return { success: false, error: (error as Error).message }
+      const classified = classifyUpdateError(error)
+      Logger.error('UpdateHandlers', 'Failed to get update state:', classified.message)
+      return { success: false, error: 'update-failed' }
     }
   })
 

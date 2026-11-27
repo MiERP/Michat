@@ -48,6 +48,17 @@ works, and feedback is very welcome.
 MiChat does **not** bundle models, start a model server, or manage model files.
 You configure an API once and MiChat uses it for chat and embeddings.
 
+### What's new in 2.2.4
+
+- **Update checks work again:** the GitHub release feed is public, so MiChat can find new versions
+  without a GitHub sign-in.
+- **Clear update errors:** a failed check shows one short localized message. Response headers,
+  cookies, and raw GitHub diagnostics are stripped.
+- **Quiet background checks:** automatic startup checks that fail stay silent; errors appear only
+  when you press **Check for Updates**.
+- **Safer download/install failures:** those errors use the same friendly update card instead of a
+  raw alert.
+
 ### What's new in 2.2.3
 
 - **Light by default:** new installations open in the light interface. If you explicitly chose

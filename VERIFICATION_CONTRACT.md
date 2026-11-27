@@ -1,309 +1,191 @@
-# VERIFICATION CONTRACT — MiChat 2.2.3
+# VERIFICATION CONTRACT — MiChat 2.2.4 update-feed fix
 
-Every acceptance criterion is verified by an independent `desktop-verifier` run using
-Playwright's Electron driver. The app launches with an isolated temporary `--user-data-dir` and
-`MICHAT_E2E_OFFSCREEN=1`, which places the BrowserWindow at `x=-32000, y=-32000` and uses
-`showInactive()` so it never appears on or steals focus from the interactive desktop.
-
-**Input policy:** no OS-level input is allowed (no robotjs, pyautogui, SendKeys, or screen
-capture). Playwright's synthetic CDP input (`locator.click()`, `.hover()`, `.press('Enter')`) is
-required and is not OS input. Screenshots are `page.screenshot()` captures.
+Every criterion is verified by an independent `desktop-verifier` using Playwright Electron CDP.
+No OS mouse, keyboard, or screen capture is used. Each launch gets a fresh temp
+`--user-data-dir`, `MICHAT_E2E_OFFSCREEN=1`, and `NODE_ENV=production`; the update E2E writes a
+temporary `dev-app-update.yml`, then restores the original file.
 
 **Run directory:** `.opencode/evidence/<run-id>/`
 
-**Global deterministic commands**
+**Pre-flight before the repository is made public**
 
-| Check                    | Command                                                      | Pass condition                            |
-| ------------------------ | ------------------------------------------------------------ | ----------------------------------------- |
-| Build renderer/main      | `pnpm build`                                                 | exit 0; no TypeScript errors              |
-| Unit + integration tests | `pnpm test`                                                  | exit 0; all suites pass                   |
-| Focus policy unit matrix | `pnpm exec vitest run tests/renderer/chatInputFocus.test.ts` | exit 0                                    |
-| Lint                     | `pnpm lint`                                                  | exit 0; zero warnings                     |
-| Typecheck                | `pnpm typecheck`                                             | exit 0                                    |
-| Version consistency      | `pnpm check:version`                                         | exit 0; prints 2.2.3 consistency          |
-| Theme/focus E2E          | `pnpm exec playwright test tests/e2e/theme-focus.spec.ts`    | exit 0                                    |
-| Release installer        | `pnpm build:win`                                             | installer, blockmap, and latest.yml exist |
+- Run a full-history secret scan:
+  `git grep -n -I -E 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----' $(git rev-list --all)`
+  and confirm no matches.
+- Confirm no token in `dev-app-update.yml`, `electron-builder.yml`, `out/`, or `app.asar`.
+- Record the maintainer approval to make the repository public in `report.md`.
+- Then set `MiERP/Michat` public and record `gh repo view MiERP/Michat --json isPrivate` = `false`.
 
-**Global offscreen assertion (all E2E criteria):** immediately after `firstWindow()`:
+**Global checks**
 
-```ts
-const bounds = await app.evaluate(({ BrowserWindow }) =>
-  BrowserWindow.getAllWindows()[0].getBounds()
-)
-expect(bounds.x + bounds.width).toBeLessThanOrEqual(0)
-expect(bounds.y).toBeLessThanOrEqual(0)
-```
-
-Windows clamps extremely negative coordinates, so the invariant is "no part of the window
-intersects the virtual desktop", not an exact `-32000`.
+| Check                         | Command                                                                                                            | Pass condition                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Full tests                    | `pnpm test`                                                                                                        | exit 0                                                                   |
+| Lint/typecheck                | `pnpm lint`, `pnpm typecheck`                                                                                      | exit 0                                                                   |
+| Version                       | `pnpm check:version`                                                                                               | 2.2.4 consistent                                                         |
+| Installer                     | `pnpm build:win`                                                                                                   | 2.2.4 installer + blockmap + latest.yml                                  |
+| Packaged smoke                | `powershell -ExecutionPolicy Bypass -File scripts/smoke-packaged.ps1 -ScreenshotPath <run>/ac-06-packaged-app.png` | parser OK, packaged version 2.2.4, screenshot written                    |
+| Anonymous atom/API/latest.yml | `curl -i` / `curl -L`                                                                                              | HTTP 200; or `NETWORK_UNAVAILABLE` if `MICHAT_REQUIRE_GITHUB` is not `1` |
 
 ---
 
-## AC-01 — Fresh profile and missing-theme profile render light
+## AC-01 — Local feed check reaches NOT_AVAILABLE
 
-**Visual check:** Launch a fresh temp profile and stop on onboarding. The background is light
-(`#f0f3f0`), text is dark, the brand bar is the light/green gradient, and no dark surface is
-visible. Capture `ac-01-fresh-light-onboarding.png` (1200×800). Then launch a second temp profile
-whose `michat-config.json` contains `settingsVersion: 2` and `settings: {
-"hasCompletedOnboarding": true }` (no `theme` key); capture the light home screen
-`ac-01b-missing-theme-profile.png`.
+**Given:** A temporary `dev-app-update.yml` points a `generic` provider at a local HTTP server.
+The server returns a valid `latest.yml` with `version: 2.2.3`; the app under test is 2.2.4.
+`forceDevUpdateConfig` is active because the app is unpackaged.
 
-**Deterministic check:**
+**User action:** Open Settings → About, click **Check for Updates**.
 
-- Fresh profile: `document.documentElement.classList.contains('dark') === false`.
-- Fresh profile: `getComputedStyle(document.body).backgroundColor === 'rgb(240, 243, 240)'`.
-- Fresh profile: `await window.api.settings.get('theme') === 'light'`.
-- Fresh profile: BrowserWindow background color is `#fafafa`, read with
-  `app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBackgroundColor())`.
-- Both profiles: window bounds satisfy `x + width <= 0` and `y <= 0`.
-- Missing-theme profile: remains light and `settings.get('theme') === 'light'`.
-- Zero renderer `console.error` / `pageerror`; only known `console.log` lines are permitted.
-- `app.close()` returns and no `electron`/`michat` process remains for either temp profile.
+**Expected UI & deterministic reaction:** The status reads "You are on the latest version" /
+"Bạn đang dùng bản mới nhất". `window.api.update.getState()` is `NOT_AVAILABLE` with no
+`errorKind` and no `error`. The local server received `GET /latest.yml` and returned 200. No
+renderer `console.error`/`pageerror`.
 
-**Isolated method:** two Playwright `_electron.launch` runs with separate temp profiles and
-`MICHAT_E2E_OFFSCREEN=1`; page screenshots only.
+**Screenshot:** `ac-01-update-check-success.png`.
+
+**Isolated method:** Playwright Electron CDP; local loopback HTTP fixture; no GitHub dependency.
 
 ---
 
-## AC-02 — A saved dark preference is preserved
+## AC-02 — 404/private feed error is friendly, sanitized, and leak-free
 
-**Visual check:** Set theme to dark through the settings bridge, reload, and capture the dark
-notebook UI: `ac-02-existing-dark-preserved.png`.
+**Given:** The local feed returns HTTP 404 for `/latest.yml` with
+`Set-Cookie: _gh_sess=fake-session`, `Content-Security-Policy: default-src 'none'`, and a body
+containing `releases.atom` and `Headers: { ... }`. Two exact raw updater error fixtures are
+committed: `tests/fixtures/update/private-feed-error.txt` and
+`tests/fixtures/update/header-first-error.txt` (first line is a header/cookie block). About is
+open.
 
-**Deterministic check:**
+**User action:** Click **Check for Updates**.
 
-- `await window.api.settings.set('theme', 'dark')` succeeds.
-- Before any reload, `michat-config.json` in the temp `--user-data-dir` contains
-  `settings.theme === 'dark'` (read with `fs.readFileSync`).
-- After `page.reload()`, the root has class `dark` and body background is `rgb(17, 24, 32)`.
-- After a full app relaunch with the same `--user-data-dir`, the root is still dark and
-  `settings.get('theme') === 'dark'`.
-- `michat-config.json` still contains `theme: 'dark'` after relaunch (not re-defaulted).
-- Zero renderer console errors.
+**Expected UI & deterministic reaction:** The harness first records that the local 404 response
+contains `_gh_sess`, `set-cookie`, `content-security-policy`, and `releases.atom`, and the mocked
+`UpdateService` unit test records that the **raw updater rejection** passed to the sanitizer
+contains all target tokens. The card then shows the localized `feed-unavailable` message. None of
+those tokens is visible in the DOM or in any native dialog (Playwright `dialog` listener). The
+update state contains `errorKind: 'feed-unavailable'` and **no free-text error field**; every
+update IPC handler returns only the fixed code `update-failed`. Sanitized detail remains in the
+main-process log. The header-first and multi-line header fixtures drop the header block and keep
+the next safe line (or return `''` if none remains).
 
-**Isolated method:** Playwright Electron with a reload and one relaunch against the same temp
-profile; screenshot via `page.screenshot()`.
+**Screenshot:** `ac-02-update-error-friendly.png`.
 
----
-
-## AC-03 — Chat input is focused when a notebook opens
-
-**Visual check:** Before configuring the API, create a notebook and capture the disabled composer
-state for AC-11. Then save a real ephemeral fake API URL, wait for the composer to enable, and
-capture the green focus ring and caret in the composer: `ac-03-chat-input-focused.png`.
-
-**Deterministic check:**
-
-- A notebook is created through `[data-testid="create-notebook"]`; route is
-  `#/notebook/<id>`.
-- An ephemeral fake HTTP server (same pattern as `tests/e2e/app.spec.ts`) is started on
-  `127.0.0.1:0`; `window.api.api.saveConfig({ baseUrl })` is saved and
-  `getConfig().baseUrl === baseUrl`.
-- After the composer enables, `document.activeElement` is
-  `[data-testid="chat-input"]`.
-- The textarea `disabled` property is `false`.
-- No dialog/alert dialog is open.
-- Zero renderer console errors.
-
-**Isolated method:** Playwright Electron; synthetic CDP clicks only; real loopback fake server;
-no OS input.
+**Isolated method:** Playwright Electron CDP click against the local 404 feed; dialog listener;
+unit tests.
 
 ---
 
-## AC-04 — Focus returns after a deterministic reply
+## AC-03 — Network, unknown, and download failures use localized messages
 
-**Visual check:** Send `Tài liệu này nói về điều gì?` in the empty notebook. The refusal reply is
-visible, the composer is enabled with focus ring and caret, and the input is empty. Capture
-`ac-04-focus-after-reply.png`.
+**Given:** Three local-feed variants: a closed loopback port (network), an HTTP 500 check with a
+non-feed body (unknown), and a valid `latest.yml` advertising v2.2.5 whose installer URL returns
+HTTP 500 (download failure).
 
-**Deterministic check:**
+**User action:** For the first two variants, launch, open Settings → About, click **Check for
+Updates**. For the download variant, click Check (state becomes AVAILABLE), then click **Download
+Update**.
 
-- Before sending, attach renderer counters to `window.api.onMessageCreated` and
-  `window.api.onMessageChunk`.
-- Send with `.press('Enter')`; the assistant reply contains `chưa có nội dung` (vi-VN) or
-  `no indexed content` (en-US).
-- Both event counters remain `0`, proving the deterministic non-streamed
-  `result.content` path ran.
-- `document.activeElement === [data-testid="chat-input"]`, textarea value is `''`, and the
-  textarea is enabled.
-- `window.api.getMessages(sessionId)` returns exactly one user row and one assistant row for the
-  new exchange.
-- After `page.reload()`, both rows are still returned and the reply text is visible.
-- Zero renderer console errors.
+**Expected UI & deterministic reaction:** The card shows the exact locale strings from SPEC §2:
+`updateErrorNetwork` for the closed port, `updateErrorUnknown` for the 500 check, and
+`updateErrorUnknown` for the failed download (500 installer). None shows raw headers/cookies, and
+none opens a raw native dialog. State objects carry the matching `errorKind`; `update:download`
+returns `success: false` with the fixed `update-failed` code only; state carries the matching
+`errorKind`. Install failure is covered by the mocked `UpdateService` unit test and sets `ERROR`
+with a categorized state; sanitized detail remains in main-process logs. Both locale files
+contain all three `updateError*` keys with the exact English/Vietnamese values. No console errors.
 
-**Isolated method:** Playwright Electron against real IPC + SQLite; no model call, no network
-beyond the fake `/models` endpoint; replies are offline and repeatable.
+**Screenshots:** `ac-03-network-error.png`, `ac-03-unknown-error.png`,
+`ac-03-download-error.png`, `ac-03-download-network-error.png`.
 
----
-
-## AC-05 — Focus is not stolen from inputs or open dialogs
-
-**Visual check:** Capture three states:
-
-- `ac-05-no-steal-title-edit.png` — notebook title input focused, composer not focused.
-- `ac-05-no-steal-settings-dialog.png` — Settings dialog open, composer not focused.
-- `ac-05-no-steal-alert-dialog.png` — delete-confirmation alert dialog open, composer not
-  focused.
-
-**Deterministic check:**
-
-- Click the notebook title; the title `<input>` is `document.activeElement`.
-- Dispatch `window.dispatchEvent(new Event('focus'))`; the title input remains active.
-- While the title is still being edited, simulate a `message-created` → `text-delta` → `finish`
-  stream through the main process. The `stream-complete` trigger must not move focus; the title
-  input remains active.
-- Press Escape to leave title edit mode (no text entry remains focused), then open Settings via
-  the top-bar Settings button.
-- Settings dialog is visible; `document.activeElement` is **not** the chat textarea.
-- Dispatch `window` focus while the dialog is open; chat textarea still not active.
-- Press Escape; after two deferred animation frames following Radix's `onCloseAutoFocus`, the chat
-  textarea becomes focused (dialog-close policy).
-- Hover the user message, click its delete action, and wait for `[role="alertdialog"]`.
-- While the alert dialog is open, dispatch `window` focus; chat textarea remains inactive.
-- Press Escape to cancel; `[role="alertdialog"]` disappears.
-- Zero renderer console errors.
-
-**Isolated method:** Playwright Electron DOM focus events and CDP clicks; no OS focus changes.
+**Isolated method:** Playwright Electron CDP; local loopback fixtures; dialog listener.
 
 ---
 
-## AC-06 — Window focus, panel clicks, selection guard, and no redundant focus
+## AC-04 — Silent startup, restart reset, and manual/startup overlap
 
-**Visual check:** Capture `ac-06-refocus-window.png` (composer ring after window focus) and
-`ac-06-refocus-panel-click.png` (composer ring after clicking empty chat-panel space).
+**Given:** A 404 feed is configured before launch. A `window.api.update.onStateChanged` collector is
+attached immediately after `firstWindow()`, before the 5-second startup timer fires.
 
-**Deterministic check:**
+**User action:** Launch, wait more than 6 seconds, then open Settings → About without clicking
+Check. Then perform one manual check, close the app, relaunch with the same 404 feed, wait more
+than 6 seconds again, and open About.
 
-- Spy on the textarea's `focus()` method; while already focused, dispatch `window` focus and
-  assert the spy count stays `0` (no redundant call). A DOM `focus` event cannot prove this
-  because a redundant `focus()` fires no event.
-- Blur the composer; dispatch `window` focus; active element becomes
-  `[data-testid="chat-input"]`.
-- Blur again; click `[data-testid="chat-messages"]` at empty coordinates; composer becomes
-  focused.
-- Create a non-empty `Range` selection over the reply text, blur, then dispatch `window` focus;
-  composer remains blurred.
-- Clear the selection.
-- Zero renderer console errors.
+**Expected UI & deterministic reaction:** After each startup wait, About is `IDLE` with no error
+text and the state collector is empty (no `CHECKING`, no `ERROR`); the captured app stderr contains
+the sanitized warning summary but none of the forbidden tokens. After the manual check the state is
+`ERROR`. After relaunch and the second >6s wait, About is `IDLE` again with no stale error. A
+mocked `UpdateService` unit test also covers a manual click overlapping an in-flight silent check:
+the manual call waits, runs a fresh non-silent check, and surfaces the error instead of inheriting
+the silent flag.
 
-**Isolated method:** Playwright Electron; implementation listens on `window` for `focus`;
-synthetic DOM events and CDP clicks only.
+**Screenshots:** `ac-04-silent-startup.png`, `ac-04-restart-reset.png`.
 
----
-
-## AC-07 — Version, changelog, README, and About screen are consistent
-
-**Visual check:** Open Settings → About; it displays `v2.2.3`. Capture `ac-07-about-version.png`.
-Include the README "What's new in 2.2.3" section as text in `report.md`.
-
-**Deterministic check:**
-
-- `package.json` `version === '2.2.3'`.
-- `CHANGELOG.md` contains `## [2.2.3] - 2026-11-27`.
-- The 2.2.3 changelog entry mentions light default, chat input focus, message feedback,
-  message deletion, and clipboard copy.
-- `README.md` contains `### What's new in 2.2.3` and names the light default, chat input focus, and
-  message actions.
-- `pnpm check:version` exits 0 and prints `[version] 2.2.3 is consistent`.
-- `electron-builder.yml` still uses `${version}` in `nsis.artifactName`.
-- `git diff -U0 -- package.json` contains the added line
-  `"version": "2.2.3"`; `git diff --name-only` is included in the report and reviewed for
-  unexpected version-bearing files.
-- `window.api.getAppVersion()` returns `2.2.3`.
-- Zero renderer console errors.
-
-**Isolated method:** shell assertions plus Playwright Electron About screenshot.
+**Isolated method:** Playwright Electron CDP; local 404 feed; pre-armed preload listener; captured
+`app.process().stderr`; mocked unit test.
 
 ---
 
-## AC-08 — Windows release artifacts exist and are 2.2.3
+## AC-05 — Version, changelog, README, and About show 2.2.4
 
-**Visual check:** The report lists `dist/` with exact names and sizes, and the packaged app's About
-screen shows `v2.2.3`.
+**Given:** The final 2.2.4 tree is built.
 
-**Deterministic check:**
+**User action:** Open Settings → About.
 
-- `dist/michat-2.2.3-setup.exe` exists and is larger than 50 MB.
-- `dist/michat-2.2.3-setup.exe.blockmap` exists.
-- `dist/latest.yml` contains `version: 2.2.3` and `michat-2.2.3-setup.exe`.
-- `pnpm smoke:packaged` exits 0 against `dist/win-unpacked` and reports `[version] packaged app
-reports 2.2.3`.
-- `pnpm build:win` exits 0.
-- No unsigned-build/SmartScreen warning is treated as a failure.
+**Expected UI & deterministic reaction:** About shows `v2.2.4`. `package.json` is `2.2.4`,
+`CHANGELOG.md` contains `## [2.2.4] - 2026-11-27`, README contains `### What's new in 2.2.4` and
+explains the public feed + friendly errors, and `pnpm check:version` passes.
 
-**Isolated method:** file assertions plus the existing PowerShell packaged smoke; no OS input.
+**Screenshot:** `ac-05-about-version.png`.
+
+**Isolated method:** Playwright Electron About screenshot plus shell/file assertions.
 
 ---
 
-## AC-09 — Pending 2.2.3 message actions work and persist
+## AC-06 — Windows 2.2.4 artifacts and packaged app
 
-**Visual check:** Hover the assistant reply; thumbs up/down controls are visible. Hover the user
-message; copy and delete controls are visible. Capture `ac-09-message-actions.png`.
+**Given:** `pnpm build:win` completed from the final tree.
 
-**Deterministic check:**
+**User action:** Launch the packaged app offscreen through the packaged smoke's CDP port.
 
-- Click the assistant copy button; inside `app.evaluate(({ clipboard }) => clipboard.readText())`
-  the value equals the assistant reply content exactly (the main-process IPC path, not
-  `navigator.clipboard`).
-- Click the assistant thumbs-up button; `window.api.getMessages(sessionId)` reports
-  `feedback === 'like'` for that assistant row; after reload it is still `'like'`.
-- Record message ids before deletion; hover the user message, click delete, confirm the
-  `[role="alertdialog"]`. After deletion `getMessages(sessionId)` contains neither the user id nor
-  its paired assistant id.
-- `pnpm test` passes `tests/renderer/messageActions.test.ts`, `tests/messagePairs.test.ts`,
-  `tests/clipboardHandlers.test.ts`, `tests/messageFeedbackDb.test.ts`,
-  `tests/chatHandlers.test.ts`, and `tests/rag/promptContext.test.ts`.
-- Zero renderer console errors.
+**Expected UI & deterministic reaction:** `dist/michat-2.2.4-setup.exe` (>50 MB),
+`dist/michat-2.2.4-setup.exe.blockmap`, and `dist/latest.yml` with `version: 2.2.4` exist.
+`pnpm smoke:packaged` prints `MICHAT_PARSER_SMOKE_OK` and `[version] packaged app reports 2.2.4`.
+ASAR contains no source/tests/docs. No `michat.exe` process remains.
 
-**Isolated method:** Playwright Electron against real IPC + SQLite; clipboard read through the
-Electron main process; no OS clipboard UI.
+**Screenshot:** `ac-06-packaged-app.png` (packaged post-onboarding screen captured offscreen via
+CDP).
+
+**Isolated method:** packaged smoke with `MICHAT_E2E_OFFSCREEN=1` and
+`powershell -ExecutionPolicy Bypass -File scripts/smoke-packaged.ps1 -ScreenshotPath <run>/ac-06-packaged-app.png`;
+CDP screenshot only.
 
 ---
 
-## AC-10 — No runtime error noise and clean shutdown
+## AC-07 — Regression suite is green and no runtime noise
 
-**Visual check:** Capture `ac-10-final-state.png` after the E2E flow; the UI is intact (no error
-boundary, no blank screen).
+**Given:** The final 2.2.4 tree.
 
-**Deterministic check:**
+**User action:** Run the full verification sequence and leave the app on the notebook/About final
+state.
 
-- No `pageerror` events during any E2E test.
-- No renderer `console` messages of type `error`; known `console.log` theme lines are allowed.
-- No main-process stderr lines containing `Unhandled`, `Uncaught`, `SQLITE_`, or `Error:`
-  (captured from `app.process().stderr`).
-- `app.close()` exits with code 0.
-- No `electron` or `michat` process remains whose command line contains the temp
-  `--user-data-dir`.
-- The packaged smoke test leaves no `michat.exe` process for its temp profile.
+**Expected UI & deterministic reaction:** `pnpm test`, `pnpm lint`, `pnpm typecheck`,
+`pnpm test:rag`, `pnpm check:security`, `pnpm check:cjk`, `pnpm check:migrations`,
+`node scripts/check-asar.cjs`, `pnpm check:version`, the update E2E, and packaged smoke all exit 0. Renderer has no `console.error`/`pageerror`; captured app stderr has no `Unhandled`,
+`Uncaught`, or `SQLITE_` lines (expected sanitized update warnings are allowlisted). No leftover
+app process for the temp profile.
 
-**Isolated method:** Playwright process/stderr capture and a PowerShell process-command-line
-check; packaged smoke from `pnpm smoke:packaged`.
+**Screenshot:** `ac-07-final-state.png`.
 
----
-
-## AC-11 — Disabled composer is never focused; focus policy unit matrix passes
-
-**Visual check:** In a fresh notebook before API configuration, the composer is disabled and has
-no focus ring; capture `ac-11-disabled-composer.png`.
-
-**Deterministic check:**
-
-- `[data-testid="chat-input"]` has `disabled === true` before API configuration.
-- `document.activeElement` is not the chat textarea before API configuration.
-- With no active session (home screen), no chat textarea exists and no focus error is logged.
-- `pnpm exec vitest run tests/renderer/chatInputFocus.test.ts` exits 0 and covers:
-  disabled, open dialog, open alert dialog, non-empty selection, already-focused,
-  opportunistic trigger inside a text entry, explicit trigger from a button, and
-  dialog-close with a non-text-entry active element.
-- Zero renderer console errors.
-
-**Isolated method:** Playwright Electron disabled-state screenshot plus the headless Vitest
-matrix; no OS input.
+**Isolated method:** full suites plus offscreen Playwright; process list filtered by executable
+and temp `--user-data-dir`.
 
 ---
 
 ## Human approval gate
 
-The independent verifier writes `.opencode/evidence/<run-id>/report.md` with an AC matrix and the
-full screenshot list. `product_verify_pass` is called only if every AC passes. The release is
-**not** pushed, tagged, or published until the user gives the explicit final go-ahead.
+The independent verifier writes `.opencode/evidence/<run-id>/report.md` with all AC IDs, a
+non-empty `## Interactive Action Log` recording every click and observed reaction, the screenshot
+list, artifact hashes, the secret-scan result, and the visibility-change approval.
+`product_verify_pass` is called only after every AC passes. No tag, push, or release happens
+without explicit user approval.

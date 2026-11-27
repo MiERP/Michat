@@ -11,6 +11,9 @@ export enum UpdateStatus {
   ERROR = 'error'
 }
 
+/** Categorized update failure used to render a localized message. */
+export type UpdateErrorKind = 'feed-unavailable' | 'network' | 'unknown'
+
 /**
  * Update progress
  */
@@ -57,22 +60,23 @@ export interface UpdateState {
   status: UpdateStatus
   info?: UpdateInfo
   progress?: UpdateProgress
-  error?: string
+  /** Categorized failure used by the localized About card. */
+  errorKind?: UpdateErrorKind
 }
 
 /**
- * Update check result
+ * Update check result. `error` is a fixed code, never raw updater text.
  */
 export interface UpdateCheckResult {
   success: boolean
   state?: UpdateState
-  error?: string
+  error?: 'update-failed'
 }
 
 /**
- * Update operation result
+ * Update operation result. `error` is a fixed code, never raw updater text.
  */
 export interface UpdateOperationResult {
   success: boolean
-  error?: string
+  error?: 'update-failed'
 }

@@ -27,12 +27,26 @@ export default function AboutSettings(): ReactElement {
     return window.api.update.onStateChanged((state) => setUpdateState(state))
   }, [])
 
+  const preserveCategorizedError = (): void => {
+    setUpdateState((current) =>
+      current.status === UpdateStatus.ERROR
+        ? current
+        : { status: UpdateStatus.ERROR, errorKind: 'unknown' }
+    )
+  }
+
   const handleCheckUpdate = async (): Promise<void> => {
     setUpdateBusy(true)
     try {
       const result = await window.api.update.check()
       if (result.state) setUpdateState(result.state)
-      if (!result.success && result.error) alert(result.error)
+      else if (!result.success) {
+        setUpdateState((current) =>
+          current.status === UpdateStatus.ERROR
+            ? current
+            : { status: UpdateStatus.ERROR, errorKind: 'unknown' }
+        )
+      }
     } finally {
       setUpdateBusy(false)
     }
@@ -42,7 +56,9 @@ export default function AboutSettings(): ReactElement {
     setUpdateBusy(true)
     try {
       const result = await window.api.update.download()
-      if (!result.success && result.error) alert(result.error)
+      if (!result.success) {
+        preserveCategorizedError()
+      }
     } finally {
       setUpdateBusy(false)
     }
@@ -51,7 +67,7 @@ export default function AboutSettings(): ReactElement {
   const handleInstallUpdate = async (): Promise<void> => {
     if (!confirm(t('confirmInstall'))) return
     const result = await window.api.update.install()
-    if (!result.success && result.error) alert(result.error)
+    if (!result.success) preserveCategorizedError()
   }
 
   const handleOpenWebsite = async (): Promise<void> => {
@@ -80,7 +96,14 @@ export default function AboutSettings(): ReactElement {
       case UpdateStatus.DOWNLOADED:
         return t('readyToInstall')
       case UpdateStatus.ERROR:
-        return updateState.error || t('checkUpdateError')
+        switch (updateState.errorKind) {
+          case 'feed-unavailable':
+            return t('updateErrorFeedUnavailable')
+          case 'network':
+            return t('updateErrorNetwork')
+          default:
+            return t('updateErrorUnknown')
+        }
       default:
         return ''
     }

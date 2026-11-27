@@ -2,6 +2,20 @@
 
 All notable changes to MiChat are documented in this file.
 
+## [2.2.4] - 2026-11-27
+
+### Fixed
+
+- **Update checks work again.** The release repository is public, so the anonymous
+  `releases.atom` / `/releases/latest` requests used by `electron-updater` no longer return 404.
+- **No raw update errors in the UI.** Updater messages are sanitized before crossing IPC or being
+  shown: response headers, cookies, `_gh_sess`, CSP text, and raw URLs are removed. The About card
+  now shows one localized sentence for feed, network, or unknown failures.
+- **Quiet background checks.** The 5-second startup check is wired and silent on failure; it no
+  longer writes an error into About before the user asks. Manual checks always show the reason.
+- **Sanitized download/install failures.** Download and install errors are categorized and shown
+  in the update card instead of a native alert with raw diagnostics.
+
 ## [2.2.3] - 2026-11-27
 
 ### Added

@@ -1,137 +1,157 @@
-# SPEC — MiChat 2.2.3: light default, chat-first focus, release
+# SPEC — MiChat 2.2.4: reachable update feed and friendly update errors
 
 ## Problem
 
-MiChat 2.2.2 ships with a dark default theme (`defaultSettings.theme = 'dark'` and
-`themeStore.theme = 'dark'`). New users get a dark UI even though the light theme is already the
-complete default palette in `theme.css`. Users who want the light interface must change it in
-Settings, and the work-in-progress that is already in the tree (message feedback, paired message
-deletion, reliable clipboard copy, grounded refusals) is not released.
+MiChat 2.2.3's update check fails with a raw GitHub 404:
 
-The notebook chat input also loses focus whenever a notebook or chat session loads, after a reply
-finishes, or when the user returns to the window. The user must click the message box before
-typing, which breaks the "open a notebook and ask" flow.
+```
+404 "method: GET url: https://github.com/MiERP/Michat/releases.atom ..."
+Headers: { ... set-cookie: _gh_sess=... }
+```
 
-Finally, the project needs a consistent 2.2.3 release: version metadata, changelog, README, a
-Windows installer, and GitHub release publication after verification.
+Root cause: `electron-updater`'s `GitHubProvider` fetches `releases.atom` and
+`/releases/latest` **anonymously**. The `MiERP/Michat` repository is currently **private**, so
+anonymous requests to both endpoints return 404 even though authenticated `gh` can see the repo
+and releases. The app then displays the raw `electron-updater` error, including response headers
+and cookies, in the About panel.
+
+The automatic startup check is defined but not wired: `checkForUpdatesOnStartup()` has no caller in
+`src/main/index.ts`. When it is wired, `electron-updater` emits `'error'` and then rejects, so both
+paths must honor the silent flag or a failed background check still writes `ERROR` into About.
 
 ## Solution
 
-### 1. Light is the default theme
+### 1. Make the update feed publicly reachable
 
-- Change the built-in default in `src/main/config/defaults.ts` from `dark` to `light`.
-- Change the renderer store's initial value in `src/renderer/src/store/themeStore.ts` from `dark`
-  to `light` so the first paint is light before the persisted setting resolves.
-- Do **not** add a migration that rewrites an explicitly saved theme. Existing profiles that
-  already stored `dark` keep dark. New profiles and profiles without a saved theme get light.
-- The Electron window background already derives from the saved theme; keep that behavior.
+- Run a pre-flight secret scan over the full Git history before changing visibility, record the
+  maintainer approval, then change `MiERP/Michat` from private to public.
+- This fixes existing 2.2.3 clients' **anonymous feed fetch (404) only**. Their raw error rendering
+  and startup-state leak still require the 2.2.4 code changes below.
+- Do **not** embed a token in the desktop app; a distributed token would be a credential leak.
 
-### 2. Chat input always has priority
+### 2. Friendly, sanitized update errors everywhere
 
-Add a small focus policy plus effects around the chat textarea in `ProcessPanel.tsx`.
+- Add a pure update-error module used by `UpdateService` and every update IPC handler.
+- Classification order (case-insensitive, sanitized summary + error code; header noise cannot
+  influence the result):
+  1. `feed-unavailable`: `404`, `releases.atom`, `/releases/latest`,
+     `ERR_UPDATER_LATEST_VERSION_NOT_FOUND`, `ERR_UPDATER_CHANNEL_FILE_NOT_FOUND`,
+     `ERR_UPDATER_INVALID_RELEASE_FEED`, `Not Found`.
+  2. `network`: `ENOTFOUND`, `EAI_AGAIN`, `ECONNREFUSED`, `ETIMEDOUT`, `ESOCKETTIMEDOUT`,
+     `ECONNRESET`, `ENETUNREACH`, `socket hang up`, `getaddrinfo`, `timeout`.
+  3. `unknown`: everything else, including non-`Error`, `null`, and empty messages.
+- Sanitization pipeline: normalize CRLF and escaped `\n` → split lines → drop lines that start with
+  `headers?:`, `set-cookie:`, `cookie:`, `content-security-policy:`, `content-type:`, `date:`,
+  `server:`, `cache-control:`, `vary:`, `referrer-policy:`, `strict-transport-security:`, `x-…:` →
+  drop stray `{…}` blocks → strip `_gh_sess=…`/cookie `key=value` pairs → collapse whitespace →
+  first remaining non-empty line → truncate to 240 UTF-16 code units with `…`. If nothing remains,
+  return `''` and let the UI use the generic localized message.
+- `UpdateState.errorKind?: UpdateErrorKind` only; no free-text updater message crosses IPC or reaches
+  the renderer. Sanitized detail stays in main-process logs. `UpdateCheckResult.error` and
+  `UpdateOperationResult.error` carry the fixed code `update-failed`; all four update IPC handlers
+  never forward raw updater text.
+- About maps `errorKind` to `updateErrorFeedUnavailable`, `updateErrorNetwork`, or
+  `updateErrorUnknown`. Exact locale values:
 
-Focus is requested:
+| Key                          | en-US                                                               | vi-VN                                                               |
+| ---------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `updateErrorFeedUnavailable` | Couldn't check for updates because the release feed is unavailable. | Không thể kiểm tra cập nhật vì nguồn phát hành không truy cập được. |
+| `updateErrorNetwork`         | Couldn't reach the update server. Check your network and try again. | Không thể kết nối máy chủ cập nhật. Kiểm tra mạng rồi thử lại.      |
+| `updateErrorUnknown`         | Update check failed. Please try again.                              | Kiểm tra cập nhật thất bại. Vui lòng thử lại.                       |
 
-1. When a notebook/session becomes available (initial load and session switch).
-2. When the saved API configuration becomes ready and the input becomes enabled.
-3. When a user-initiated `sendMessage` settles and the composer is enabled again. This covers
-   both the streamed path (`message-chunk` finish) and the deterministic non-streamed path
-   (`result.content`, for example the empty-knowledge-base refusal) that never enters streaming
-   state.
-4. When the application window regains focus (`window` event, not `document`).
-5. When the user clicks non-interactive space in the chat panel (`click`, not `mousedown`).
-6. After a modal dialog or alert dialog closes. The implementation waits two animation frames
-   after Radix's `onCloseAutoFocus` restoration (or re-checks in `onCloseAutoFocus`), then
-   re-checks the guard before focusing.
+- Remove `alert(result.error)` entirely; errors are shown only in the localized update card. Raw
+  `_gh_sess`, `Headers:`, `set-cookie`, or CSP text must never reach the UI, a native dialog, or a
+  log line.
 
-Focus is never taken when:
+### 3. Wire and silence the automatic startup check
 
-- The textarea is disabled (no session, no API configuration, or streaming in progress).
-- A dialog or alert dialog is open (`[role="dialog"][data-state="open"]` **or**
-  `[role="alertdialog"][data-state="open"]`).
-- The user has a non-empty text selection: `window.getSelection().toString().length > 0`, or an
-  `input`/`textarea` whose `selectionStart !== selectionEnd`.
-- For every trigger, focus is currently in an input, textarea, select, contenteditable element,
-  or `[role="textbox"]`/`[role="combobox"]`. Explicit triggers may move focus from a button but
-  never from another text entry.
-- The textarea is already focused (no redundant `focus()` calls).
+- Call `updateService.checkForUpdatesOnStartup()` in `src/main/index.ts` after
+  `updateService.setMainWindow(mainWindow)`.
+- `checkForUpdates({ silent })` threads one instance flag through both the `'error'` listener and
+  the `catch` path. A silent failure logs a warning with the sanitized summary, emits no
+  `update:state-changed`, and leaves state `IDLE`. A silent check also suppresses the `CHECKING`
+  broadcast. Manual **Check for Updates** shows the categorized error.
+- `autoUpdater.logger = null` (electron-updater's no-op logger) disables its raw stack/header
+  logging; UpdateService logs only the sanitized classified summary.
+- Manual checks always force `silent = false` and wait for an in-flight startup check to settle,
+  then run a fresh check, so a click near the 5-second mark cannot inherit the silent flag.
+- Download and install failures also use the sanitizer and set `ERROR` with `errorKind`; all four
+  update IPC handlers return only the fixed `update-failed` code, never free-text updater output.
+- Successful automatic checks may still publish `NOT_AVAILABLE`/`AVAILABLE`.
+- Unit tests use a mocked `electron-updater` and assert both error paths leave `IDLE` with no state
+  event, manual failure sets `ERROR` with the correct `errorKind`, download/install failures are
+  sanitized, and a manual call overlapping a silent check runs a fresh non-silent check.
 
-The rules live in a pure helper (`shouldFocusChatInput`) so they are unit-testable without a DOM.
-The textarea receives stable test hooks (`data-testid="chat-input"`) and the message area gets
-`data-testid="chat-messages"` for deterministic E2E and visual verification. Test hooks have no
-production behavior.
+### 4. Deterministic update E2E with a local feed
 
-### 3. Ship pending 2.2.3 work
+- `autoUpdater.forceDevUpdateConfig = !app.isPackaged` (in the production branch). No test-only env
+  string is added to the shipped app.
+- The Playwright harness writes a temporary `dev-app-update.yml` before each launch and restores it
+  afterward:
+  - success: `provider: generic`, local HTTP server serves `latest.yml` for v2.2.3, so a 2.2.4 app
+    deterministically reports `NOT_AVAILABLE`.
+  - feed failure: server returns 404 for `latest.yml`, with `Set-Cookie: _gh_sess=fake-session`,
+    `Content-Security-Policy: default-src 'none'`, and a body containing `releases.atom` /
+    `Headers: { ... }`. Two exact raw updater errors are committed:
+    `tests/fixtures/update/private-feed-error.txt` (404 first line) and
+    `tests/fixtures/update/header-first-error.txt` (first line is a `Headers: { ... _gh_sess=... }`
+    block). Unit tests assert the header-first line is dropped and the next safe line is kept.
+  - download failure: server advertises v2.2.5 but returns HTTP 500 for the installer file
+    (classified `unknown` → `updateErrorUnknown`).
+  - network failure: URL points to a closed loopback port.
+  - unknown failure: server returns HTTP 500 with a non-feed body.
+- GitHub reachability is separate evidence. Anonymous curl checks record `PASS` or
+  `NETWORK_UNAVAILABLE`; they block only when `MICHAT_REQUIRE_GITHUB=1`.
 
-The release includes the already-written working-tree changes:
+### 5. Release 2.2.4
 
-- Assistant message feedback (thumbs up/down) persisted through the new migration.
-- Deleting a user message deletes its paired assistant reply and aborts an active stream.
-- Copy uses the Electron main-process clipboard with a browser fallback, so packaged builds work.
-- Empty / ungrounded knowledge-base answers are refused deterministically instead of being
-  answered from model memory.
-- Chit-chat, grounding and message-pair helpers are extracted and unit-tested.
-
-### 4. Version and release
-
-- `package.json` version: `2.2.3`.
-- `CHANGELOG.md` entry `## [2.2.3] - 2026-11-27` describing the user-visible changes.
-- `README.md` gains a "What's new in 2.2.3" section.
-- `pnpm check:version`, lint, typecheck, tests, build, and Windows packaging pass.
-- Build `dist/michat-2.2.3-setup.exe` plus `latest.yml`; publish to GitHub only after the final
-  human approval gate.
+- Version 2.2.4, CHANGELOG entry, README "What's new in 2.2.4", Windows installer, latest.yml, and
+  GitHub release after the full gate and explicit approval.
 
 ## User stories
 
-- **US-1** As a new user, I open MiChat and see the light interface immediately, without visiting
-  Settings.
-- **US-2** As an existing user who selected dark, my choice is preserved after upgrading.
-- **US-3** As a user opening a notebook, the caret is already in the chat box, so I can type
-  immediately.
-- **US-4** As a user sending a message, after the answer finishes the caret returns to the chat
-  box for the next question.
-- **US-5** As a user editing a title or settings field, the chat box never steals my caret.
-- **US-6** As a user who alt-tabs back to MiChat, the chat box is ready for input when nothing
-  else is being edited.
-- **US-7** As a maintainer, I can verify the 2.2.3 version, changelog, README, and installer from
-  one deterministic checklist.
+- **US-1** As a user on 2.2.3, my update check reaches the public feed and tells me whether a newer
+  release exists instead of showing a raw 404.
+- **US-2** As a user, a failed update check shows one clear localized sentence, never response
+  headers or cookies.
+- **US-3** As a user, a background startup check that fails stays silent; I only see an error when
+  I explicitly press Check for Updates.
+- **US-4** As a maintainer, I can prove the atom feed, latest.yml, and API release endpoint are
+  anonymously reachable and that 2.2.4 is consistent everywhere.
 
 ## Implementation decisions
 
-| Area                | Decision                                                                                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Theme default       | `defaultSettings.theme = 'light'`; `themeStore` initial state `light`; no forced migration.                                                                                           |
-| Focus policy        | New pure module `chatInputFocus.ts`; orchestration in `ProcessPanel.tsx`; ref-based focus.                                                                                            |
-| Focus triggers      | Session/API ready, `sendMessage` settle (non-streamed reply), stream end, window `focus`, chat-area click, dialog-close observer with `requestAnimationFrame` re-check.               |
-| Focus guard         | Disabled, open dialog/alert dialog, text selection, other text-entry element, already focused.                                                                                        |
-| Test hooks          | `data-testid="chat-input"`, `data-testid="chat-messages"`, `data-testid="create-notebook"`; no behavior in test hooks.                                                                |
-| Isolated E2E window | `MICHAT_E2E_OFFSCREEN=1` makes `createMainWindow()` place the window at `x=-32000, y=-32000` and use `showInactive()` so Playwright can render and screenshot without focus stealing. |
-| Tests               | Unit matrix for `shouldFocusChatInput`; Playwright Electron E2E for theme + focus + persistence + version; existing suites for shipped pending work.                                  |
-| Version             | Manual edit of `package.json` + `CHANGELOG.md` to keep the existing formatting; validate with `pnpm check:version`.                                                                   |
-| Release             | `pnpm build:win`; artifact `dist/michat-2.2.3-setup.exe`; `latest.yml`; GitHub release after approval.                                                                                |
+| Area                  | Decision                                                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository visibility | Public (GitHub setting); no code token, no public releases-only mirror.                                                                           |
+| Error model           | `UpdateState` carries `errorKind` only; no free-text updater message crosses IPC.                                                                 |
+| Classifier            | New pure module `src/main/utils/updateErrors.ts`; unit-tested.                                                                                    |
+| Startup check         | Wired after `setMainWindow`; silent failure leaves `IDLE` and emits no state event.                                                               |
+| UI                    | `AboutSettings` maps `errorKind` to i18n keys; no `alert` and no raw error rendering.                                                             |
+| IPC safety            | All four handlers return fixed `update-failed`; state `errorKind` drives the UI. |
+| Updater logging       | `autoUpdater.logger = null`; all update diagnostics go through the sanitized classifier.                                                          |
+| E2E                   | Temporary `dev-app-update.yml` + local generic feed; `forceDevUpdateConfig = !app.isPackaged`; real clicks against success/404/network/500 feeds. |
+| Version               | 2.2.4 patch; docs and installer after verification.                                                                                               |
 
 ## Testing seams
 
-- `shouldFocusChatInput` pure function — disabled, dialog, alert dialog, selection, text-entry,
-  already focused, opportunistic vs explicit trigger combinations.
-- Theme defaults — assert `defaultSettings.theme` and `themeStore` initial state; E2E fresh
-  profile, profile with `settingsVersion >= 2` and no `theme`, and profile with a persisted dark
-  value read back from `michat-config.json`.
-- ProcessPanel E2E — session load focus, non-streamed reply focus, window-focus refocus, panel
-  click, no steal from title input/settings/alert dialogs, no focus while disabled or already
-  focused.
-- Release metadata — `scripts/version.cjs check`, changelog date/content, README statements,
-  installer + `latest.yml` + blockmap existence.
-- Pending work — existing unit/integration tests (`chatStore`, `messageActions`, `messagePairs`,
-  `clipboardHandlers`, `chatHandlers`, `promptContext`) remain green.
+- `classifyUpdateError` / `sanitizeUpdateErrorMessage` pure unit matrix, including the exact
+  private-feed fixture and non-Error/null inputs.
+- `UpdateService` unit test with a mocked `electron-updater`: silent failure leaves `IDLE` from
+  both the listener and catch paths and emits no state event; manual failure sets `ERROR` with
+  `errorKind` and sanitized main-process log text.
+- Playwright update E2E: local generic feed success → `NOT_AVAILABLE`; 404 feed, closed port, and
+  HTTP 500 each → correct localized message; no `_gh_sess`/`Headers`/dialog text; silent startup
+  failure → About stays `IDLE`; restart clears a previous manual error.
+- Anonymous HTTP checks: atom feed, latest API, latest.yml return 200, or are recorded as
+  `NETWORK_UNAVAILABLE` unless `MICHAT_REQUIRE_GITHUB=1`.
+- Version/changelog/README/installer checks.
+- Pre-flight secret scan over full Git history and a recorded approval before the public change.
 
 ## Out of scope
 
-- Removing or redesigning the dark theme.
-- Re-theming the custom titlebar / Windows overlay colors.
-- Changing chat streaming behavior, model selection, or RAG retrieval quality.
-- Auto-update delivery beyond publishing `latest.yml`.
-- macOS/Linux installers for this release (Windows installer only).
-- Corrupt-JSON store recovery (electron-store's `clearInvalidConfig` behavior is unchanged).
-- Composer layout changes on window resize.
-- Force-pushing, rewriting history, or publishing without the final approval gate.
+- Replacing `electron-updater` or changing the download/install flow.
+- Embedding a GitHub token or adding a user-supplied update token.
+- A separate public releases-only repository.
+- Custom update server or CDN.
+- Changing startup delay, download behavior, or release signing.

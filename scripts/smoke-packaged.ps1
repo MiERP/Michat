@@ -1,7 +1,8 @@
 param(
   [int]$Port = 9337,
   [string]$ExePath = "dist/win-unpacked/michat.exe",
-  [string]$UserDataDir = ""
+  [string]$UserDataDir = "",
+  [string]$ScreenshotPath = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -185,6 +186,17 @@ new Promise(resolve => {
     throw "Packaged app reports version '$packagedVersion', expected '$expectedVersion'"
   }
   Write-Host "[version] packaged app reports $packagedVersion"
+
+  if ($ScreenshotPath) {
+    Send-Cdp 'Page.enable' $null | Out-Null
+    $screenshot = Send-Cdp 'Page.captureScreenshot' @{ format = 'png'; captureBeyondViewport = $false }
+    if (-not $screenshot.result.data) { throw 'Page.captureScreenshot returned no image data' }
+    $absoluteScreenshot = [System.IO.Path]::GetFullPath($ScreenshotPath)
+    $screenshotDir = Split-Path -Parent $absoluteScreenshot
+    if ($screenshotDir) { New-Item -ItemType Directory -Force -Path $screenshotDir | Out-Null }
+    [System.IO.File]::WriteAllBytes($absoluteScreenshot, [Convert]::FromBase64String($screenshot.result.data))
+    Write-Host "[screenshot] $absoluteScreenshot"
+  }
 
   Write-Host 'Packaged smoke test passed'
 } finally {

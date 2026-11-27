@@ -1,0 +1,6 @@
+404 Not Found
+Headers: {
+  "set-cookie": "_gh_sess=SUPERSECRET; path=/; HttpOnly",
+  "authorization": "Bearer ghp_SECRETTOKENVALUE",
+  "content-security-policy": "default-src 'none'"
+}

@@ -1,0 +1,2 @@
+Headers: { "set-cookie": [ "_gh_sess=fake-session-value" ], "content-security-policy": "default-src 'none'" }
+set-cookie: _gh_sess=fake-session-value
