@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, ReactElement } from 'react'
+import { useState, useEffect, useRef, useCallback, ReactElement } from 'react'
 import {
   Send,
   StopCircle,
@@ -19,6 +19,7 @@ import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { Card } from '../ui/card'
 import { PanelHeader } from '../ui/panel-header'
+import { hasOpenDialog, requestChatInputFocus, type ChatFocusIntent } from './chat/chatInputFocus'
 
 interface ProcessPanelProps {
   onToggleLeft?: () => void
@@ -76,6 +77,100 @@ export default function ProcessPanel({
   const canSend = currentSession && !isCurrentNotebookStreaming && input.trim() && apiReady
   const canStop = currentSession && isCurrentNotebookStreaming
 
+  const focusFrameRef = useRef<number | null>(null)
+
+  // Delay focus to the next paint so disabled/loading states and Radix focus
+  // restoration have settled before the guard runs.
+  const focusAfterFrame = useCallback((intent: ChatFocusIntent) => {
+    if (focusFrameRef.current !== null) {
+      cancelAnimationFrame(focusFrameRef.current)
+    }
+    focusFrameRef.current = requestAnimationFrame(() => {
+      focusFrameRef.current = null
+      requestChatInputFocus(textareaRef.current, intent)
+    })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (focusFrameRef.current !== null) {
+        cancelAnimationFrame(focusFrameRef.current)
+      }
+    }
+  }, [])
+
+  // Entering or switching a notebook puts the caret in the composer.
+  useEffect(() => {
+    if (!currentSession?.id || !apiReady) return
+    focusAfterFrame('session-ready')
+  }, [currentSession?.id, apiReady, focusAfterFrame])
+
+  // A streamed reply disables the composer; restore focus when it re-enables.
+  const wasStreamingRef = useRef(isCurrentNotebookStreaming)
+  useEffect(() => {
+    const wasStreaming = wasStreamingRef.current
+    wasStreamingRef.current = isCurrentNotebookStreaming
+    if (wasStreaming && !isCurrentNotebookStreaming) {
+      focusAfterFrame('stream-complete')
+    }
+  }, [isCurrentNotebookStreaming, focusAfterFrame])
+
+  // Alt-tabbing back should not require a click when nothing else is edited.
+  useEffect(() => {
+    const handleWindowFocus = (): void => {
+      focusAfterFrame('window-focus')
+    }
+    window.addEventListener('focus', handleWindowFocus)
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus)
+    }
+  }, [focusAfterFrame])
+
+  // Radix restores focus to the trigger on close; wait two frames, then apply
+  // the same guard so an input or another dialog still wins.
+  useEffect(() => {
+    let wasOpen = hasOpenDialog()
+    let firstFrame = 0
+    let secondFrame = 0
+
+    const observer = new MutationObserver(() => {
+      const isOpen = hasOpenDialog()
+      if (wasOpen && !isOpen) {
+        firstFrame = requestAnimationFrame(() => {
+          secondFrame = requestAnimationFrame(() => {
+            focusAfterFrame('dialog-close')
+          })
+        })
+      }
+      wasOpen = isOpen
+    })
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-state']
+    })
+
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(firstFrame)
+      cancelAnimationFrame(secondFrame)
+    }
+  }, [focusAfterFrame])
+
+  const handleChatPanelClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const target = event.target as HTMLElement
+    if (
+      target.closest(
+        'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="dialog"], [role="alertdialog"]'
+      )
+    ) {
+      return
+    }
+    focusAfterFrame('panel-click')
+  }
+
   // Check whether the external API is configured.
   const checkApiConfig = async (): Promise<void> => {
     try {
@@ -101,7 +196,16 @@ export default function ProcessPanel({
   const handleSend = (): void => {
     if (!canSend) return
 
-    sendMessage(currentSession.id, input.trim())
+    // Non-streamed replies (for example grounded refusals) settle here; streamed
+    // replies settle through the streaming-state effect above.
+    void sendMessage(currentSession.id, input.trim())
+      .catch(() => {
+        // sendMessage already records its own failures; this only prevents an
+        // unexpected rejection from escaping the fire-and-forget call.
+      })
+      .finally(() => {
+        focusAfterFrame('send-complete')
+      })
     setInput('')
   }
 
@@ -248,6 +352,7 @@ export default function ProcessPanel({
             isEditingTitle ? (
               <Input
                 type="text"
+                data-testid="notebook-title-input"
                 value={editingTitle}
                 onChange={(e) => setEditingTitle(e.target.value)}
                 onBlur={handleSaveTitle}
@@ -259,6 +364,7 @@ export default function ProcessPanel({
             ) : (
               <Button
                 onClick={handleStartEditTitle}
+                data-testid="notebook-title-button"
                 variant="ghost"
                 className="text-sm font-medium h-auto p-0"
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -295,7 +401,7 @@ export default function ProcessPanel({
           notebook summary card is embedded at the top for reading before chatting */}
       <div className="absolute top-14 bottom-0 left-0 right-0 overflow-hidden flex flex-col">
         <NotebookSummaryCard />
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0" data-testid="chat-messages" onClick={handleChatPanelClick}>
           <MessageList messages={messages} />
         </div>
       </div>
@@ -334,6 +440,7 @@ export default function ProcessPanel({
           {/* Multi-line input */}
           <Textarea
             ref={textareaRef}
+            data-testid="chat-input"
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}

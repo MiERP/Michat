@@ -2,6 +2,31 @@
 
 All notable changes to MiChat are documented in this file.
 
+## [2.2.3] - 2026-11-27
+
+### Added
+
+- Assistant answers now have thumbs-up/thumbs-down feedback stored in SQLite, so answer quality
+  can be reviewed later without leaving the chat.
+- Deleting a user message also deletes its paired assistant reply and aborts an active stream, so
+  the conversation never keeps an orphaned answer.
+- Copying a message now uses the Electron main-process clipboard with a browser fallback, which
+  fixes copy in packaged builds where `navigator.clipboard` is gated.
+
+### Changed
+
+- New installations open in the **light** theme by default. An explicitly saved dark theme is
+  preserved; no existing preference is overwritten.
+- The chat composer now takes focus when a notebook/session opens, after a reply completes, when
+  the window regains focus, when empty chat space is clicked, and after a dialog closes. It never
+  steals focus from another input, an open dialog, or an active text selection, and never focuses
+  while disabled or already focused.
+- Empty or ungrounded knowledge bases now return a deterministic refusal instead of letting the
+  model answer from its own memory. Questions with no retrieved evidence receive an explicit
+  no-evidence instruction.
+- Chit-chat detection, grounding checks, and message-pair lookup now live in focused utility
+  modules with unit coverage.
+
 ## [2.2.2] - 2026-11-26
 
 ### Fixed

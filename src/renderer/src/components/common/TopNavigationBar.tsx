@@ -86,6 +86,7 @@ export default function TopNavigationBar({
         <div className="flex items-center gap-2">
           <Button
             onClick={handleSettingsClick}
+            data-testid="open-settings"
             variant="ghost"
             size="icon"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -135,6 +136,7 @@ export default function TopNavigationBar({
             {/* New notebook button */}
             <Button
               onClick={onCreateClick}
+              data-testid="create-notebook"
               variant="ghost"
               size="icon"
               className="w-7 h-7 text-white/80 hover:bg-white/10 hover:text-white"
@@ -150,6 +152,7 @@ export default function TopNavigationBar({
       {!isLinux() && (
         <Button
           onClick={handleSettingsClick}
+          data-testid="open-settings"
           variant="ghost"
           size="icon"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}

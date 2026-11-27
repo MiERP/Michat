@@ -46,4 +46,5 @@ desktop.ini
 
 # Internal tooling / cache
 .commandcode/
+.scratch/
 src/renderer/.dev-check-vite-cache/

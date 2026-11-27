@@ -75,6 +75,9 @@ export const chatMessages = sqliteTable(
     content: text('content').notNull(),
     reasoningContent: text('reasoning_content'), // DeepSeek Reasoner chain-of-thought content
     metadata: text('metadata', { mode: 'json' }).$type<ChatMessageMetadata>(),
+    /** User rating on an assistant answer; kept for answer-quality datasets. */
+    feedback: text('feedback', { enum: ['like', 'dislike'] }),
+    feedbackAt: integer('feedback_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull()
   },
   (table) => ({

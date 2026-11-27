@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ChatSession, ChatMessage, ChatScope } from '../types/notebook'
+import type { MessageFeedbackRating } from '../../../shared/types/chat'
 import Logger from '../../../shared/utils/logger'
 
 let activeSessionRequest = 0
@@ -45,6 +46,8 @@ interface ChatStore {
   createSession: (notebookId: string, title: string) => Promise<ChatSession>
   sendMessage: (sessionId: string, content: string) => Promise<void>
   abortMessage: (notebookId: string) => Promise<void>
+  deleteUserMessage: (messageId: string) => Promise<boolean>
+  setMessageFeedback: (messageId: string, rating: MessageFeedbackRating | null) => Promise<boolean>
 }
 
 export const useChatStore = create<ChatStore>()((set, get) => ({
@@ -183,6 +186,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       notebookId,
       role: 'user',
       content,
+      feedback: null,
+      feedbackAt: null,
       createdAt: new Date()
     }
     get().addMessage(userMessage)
@@ -202,6 +207,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
         notebookId,
         role: 'assistant',
         content: `❌ Error: ${result.error ?? 'Failed to start the response'}`,
+        feedback: null,
+        feedbackAt: null,
         createdAt: new Date()
       }
       if (get().currentSession?.id === sessionId) get().addMessage(errorMessage)
@@ -209,6 +216,40 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }
 
     const messageId = result.messageId
+
+    // Replace the optimistic temp id with the persisted user row id, so the
+    // delete action can address the message that actually exists in SQLite.
+    if (result.userMessageId) {
+      const persistedUserId = result.userMessageId
+      set((state) => ({
+        messages: state.messages.map((message) =>
+          message.id === userMessage.id ? { ...message, id: persistedUserId } : message
+        )
+      }))
+    }
+
+    // An answer produced without the model (for example a deterministic
+    // no-knowledge-base refusal) is already complete: show it without a
+    // streaming cursor or callback state.
+    if (result.content) {
+      const completedMessage: ChatMessage = {
+        id: messageId,
+        sessionId,
+        notebookId,
+        role: 'assistant',
+        content: result.content,
+        feedback: null,
+        feedbackAt: null,
+        createdAt: new Date()
+      }
+      if (
+        get().currentSession?.id === sessionId &&
+        !get().messages.some((message) => message.id === messageId)
+      ) {
+        get().addMessage(completedMessage)
+      }
+      return
+    }
 
     // 4. Add the assistant message placeholder (including reasoning fields)
     const assistantMessage: ChatMessage = {
@@ -218,6 +259,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       role: 'assistant',
       content: '',
       reasoningContent: undefined,
+      feedback: null,
+      feedbackAt: null,
       createdAt: new Date(),
       isStreaming: true,
       isReasoningStreaming: true
@@ -276,6 +319,63 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       }
     } catch (error) {
       Logger.error('ChatStore', 'Error aborting message:', error)
+    }
+  },
+
+  deleteUserMessage: async (messageId) => {
+    try {
+      const result = await window.api.deleteMessage(messageId)
+      if (!result.success) {
+        Logger.warn('ChatStore', result.error || 'Failed to delete user message')
+        return false
+      }
+
+      const removedIds = new Set(result.deletedMessageIds)
+      set((state) => {
+        const streamingMessages = { ...state.streamingMessages }
+        for (const [notebookId, activeMessageId] of Object.entries(streamingMessages)) {
+          if (removedIds.has(activeMessageId)) delete streamingMessages[notebookId]
+        }
+
+        const messageToNotebook = { ...state.messageToNotebook }
+        for (const removedId of removedIds) delete messageToNotebook[removedId]
+
+        return {
+          messages: state.messages.filter((message) => !removedIds.has(message.id)),
+          streamingMessages,
+          messageToNotebook
+        }
+      })
+      return true
+    } catch (error) {
+      Logger.error('ChatStore', 'Error deleting user message:', error)
+      return false
+    }
+  },
+
+  setMessageFeedback: async (messageId, rating) => {
+    try {
+      const result = await window.api.setMessageFeedback(messageId, rating)
+      if (!result.success) {
+        Logger.warn('ChatStore', result.error || 'Failed to save message feedback')
+        return false
+      }
+
+      set((state) => ({
+        messages: state.messages.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                feedback: rating,
+                feedbackAt: rating ? new Date() : null
+              }
+            : message
+        )
+      }))
+      return true
+    } catch (error) {
+      Logger.error('ChatStore', 'Error saving message feedback:', error)
+      return false
     }
   }
 }))
@@ -393,6 +493,8 @@ export function setupChatListeners() {
       notebookId,
       role: 'assistant',
       content: '',
+      feedback: null,
+      feedbackAt: null,
       createdAt: new Date(),
       isStreaming: true,
       isReasoningStreaming: true

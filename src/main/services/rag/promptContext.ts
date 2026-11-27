@@ -78,6 +78,32 @@ export interface RagSearchResult {
   metadata?: Record<string, unknown>
 }
 
+/**
+ * Deterministic reply for a notebook with no indexed content. Keeping this in
+ * the main process prevents the model from answering a knowledge question from
+ * its own parametric memory when there is no data to ground the answer.
+ */
+export function buildEmptyKnowledgeBaseReply(language?: string): string {
+  const english = (language || '').toLowerCase().startsWith('en')
+  return english
+    ? "This notebook has no indexed content in its knowledge base yet (or its documents are still processing), so I can't answer from your data. Add the relevant documents or wait for indexing, then ask again."
+    : 'Sổ tay này chưa có nội dung nào được lập chỉ mục trong cơ sở tri thức (hoặc tài liệu đang xử lý), nên mình không thể trả lời dựa trên dữ liệu. Bạn hãy thêm tài liệu hoặc chờ lập chỉ mục xong rồi hỏi lại nhé.'
+}
+
+/**
+ * Strict instruction used when RAG ran but returned no usable evidence. The
+ * model must refuse instead of falling back to its own general knowledge.
+ */
+export function buildNoEvidenceInstruction(language?: string): string {
+  const replyLanguage = (language || '').toLowerCase().startsWith('en') ? 'English' : 'Vietnamese'
+  return `Knowledge base status: no relevant evidence was retrieved for the current question.
+
+Instructions:
+1. Do NOT answer from your own general knowledge, training data, or assumptions.
+2. Tell the user in ${replyLanguage} that you could not find the information in this notebook's knowledge base, and suggest adding a relevant document or rephrasing the question.
+3. Do not fabricate facts, article numbers, dates, or citations.`
+}
+
 export function buildRAGContext(
   searchResults: RagSearchResult[],
   options: { dedupeSections?: boolean; tokenBudget?: number } = {}

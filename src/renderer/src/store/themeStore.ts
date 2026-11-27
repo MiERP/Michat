@@ -27,7 +27,7 @@ export const useThemeStore = create<ThemeStore>((set, get) => {
   }
 
   return {
-    theme: 'dark',
+    theme: 'light',
     isLoading: true,
 
     initTheme: async () => {

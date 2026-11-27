@@ -194,6 +194,56 @@ export function getMessagesBySession(sessionId: string) {
 }
 
 /**
+ * Returns every message in a session (no display cap) for pairing work.
+ * Status notices may sit between a user row and its reply, so insertion order
+ * is the reliable order: `rowid` breaks ties when timestamps are identical.
+ */
+export function getAllMessagesBySession(sessionId: string) {
+  const db = getDatabase()
+
+  return db
+    .select({ id: chatMessages.id, role: chatMessages.role })
+    .from(chatMessages)
+    .where(eq(chatMessages.sessionId, sessionId))
+    .orderBy(chatMessages.createdAt, sql`rowid`)
+    .all()
+}
+
+/** Returns a single message by id. */
+export function getMessageById(messageId: string) {
+  const db = getDatabase()
+  return db.select().from(chatMessages).where(eq(chatMessages.id, messageId)).get()
+}
+
+/** Deletes messages by id in one transaction. */
+export function deleteMessagesByIds(messageIds: string[]): void {
+  if (messageIds.length === 0) return
+  const db = getDatabase()
+
+  db.transaction((tx) => {
+    for (const messageId of messageIds) {
+      tx.delete(chatMessages).where(eq(chatMessages.id, messageId)).run()
+    }
+  })
+}
+
+/** Stores the user's like/dislike rating on an assistant answer. */
+export function updateMessageFeedback(
+  messageId: string,
+  feedback: 'like' | 'dislike' | null
+): void {
+  const db = getDatabase()
+
+  db.update(chatMessages)
+    .set({
+      feedback,
+      feedbackAt: feedback ? new Date() : null
+    })
+    .where(eq(chatMessages.id, messageId))
+    .run()
+}
+
+/**
  * Updates message content.
  * Mainly used to store the complete content of a streamed message.
  */
@@ -213,7 +263,8 @@ export function updateMessageContent(
     updateData.metadata = metadata
   }
 
-  db.update(chatMessages).set(updateData).where(eq(chatMessages.id, messageId)).run()
+  const result = db.update(chatMessages).set(updateData).where(eq(chatMessages.id, messageId)).run()
+  return result.changes > 0
 }
 
 // ==================== Notebooks ====================

@@ -398,6 +398,24 @@ export const ChatSchemas = {
 
   abortMessage: z.object({
     messageId: z.string().min(1, 'Message ID cannot be empty')
+  }),
+
+  deleteMessage: z.object({
+    messageId: z.string().min(1, 'Message ID cannot be empty').max(200, 'Message ID is too long')
+  }),
+
+  setMessageFeedback: z.object({
+    messageId: z.string().min(1, 'Message ID cannot be empty').max(200, 'Message ID is too long'),
+    rating: z.enum(['like', 'dislike']).nullable()
+  })
+}
+
+/**
+ * Clipboard-related validation schemas
+ */
+export const ClipboardSchemas = {
+  writeText: z.object({
+    text: z.string().min(1, 'Clipboard text cannot be empty').max(1_000_000)
   })
 }
 

@@ -45,6 +45,9 @@ export function createMainWindow(): BrowserWindow {
 
   const theme = settingsManager.getSettingSync('theme')
   const backgroundColor = theme === 'dark' ? '#282c34' : '#fafafa'
+  // Playwright-driven verification renders the window offscreen and shows it
+  // without activation, so automated checks never steal OS focus.
+  const offscreenE2E = process.env.MICHAT_E2E_OFFSCREEN === '1'
 
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -52,6 +55,7 @@ export function createMainWindow(): BrowserWindow {
     minWidth: 1000,
     minHeight: 700,
     show: false,
+    ...(offscreenE2E ? { x: -32000, y: -32000 } : {}),
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 16 } } : {}),
@@ -65,7 +69,11 @@ export function createMainWindow(): BrowserWindow {
   let windowShown = false
   mainWindow.on('ready-to-show', () => {
     windowShown = true
-    mainWindow?.show()
+    if (offscreenE2E) {
+      mainWindow?.showInactive()
+    } else {
+      mainWindow?.show()
+    }
   })
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {

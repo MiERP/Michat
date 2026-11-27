@@ -51,6 +51,9 @@ export interface ChatMessageMetadata {
   citations?: ChatCitation[]
 }
 
+/** User rating attached to an assistant answer. */
+export type MessageFeedbackRating = 'like' | 'dislike'
+
 /**
  * Chat message interface (full version)
  * Based on the Drizzle-inferred database type, plus frontend extension fields
@@ -79,6 +82,17 @@ export interface APIMessage {
 /** Result of the send-message IPC call. */
 export interface SendMessageResult {
   messageId: string
+  /** Persisted id of the user row, so the renderer can replace its temp id. */
+  userMessageId?: string
+  /** Set when the assistant reply was produced without calling the model. */
+  content?: string
+  error?: string
+}
+
+/** Result of deleting a user message and its paired assistant reply. */
+export interface DeleteMessageResult {
+  success: boolean
+  deletedMessageIds: string[]
   error?: string
 }
 

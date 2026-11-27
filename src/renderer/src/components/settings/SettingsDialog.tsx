@@ -8,7 +8,7 @@ import PromptsSettings from './PromptsSettings'
 import ShortcutSettings from './ShortcutSettings'
 import AboutSettings from './AboutSettings'
 import SettingsContentPanel from './SettingsContentPanel'
-import { Dialog, DialogContent } from '../ui/dialog'
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog'
 import {
   Sidebar,
   SidebarContent,
@@ -115,6 +115,7 @@ export default function SettingsDialog(): ReactElement {
         className="max-w-5xl h-[80vh] p-0 flex flex-col bg-sidebar"
         showCloseButton={false}
       >
+        <DialogTitle className="sr-only">{t('settings')}</DialogTitle>
         <SidebarProvider className="flex flex-1 min-h-0">
           <div className="flex flex-1 min-h-0 gap-3 p-3 w-full">
             {/* Use the Shadcn Sidebar */}

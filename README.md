@@ -48,6 +48,18 @@ works, and feedback is very welcome.
 MiChat does **not** bundle models, start a model server, or manage model files.
 You configure an API once and MiChat uses it for chat and embeddings.
 
+### What's new in 2.2.3
+
+- **Light by default:** new installations open in the light interface. If you explicitly chose
+  dark, that preference is kept.
+- **Type without clicking:** the chat input takes focus when a notebook opens, after an answer
+  finishes, when you return to the window, and after closing a dialog. It stays out of the way
+  while you edit other fields, select text, or use a modal.
+- **Better message controls:** thumbs-up/down feedback is saved locally, deleting your question
+  removes its answer too, and copy now works reliably in packaged builds.
+- **Grounded refusals:** when a notebook has no indexed content or no relevant evidence, MiChat
+  says so instead of answering from the model's general knowledge.
+
 ### What's new in 2.2.0
 
 - **Better legal-document answers:** `Chương`/`Mục`/`Điều` headings become real sections, so

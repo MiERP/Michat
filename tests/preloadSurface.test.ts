@@ -48,6 +48,9 @@ describe('preload surface', () => {
     expect(api.electron).toBeUndefined()
     expect(typeof (api.shortcuts as Record<string, unknown>).getAll).toBe('function')
     expect(typeof (api.api as Record<string, unknown>).getConfig).toBe('function')
+    expect(typeof api.copyToClipboard).toBe('function')
+    expect(typeof api.deleteMessage).toBe('function')
+    expect(typeof api.setMessageFeedback).toBe('function')
     expect(api.llama).toBeUndefined()
   })
 
@@ -64,6 +67,18 @@ describe('preload surface', () => {
       action: 'newChat',
       accelerator: 'Ctrl+N'
     })
+  })
+
+  it('routes copy through the clipboard IPC channel', async () => {
+    await loadPreload()
+    const [, api] = electron.exposeInMainWorld.mock.calls[0] as [
+      string,
+      { copyToClipboard: (text: string) => Promise<unknown> }
+    ]
+
+    await api.copyToClipboard('copy me')
+
+    expect(electron.invoke).toHaveBeenCalledWith('clipboard:write-text', { text: 'copy me' })
   })
 
   it('fails closed when context isolation is disabled', async () => {

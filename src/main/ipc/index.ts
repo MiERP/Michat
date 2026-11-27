@@ -18,6 +18,7 @@ import { registerQuizHandlers } from './quizHandlers'
 import { registerUpdateHandlers } from './updateHandlers'
 import { registerItemHandlers } from './itemHandlers'
 import { registerShortcutHandlers } from './shortcutHandlers'
+import { registerClipboardHandlers } from './clipboardHandlers'
 import type { NotebookSummaryService } from '../services/NotebookSummaryService'
 
 /**
@@ -54,6 +55,7 @@ export function registerAllHandlers(
   registerUpdateHandlers(updateService)
   registerItemHandlers(knowledgeService)
   registerShortcutHandlers(shortcutManager, store)
+  registerClipboardHandlers()
   console.log('[IPC] All handlers registered')
 }
 

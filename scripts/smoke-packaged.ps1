@@ -1,14 +1,25 @@
 param(
   [int]$Port = 9337,
-  [string]$ExePath = "dist/win-unpacked/michat.exe"
+  [string]$ExePath = "dist/win-unpacked/michat.exe",
+  [string]$UserDataDir = ""
 )
 
 $ErrorActionPreference = 'Stop'
 
 $resolvedExe = Resolve-Path $ExePath
-$configDir = Join-Path $env:APPDATA 'michat'
+$autoUserDataDir = [string]::IsNullOrWhiteSpace($UserDataDir)
+if ($autoUserDataDir) {
+  $UserDataDir = Join-Path $env:TEMP ("michat-smoke-{0}" -f ([guid]::NewGuid()))
+}
+$UserDataDir = [System.IO.Path]::GetFullPath($UserDataDir)
+if ($UserDataDir.Length -gt 3) {
+  $UserDataDir = $UserDataDir.TrimEnd('\')
+}
+if ($UserDataDir -match '"') {
+  throw 'UserDataDir cannot contain a double quote'
+}
+$configDir = $UserDataDir
 $configPath = Join-Path $configDir 'michat-config.json'
-$backupPath = $null
 $proc = $null
 $ws = $null
 
@@ -24,8 +35,6 @@ function Set-OnboardingIncomplete {
   }
 
   if (Test-Path $configPath) {
-    $script:backupPath = Join-Path $env:TEMP ("michat-config-smoke-{0}.json" -f ([guid]::NewGuid()))
-    Copy-Item $configPath $script:backupPath -Force
     $config = Get-Content $configPath -Raw | ConvertFrom-Json
   } else {
     $config = [pscustomobject]@{ settings = [pscustomobject]@{} }
@@ -41,13 +50,6 @@ function Set-OnboardingIncomplete {
   }
 
   Write-JsonNoBom $configPath $config
-}
-
-function Restore-Config {
-  if ($script:backupPath -and (Test-Path $script:backupPath)) {
-    Copy-Item $script:backupPath $configPath -Force
-    Remove-Item $script:backupPath -Force
-  }
 }
 
 function Send-Cdp($method, $params) {
@@ -80,8 +82,21 @@ function Invoke-ParserSmoke($exePath) {
   # Plan Task 15: prove that the packaged app parses a document in a separate
   # utility process (asar entry, loaders, message channel), not in-process.
   $fixture = (Resolve-Path (Join-Path $PSScriptRoot '..\tests\fixtures\rag\local-first.md')).Path
-  $output = & $exePath "--smoke-parser=$fixture" 2>&1 | Out-String
-  $exitCode = $LASTEXITCODE
+  $stdoutPath = Join-Path $env:TEMP ("michat-parser-smoke-out-{0}.log" -f ([guid]::NewGuid()))
+  $stderrPath = Join-Path $env:TEMP ("michat-parser-smoke-err-{0}.log" -f ([guid]::NewGuid()))
+  try {
+    $parser = Start-Process -FilePath $exePath `
+      -ArgumentList "--smoke-parser=`"$fixture`"", "--user-data-dir=`"$UserDataDir`"" `
+      -Wait -PassThru -NoNewWindow `
+      -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $exitCode = $parser.ExitCode
+    $output = @()
+    if (Test-Path $stdoutPath) { $output += Get-Content $stdoutPath -Raw -ErrorAction SilentlyContinue }
+    if (Test-Path $stderrPath) { $output += Get-Content $stderrPath -Raw -ErrorAction SilentlyContinue }
+    $output = ($output -join "`n")
+  } finally {
+    Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+  }
   if ($exitCode -ne 0) {
     throw "Packaged parser smoke failed (exit $exitCode): $output"
   }
@@ -118,7 +133,7 @@ try {
   Invoke-ParserSmoke $resolvedExe
   Set-OnboardingIncomplete
 
-  $proc = Start-Process -FilePath $resolvedExe -ArgumentList "--remote-debugging-port=$Port" -PassThru
+  $proc = Start-Process -FilePath $resolvedExe -ArgumentList "--remote-debugging-port=$Port", "--user-data-dir=`"$UserDataDir`"" -PassThru
   $target = Wait-ForRendererTarget $Port $proc
   if (-not $target.webSocketDebuggerUrl) { throw 'No debuggable renderer target found' }
 
@@ -163,9 +178,19 @@ new Promise(resolve => {
     throw ("Onboarding did not complete successfully: " + ($state | ConvertTo-Json -Compress))
   }
 
+  $expectedVersion = (Get-Content (Join-Path $PSScriptRoot '..\package.json') -Raw | ConvertFrom-Json).version
+  $versionResult = Send-Cdp 'Runtime.evaluate' @{ expression = 'window.api.getAppVersion()'; awaitPromise = $true; returnByValue = $true }
+  $packagedVersion = $versionResult.result.result.value
+  if ($packagedVersion -ne $expectedVersion) {
+    throw "Packaged app reports version '$packagedVersion', expected '$expectedVersion'"
+  }
+  Write-Host "[version] packaged app reports $packagedVersion"
+
   Write-Host 'Packaged smoke test passed'
 } finally {
   if ($ws) { $ws.Dispose() }
   if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
-  Restore-Config
+  if ($autoUserDataDir -and (Test-Path $UserDataDir)) {
+    Remove-Item -Recurse -Force $UserDataDir -ErrorAction SilentlyContinue
+  }
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildRAGContext, type RagSearchResult } from '../../src/main/services/rag/promptContext'
+import {
+  buildEmptyKnowledgeBaseReply,
+  buildNoEvidenceInstruction,
+  buildRAGContext,
+  type RagSearchResult
+} from '../../src/main/services/rag/promptContext'
 
 function result(overrides: Partial<RagSearchResult> & { content: string }): RagSearchResult {
   return {
@@ -10,6 +15,25 @@ function result(overrides: Partial<RagSearchResult> & { content: string }): RagS
     ...overrides
   }
 }
+
+describe('grounding fallbacks', () => {
+  it('returns a Vietnamese refusal for an empty notebook by default', () => {
+    expect(buildEmptyKnowledgeBaseReply('vi-VN')).toContain('chưa có nội dung')
+    expect(buildEmptyKnowledgeBaseReply(undefined)).toContain('cơ sở tri thức')
+  })
+
+  it('returns an English refusal for an empty notebook', () => {
+    expect(buildEmptyKnowledgeBaseReply('en-US')).toContain('no indexed content')
+  })
+
+  it('forbids general-knowledge answers when retrieval finds no evidence', () => {
+    const instruction = buildNoEvidenceInstruction('vi-VN')
+    expect(instruction).toContain('Do NOT answer from your own general knowledge')
+    expect(instruction).toContain('Vietnamese')
+    expect(instruction).toContain('Do not fabricate')
+    expect(buildNoEvidenceInstruction('en-US')).toContain('English')
+  })
+})
 
 describe('buildRAGContext', () => {
   it('returns an empty context for no results', () => {

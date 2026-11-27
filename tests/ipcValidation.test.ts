@@ -1,5 +1,11 @@
 ﻿import { describe, expect, it } from 'vitest'
-import { ApiSchemas, KnowledgeSchemas, SettingsSchemas } from '../src/main/ipc/validation'
+import {
+  ApiSchemas,
+  ChatSchemas,
+  ClipboardSchemas,
+  KnowledgeSchemas,
+  SettingsSchemas
+} from '../src/main/ipc/validation'
 
 describe('ipc validation schemas', () => {
   it('rejects impossible metadata dates and accepts leap days', () => {
@@ -62,5 +68,27 @@ describe('ipc validation schemas', () => {
         metadata: { issuedAt: '06/05/2025' }
       })
     ).toThrow()
+  })
+
+  it('validates message deletion and like/dislike feedback', () => {
+    expect(ChatSchemas.deleteMessage.parse({ messageId: 'msg-1' }).messageId).toBe('msg-1')
+    expect(
+      ChatSchemas.setMessageFeedback.parse({ messageId: 'msg-1', rating: 'like' }).rating
+    ).toBe('like')
+    expect(
+      ChatSchemas.setMessageFeedback.parse({ messageId: 'msg-1', rating: null }).rating
+    ).toBeNull()
+    expect(() =>
+      ChatSchemas.setMessageFeedback.parse({ messageId: 'msg-1', rating: 'maybe' })
+    ).toThrow()
+    expect(() => ChatSchemas.deleteMessage.parse({ messageId: 'x'.repeat(201) })).toThrow()
+    expect(() =>
+      ChatSchemas.setMessageFeedback.parse({ messageId: 'x'.repeat(201), rating: 'like' })
+    ).toThrow()
+  })
+
+  it('caps clipboard payloads', () => {
+    expect(ClipboardSchemas.writeText.parse({ text: 'copy me' }).text).toBe('copy me')
+    expect(() => ClipboardSchemas.writeText.parse({ text: '' })).toThrow()
   })
 })

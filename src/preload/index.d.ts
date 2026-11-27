@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   ChatScope,
   ChatMessageCreatedEvent,
+  DeleteMessageResult,
   SendMessageResult,
   StreamChunk
 } from '../shared/types/chat'
@@ -144,6 +145,12 @@ declare global {
       ) => Promise<SendMessageResult>
       onMessageCreated: (callback: (data: ChatMessageCreatedEvent) => void) => () => void
       abortMessage: (messageId: string) => Promise<{ success: boolean; reason?: string }>
+      deleteMessage: (messageId: string) => Promise<DeleteMessageResult>
+      setMessageFeedback: (
+        messageId: string,
+        rating: 'like' | 'dislike' | null
+      ) => Promise<{ success: boolean; error?: string }>
+      copyToClipboard: (text: string) => Promise<{ success: boolean }>
 
       // Streaming message listeners (AI SDK streaming protocol format)
       onMessageChunk: (

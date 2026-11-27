@@ -4,6 +4,7 @@ import type {
   AppSettings,
   ChatMessageErrorEvent,
   ChatMessageCreatedEvent,
+  DeleteMessageResult,
   Note,
   Notebook,
   SendMessageResult,
@@ -131,6 +132,17 @@ const api = {
   sendMessage: (sessionId: string, content: string, scope?: unknown): Promise<SendMessageResult> =>
     invokeWithTimeout('send-message', 60000, { sessionId, content, scope }), // 60s timeout (streamed messages can be long)
   abortMessage: (messageId: string) => invokeWithTimeout('abort-message', 5000, { messageId }),
+  deleteMessage: (messageId: string): Promise<DeleteMessageResult> =>
+    invokeWithTimeout('delete-message', 5000, { messageId }),
+  setMessageFeedback: (
+    messageId: string,
+    rating: 'like' | 'dislike' | null
+  ): Promise<{ success: boolean; error?: string }> =>
+    invokeWithTimeout('set-message-feedback', 5000, { messageId, rating }),
+
+  // Clipboard (main-process clipboard works when navigator.clipboard is gated)
+  copyToClipboard: (text: string): Promise<{ success: boolean }> =>
+    invokeWithTimeout('clipboard:write-text', 5000, { text }),
 
   // Emitted as soon as the assistant placeholder row exists.
   onMessageCreated: (callback: (data: ChatMessageCreatedEvent) => void) => {

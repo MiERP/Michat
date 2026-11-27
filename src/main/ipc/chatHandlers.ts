@@ -10,6 +10,9 @@ import type { ChatCitation, ChatMessageMetadata } from '../../shared/types/chat'
 import type { AppSettings } from '../../shared/types'
 import Logger from '../../shared/utils/logger'
 import { buildScopeFilter } from '../utils/chatScope'
+import { isLikelyChitChat, isSmallTalkQuery, mentionsLegalReference } from '../utils/chitChat'
+import { shouldRefuseEmptyKnowledgeBase } from '../utils/grounding'
+import { findPairedReplyId } from '../utils/messagePairs'
 import {
   extractArticleRefs,
   extractArticleRefsFromContent,
@@ -18,6 +21,8 @@ import {
 } from '../utils/articleRefs'
 import { extractDefinitionTerm, namesSpecificLaw } from '../services/rag/legalContext'
 import {
+  buildEmptyKnowledgeBaseReply,
+  buildNoEvidenceInstruction,
   buildRAGContext,
   RAG_BASE_CONTEXT_TOKENS,
   sectionKeyOf
@@ -105,32 +110,6 @@ function buildLongTermMemoryContext(
     .join('\n\n')
 
   return `Long-term conversation memory from previous archived sessions:\n\n${blocks}\n\nUse this memory only as background context. If user intent conflicts with old memory, follow the newest user instruction.`
-}
-
-/** Bỏ dấu tiếng Việt để so khớp nhận cả "chào" lẫn "chao". */
-function stripVietnameseDiacritics(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-}
-
-function isLikelyChitChat(query: string, shortQueryLength: number): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  if (q.length < shortQueryLength) return true
-
-  const englishPatterns = [
-    /^(hi|hello|hey)\b/,
-    /^(good (morning|afternoon|evening))/,
-    /^thank you\b/
-  ]
-  if (englishPatterns.some((re) => re.test(q))) return true
-
-  const ascii = stripVietnameseDiacritics(q)
-  const vietnamesePatterns = [/^(xin chao|chao)\b/, /^ban co the giup/, /^cam on\b/]
-
-  return vietnamesePatterns.some((re) => re.test(ascii))
 }
 
 function normalizeCitationSnippet(raw: string, maxLength = 2000): string {
@@ -221,6 +200,49 @@ export function registerChatHandlers(
     })
   )
 
+  // Deleting a user message also removes the assistant reply generated for it.
+  ipcMain.handle(
+    'delete-message',
+    validate(ChatSchemas.deleteMessage, async (args) => {
+      const target = queries.getMessageById(args.messageId)
+      if (!target) {
+        return { success: false, deletedMessageIds: [], error: 'Message not found' }
+      }
+      if (target.role !== 'user') {
+        return {
+          success: false,
+          deletedMessageIds: [],
+          error: 'Only user messages can be deleted'
+        }
+      }
+
+      const sessionMessages = queries.getAllMessagesBySession(target.sessionId)
+      const replyId = findPairedReplyId(sessionMessages, target.id)
+      if (replyId) {
+        // Stop generation before deleting its row so the completion callback
+        // cannot write content back into a removed message.
+        activeStreams.get(replyId)?.abort()
+        cleanupStream(replyId)
+      }
+
+      const deletedMessageIds = replyId ? [target.id, replyId] : [target.id]
+      queries.deleteMessagesByIds(deletedMessageIds)
+      return { success: true, deletedMessageIds }
+    })
+  )
+
+  ipcMain.handle(
+    'set-message-feedback',
+    validate(ChatSchemas.setMessageFeedback, async (args) => {
+      const message = queries.getMessageById(args.messageId)
+      if (!message || message.role !== 'assistant') {
+        return { success: false, error: 'Only assistant messages can be rated' }
+      }
+      queries.updateMessageFeedback(args.messageId, args.rating)
+      return { success: true }
+    })
+  )
+
   // S-03: Use validateWithEvent so send-message has consistent validation
   // while still accessing event.sender for streaming
   ipcMain.handle(
@@ -230,6 +252,40 @@ export function registerChatHandlers(
       const session = queries.getSessionById(sessionId)
       if (!session?.notebookId) {
         return { messageId: '', error: 'Session not found' }
+      }
+
+      const settings = await settingsManager.getAllSettings().catch(() => null)
+      const activeLanguage = settings?.language || 'vi-VN'
+      const effectiveSettings = (settings || {}) as Partial<AppSettings>
+      const shortQueryLength = Math.min(
+        Math.max(effectiveSettings.ragSkipShortQueryLength ?? 12, 4),
+        32
+      )
+      const useChitChatHeuristic = effectiveSettings.ragEnableChitChatHeuristic ?? true
+      const isChitChatQuery =
+        useChitChatHeuristic &&
+        isLikelyChitChat(content, shortQueryLength) &&
+        !mentionsLegalReference(content)
+
+      // Calculate the indexed size before writing rows, so a failed lookup does
+      // not leave a user/assistant pair behind.
+      const indexedChunkCount = knowledgeService.getStats(session.notebookId).chunkCount
+
+      // A notebook with no indexed chunks cannot ground a factual answer. Return
+      // a deterministic refusal instead of letting the model answer from its own
+      // parametric knowledge (hallucination when the knowledge base is empty).
+      // This path deliberately runs before the chat-provider check: refusing for
+      // missing data must work even when the model server is offline.
+      if (shouldRefuseEmptyKnowledgeBase(content, indexedChunkCount)) {
+        const userMessage = queries.createMessage(sessionId, 'user', content)
+        const assistantMessage = queries.createMessage(sessionId, 'assistant', '')
+        const reply = buildEmptyKnowledgeBaseReply(activeLanguage)
+        queries.updateMessageContent(assistantMessage.id, reply, undefined, { citations: [] })
+        return {
+          messageId: assistantMessage.id,
+          userMessageId: userMessage.id,
+          content: reply
+        }
       }
 
       // Fail before writing rows so the renderer never receives an error for a
@@ -243,8 +299,9 @@ export function registerChatHandlers(
         }
       }
 
-      queries.createMessage(sessionId, 'user', content)
+      const userMessage = queries.createMessage(sessionId, 'user', content)
       const assistantMessage = queries.createMessage(sessionId, 'assistant', '')
+
       event.sender.send('message-created', {
         messageId: assistantMessage.id,
         sessionId,
@@ -268,11 +325,9 @@ export function registerChatHandlers(
           notebookId: session.notebookId,
           error: 'No valid conversation history'
         })
-        return { messageId: assistantMessage.id }
+        return { messageId: assistantMessage.id, userMessageId: userMessage.id }
       }
 
-      const settings = await settingsManager.getAllSettings().catch(() => null)
-      const activeLanguage = settings?.language || 'vi-VN'
       const personaPrompt =
         settings?.prompts?.chat?.[activeLanguage] || settings?.prompts?.chat?.['vi-VN']
       const systemParts: string[] = []
@@ -304,19 +359,17 @@ export function registerChatHandlers(
 
       let citationMetadata: ChatCitation[] = []
       let ragContext = ''
+      // Grounding is required for every non-small-talk query, even when the
+      // short-query heuristic skipped retrieval. In that case the no-evidence
+      // instruction still prevents a parametric-memory answer.
+      const ragAttempted = !isSmallTalkQuery(content)
 
       // 3.2 RAG retrieval (scope-aware hierarchical search).
       // Skip RAG only for chit-chat or very short queries.
       try {
-        const effectiveSettings = (settings || {}) as Partial<AppSettings>
         const hasEmbeddingModel = Boolean(await apiClient.getEmbeddingProvider())
         const ragTopK = Math.min(Math.max(effectiveSettings.ragTopK ?? 5, 1), 16)
         const ragThreshold = Math.min(Math.max(effectiveSettings.ragThreshold ?? 0.5, 0), 1)
-        const shortQueryLength = Math.min(
-          Math.max(effectiveSettings.ragSkipShortQueryLength ?? 12, 4),
-          32
-        )
-        const useChitChatHeuristic = effectiveSettings.ragEnableChitChatHeuristic ?? true
         const rerankEnabled = effectiveSettings.rerankEnabled ?? false
         const rerankTopN = Math.min(Math.max(effectiveSettings.rerankTopN ?? 12, ragTopK), 100)
         const rerankUseHeuristicFallback = effectiveSettings.rerankUseHeuristicFallback ?? true
@@ -325,10 +378,7 @@ export function registerChatHandlers(
         const metadataAwareEnabled = effectiveSettings.ragMetadataAwareEnabled ?? true
         const retrievalDebugEnabled = effectiveSettings.ragRetrievalDebugEnabled ?? false
 
-        if (
-          hasEmbeddingModel &&
-          !(useChitChatHeuristic && isLikelyChitChat(content, shortQueryLength))
-        ) {
+        if (hasEmbeddingModel && !isChitChatQuery) {
           if (session.notebookId) {
             const ragStartedAt = Date.now()
             const explicitScope = buildScopeFilter(scope)
@@ -581,7 +631,14 @@ export function registerChatHandlers(
         Logger.warn('ChatHandlers', 'RAG search failed:', error)
       }
 
-      if (ragContext) systemParts.push(ragContext)
+      if (ragContext) {
+        systemParts.push(ragContext)
+      } else if (ragAttempted) {
+        // The query needed data but retrieval produced no usable evidence. An
+        // explicit no-evidence instruction stops the model from answering from
+        // its own training data.
+        systemParts.push(buildNoEvidenceInstruction(activeLanguage))
+      }
 
       // Qwen/llama.cpp chat templates accept only one system message at the
       // beginning. Merge persona, long-term memory and RAG context into a
@@ -687,13 +744,16 @@ export function registerChatHandlers(
               citations: citationMetadata
             }
 
-            // Update DB with final content (including reasoning)
-            queries.updateMessageContent(
+            // Update DB with final content (including reasoning). The row may
+            // already be gone when the user deleted this exchange mid-stream;
+            // skip usage accounting and auto-switch in that case.
+            const updated = queries.updateMessageContent(
               assistantMessage.id,
               fullTextContent,
               fullReasoningContent,
               finalMetadata
             )
+            if (!updated) return
 
             let tokensUsed = 0
             if (usageMetadata?.usage?.totalTokens) {
@@ -734,7 +794,7 @@ export function registerChatHandlers(
       // BUG-05 Fix: Track stream with timestamp for stale cleanup
       trackStream(assistantMessage.id, abortController)
 
-      return { messageId: assistantMessage.id }
+      return { messageId: assistantMessage.id, userMessageId: userMessage.id }
     })
   )
 

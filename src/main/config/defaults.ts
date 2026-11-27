@@ -6,7 +6,7 @@ import { ShortcutAction, type ShortcutConfig } from '../../shared/types'
  * Mọi cấu hình mặc định đều được định nghĩa tại đây, nơi khác chỉ tham chiếu
  */
 export const defaultSettings: AppSettings = {
-  theme: 'dark',
+  theme: 'light',
   language: 'vi-VN',
   autoLaunch: false,
   hasCompletedOnboarding: false,
